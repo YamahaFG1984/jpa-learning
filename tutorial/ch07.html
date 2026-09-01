@@ -1,0 +1,712 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>第 7 章 · 映射继承</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="topbar"><div class="topbar-inner">
+  <a class="brand" href="index.html">Java Persistence 讲义</a>
+  <span class="spacer"></span>
+  <a href="ch06.html">← 上一章</a>
+  <a href="index.html">目录</a>
+  <a href="ch08.html">下一章 →</a>
+</div></div>
+
+<div class="wrap">
+<nav class="toc">
+  <h4>本章目录</h4>
+  <a href="#s0">四种策略总览</a>
+  <a href="#s1">7.1 每具体类一表 + 隐式多态</a>
+  <a href="#s2">7.2 每具体类一表 + UNION</a>
+  <a href="#s3">7.3 每类层次一表</a>
+  <a href="#s4">7.4 每子类一表 + JOIN</a>
+  <a href="#s5">7.5 混合继承策略</a>
+  <a href="#s6">7.6 可嵌入类的继承</a>
+  <a href="#s7">7.7 如何选择策略</a>
+  <a href="#s8">7.8 多态关联</a>
+  <a href="#s9">本章小结</a>
+</nav>
+
+<main>
+<div class="hero">
+  <div class="eyebrow">Part 2 · 映射策略</div>
+  <h1>第 7 章　映射继承</h1>
+  <p>「一个持久化实体类对应一张表」这个朴素策略，<b>一碰到继承就崩了</b>。因为面向对象模型同时提供 <b>is a</b> 和 <b>has a</b> 关系，而基于 SQL 的模型<b>只有 has a</b>——SQL DBMS 不支持类型继承，即便有也通常是私有的或不完整的。</p>
+</div>
+
+<h2 id="s0"><span class="num">§</span>四种策略总览</h2>
+
+<figure><div class="fig-box">
+<svg viewBox="0 0 860 470" xmlns="http://www.w3.org/2000/svg" font-family="Inter,system-ui,sans-serif">
+  <defs><marker id="i7" markerWidth="12" markerHeight="12" refX="11" refY="6" orient="auto"><path d="M0 0 L12 6 L0 12 z" fill="var(--bg)" stroke="var(--java)" stroke-width="1.2"/></marker></defs>
+
+  <!-- source model -->
+  <rect x="20" y="16" width="200" height="140" rx="8" fill="var(--java-soft)" stroke="var(--java)" stroke-width="1.6"/>
+  <text x="120" y="38" text-anchor="middle" font-size="12.5" font-weight="700" fill="var(--java)">领域模型（来源）</text>
+  <rect x="60" y="48" width="120" height="30" rx="5" fill="var(--panel)" stroke="var(--java)" stroke-dasharray="5 3"/>
+  <text x="120" y="68" text-anchor="middle" font-size="11.5" font-style="italic" fill="var(--ink)">BillingDetails</text>
+  <path d="M80 118 L80 96 L120 96 L120 80" fill="none" stroke="var(--java)" stroke-width="1.3" marker-end="url(#i7)"/>
+  <path d="M162 118 L162 96 L120 96" fill="none" stroke="var(--java)" stroke-width="1.3"/>
+  <rect x="34" y="120" width="92" height="26" rx="5" fill="var(--panel)" stroke="var(--java)"/>
+  <text x="80" y="138" text-anchor="middle" font-size="10.5" fill="var(--ink)">CreditCard</text>
+  <rect x="132" y="120" width="82" height="26" rx="5" fill="var(--panel)" stroke="var(--java)"/>
+  <text x="173" y="138" text-anchor="middle" font-size="10.5" fill="var(--ink)">BankAccount</text>
+
+  <!-- 1 -->
+  <rect x="250" y="16" width="290" height="140" rx="8" fill="var(--panel)" stroke="var(--line-strong)" stroke-width="1.4"/>
+  <text x="264" y="36" font-size="12.5" font-weight="700" fill="var(--ink)">① 每具体类一表 + <tspan fill="var(--accent)">隐式多态</tspan></text>
+  <text x="264" y="52" font-family="monospace" font-size="10.5" fill="var(--ink-faint)">@MappedSuperclass（超类不是实体）</text>
+  <rect x="266" y="60" width="120" height="86" rx="5" fill="var(--sql-soft)" stroke="var(--sql)"/>
+  <text x="326" y="78" text-anchor="middle" font-size="10.5" font-weight="700" fill="var(--ink)">CREDITCARD</text>
+  <text x="276" y="96" font-family="monospace" font-size="9.5" fill="var(--ink-soft)">ID «PK»</text>
+  <text x="276" y="110" font-family="monospace" font-size="9.5" fill="var(--accent)">CC_OWNER</text>
+  <text x="276" y="124" font-family="monospace" font-size="9.5" fill="var(--ink-soft)">CARDNUMBER</text>
+  <text x="276" y="138" font-family="monospace" font-size="9.5" fill="var(--ink-soft)">EXPMONTH/YEAR</text>
+  <rect x="400" y="60" width="126" height="86" rx="5" fill="var(--sql-soft)" stroke="var(--sql)"/>
+  <text x="463" y="78" text-anchor="middle" font-size="10.5" font-weight="700" fill="var(--ink)">BANKACCOUNT</text>
+  <text x="410" y="96" font-family="monospace" font-size="9.5" fill="var(--ink-soft)">ID «PK»</text>
+  <text x="410" y="110" font-family="monospace" font-size="9.5" fill="var(--accent)">OWNER</text>
+  <text x="410" y="124" font-family="monospace" font-size="9.5" fill="var(--ink-soft)">ACCOUNT/BANKNAME</text>
+  <text x="410" y="138" font-family="monospace" font-size="9.5" fill="var(--ink-soft)">SWIFT</text>
+
+  <!-- 2 -->
+  <rect x="560" y="16" width="290" height="140" rx="8" fill="var(--panel)" stroke="var(--line-strong)" stroke-width="1.4"/>
+  <text x="574" y="36" font-size="12.5" font-weight="700" fill="var(--ink)">② 每具体类一表 + <tspan fill="var(--accent)">UNION</tspan></text>
+  <text x="574" y="52" font-family="monospace" font-size="10.5" fill="var(--ink-faint)">TABLE_PER_CLASS</text>
+  <text x="705" y="80" text-anchor="middle" font-size="11.5" fill="var(--ink)">表结构与 ① <tspan font-weight="700">完全一样</tspan></text>
+  <text x="705" y="100" text-anchor="middle" font-size="11.5" fill="var(--ink)">但超类被标为 <tspan font-family="monospace">@Entity</tspan></text>
+  <rect x="590" y="110" width="230" height="36" rx="5" fill="var(--sql-soft)" stroke="var(--sql)"/>
+  <text x="705" y="126" text-anchor="middle" font-size="10.5" fill="var(--ink)">多态查询 → FROM 子查询里用</text>
+  <text x="705" y="140" text-anchor="middle" font-family="monospace" font-size="10.5" font-weight="700" fill="var(--sql)">UNION ALL + CLAZZ_ 字面量</text>
+
+  <!-- 3 -->
+  <rect x="250" y="170" width="290" height="140" rx="8" fill="var(--panel)" stroke="var(--line-strong)" stroke-width="1.4"/>
+  <text x="264" y="190" font-size="12.5" font-weight="700" fill="var(--ink)">③ 每类层次一表（<tspan fill="var(--accent)">判别列</tspan>）</text>
+  <text x="264" y="206" font-family="monospace" font-size="10.5" fill="var(--ink-faint)">SINGLE_TABLE</text>
+  <rect x="300" y="214" width="190" height="88" rx="5" fill="var(--sql-soft)" stroke="var(--sql)"/>
+  <text x="395" y="232" text-anchor="middle" font-size="10.5" font-weight="700" fill="var(--ink)">BILLINGDETAILS</text>
+  <text x="310" y="248" font-family="monospace" font-size="9.5" fill="var(--ink-soft)">ID «PK»</text>
+  <text x="310" y="262" font-family="monospace" font-size="9.5" fill="var(--accent)">BD_TYPE «Discriminator»</text>
+  <text x="310" y="276" font-family="monospace" font-size="9.5" fill="var(--ink-soft)">OWNER</text>
+  <text x="310" y="290" font-family="monospace" font-size="9.5" fill="var(--danger)">其余全部列（都必须可 NULL）</text>
+
+  <!-- 4 -->
+  <rect x="560" y="170" width="290" height="140" rx="8" fill="var(--panel)" stroke="var(--line-strong)" stroke-width="1.4"/>
+  <text x="574" y="190" font-size="12.5" font-weight="700" fill="var(--ink)">④ 每子类一表 + <tspan fill="var(--accent)">JOIN</tspan></text>
+  <text x="574" y="206" font-family="monospace" font-size="10.5" fill="var(--ink-faint)">JOINED　is-a → has-a（外键）</text>
+  <rect x="655" y="212" width="100" height="30" rx="5" fill="var(--sql-soft)" stroke="var(--sql)"/>
+  <text x="705" y="231" text-anchor="middle" font-size="10" font-weight="700" fill="var(--ink)">BILLINGDETAILS</text>
+  <path d="M660 262 L660 250 L705 250 L705 244" fill="none" stroke="var(--sql)" stroke-width="1.2"/>
+  <path d="M755 262 L755 250 L705 250" fill="none" stroke="var(--sql)" stroke-width="1.2"/>
+  <rect x="600" y="264" width="115" height="38" rx="5" fill="var(--sql-soft)" stroke="var(--sql)"/>
+  <text x="657" y="279" text-anchor="middle" font-size="10" font-weight="700" fill="var(--ink)">CREDITCARD</text>
+  <text x="657" y="294" text-anchor="middle" font-family="monospace" font-size="8.5" fill="var(--accent)">ID «PK» «FK»</text>
+  <rect x="722" y="264" width="115" height="38" rx="5" fill="var(--sql-soft)" stroke="var(--sql)"/>
+  <text x="779" y="279" text-anchor="middle" font-size="10" font-weight="700" fill="var(--ink)">BANKACCOUNT</text>
+  <text x="779" y="294" text-anchor="middle" font-family="monospace" font-size="8.5" fill="var(--accent)">ID «PK» «FK»</text>
+
+  <!-- comparison -->
+  <rect x="20" y="326" width="830" height="130" rx="8" fill="var(--accent-soft)" stroke="var(--accent)" stroke-width="1.6"/>
+  <text x="435" y="348" text-anchor="middle" font-size="13" font-weight="700" fill="var(--accent)">一眼对比</text>
+  <g font-size="11">
+    <text x="40" y="372" font-weight="700" fill="var(--ink-soft)">　　　　　　　　　　多态关联　　多态查询　　数据完整性　　规范化　　　手写 SQL / 报表　　　性能</text>
+    <text x="40" y="394" fill="var(--ink)">① MappedSuperclass　　<tspan fill="var(--danger)">✗ 不行</tspan>　　　<tspan fill="var(--warn)">△ 多条 SELECT</tspan>　<tspan fill="var(--sql)">✓ 好</tspan>　　　　<tspan fill="var(--sql)">✓ 好</tspan>　　　<tspan fill="var(--sql)">✓ 简单</tspan>　　　　　<tspan fill="var(--sql)">✓ 窄查询快</tspan></text>
+    <text x="40" y="414" fill="var(--ink)">② TABLE_PER_CLASS　　<tspan fill="var(--sql)">✓ 可以</tspan>　　　<tspan fill="var(--sql)">✓ UNION</tspan>　　　<tspan fill="var(--sql)">✓ 好</tspan>　　　　<tspan fill="var(--sql)">✓ 好</tspan>　　　<tspan fill="var(--warn)">△ 需 UNION</tspan>　　　<tspan fill="var(--warn)">△ 看优化器</tspan></text>
+    <text x="40" y="434" fill="var(--ink)">③ SINGLE_TABLE　　　　<tspan fill="var(--sql)">✓ 可以</tspan>　　　<tspan fill="var(--sql)">✓ 最快</tspan>　　　<tspan fill="var(--danger)">✗ 列必须可空</tspan>　<tspan fill="var(--danger)">✗ 违反 3NF</tspan>　<tspan fill="var(--sql)">✓ 最简单</tspan>　　　　<tspan fill="var(--sql)">✓ 最好</tspan></text>
+    <text x="40" y="452" fill="var(--ink)">④ JOINED　　　　　　　<tspan fill="var(--sql)">✓ 可以</tspan>　　　<tspan fill="var(--warn)">△ 外连接</tspan>　　　<tspan fill="var(--sql)">✓ 最好</tspan>　　　<tspan fill="var(--sql)">✓ 最好</tspan>　　<tspan fill="var(--danger)">✗ 复杂</tspan>　　　　　<tspan fill="var(--danger)">✗ 深层次差</tspan></text>
+  </g>
+</svg>
+</div><figcaption>图 7-0　四种继承映射策略的结构与权衡（本章按顺序逐个展开）</figcaption></figure>
+
+<div class="note"><b>视角</b><p>本章采取<b>自顶向下</b>的视角：假设你从领域模型出发，推导一个新的 SQL schema。但如果你是<b>自底向上</b>（从既有表出发），这些策略同样适用 —— 途中会介绍一些应付不理想表结构的技巧。<b>运行示例前先执行 <code>Ch07/Ch07.sql</code>。</b></p></div>
+
+<h2 id="s1"><span class="num">7.1</span>每具体类一张表 + 隐式多态</h2>
+<p><span class="badge">源码目录 mapping-inheritance-mappedsuperclass</span></p>
+
+<div class="pit"><b>默认情况下超类的属性会被忽略、<u>不会</u>被持久化！</b><p>必须给超类加 <code>@MappedSuperclass</code>，才能把它的属性<b>嵌入</b>到各具体子类的表里。</p></div>
+
+<div class="cols">
+<div>
+<div class="filename">…/ch07/model/BillingDetails.java</div>
+<pre><code><span class="ann">@MappedSuperclass</span>
+<span class="kw">public abstract class</span> BillingDetails {
+    <span class="ann">@Id</span>
+    <span class="ann">@GeneratedValue</span>(generator = <span class="str">"ID_GENERATOR"</span>)
+    <span class="kw">private</span> Long id;
+
+    <span class="ann">@NotNull</span>
+    <span class="kw">private</span> String owner;
+}</code></pre>
+<p style="font-size:14px">标识符属性可以像这样<b>声明在超类</b>（所有子类共享列名与生成器策略），也可以在每个具体类里各写一遍。</p>
+</div>
+<div>
+<div class="filename">…/ch07/model/CreditCard.java</div>
+<pre><code><span class="ann">@Entity</span>
+<span class="ann">@AttributeOverride</span>(name = <span class="str">"owner"</span>,
+    column = <span class="ann">@Column</span>(name = <span class="str">"CC_OWNER"</span>, nullable = <span class="kw">false</span>))
+<span class="kw">public class</span> CreditCard <span class="kw">extends</span> BillingDetails {
+    <span class="ann">@NotNull</span> <span class="kw">private</span> String cardNumber;
+    <span class="ann">@NotNull</span> <span class="kw">private</span> String expMonth;
+    <span class="ann">@NotNull</span> <span class="kw">private</span> String expYear;
+}</code></pre>
+<p style="font-size:14px">用 <code>@AttributeOverride</code> 覆盖超类的列映射：把 <code>CREDITCARD</code> 表中的 <code>OWNER</code> 改名为 <code>CC_OWNER</code>。<b>JPA 2.2 起</b>可在同一个类上写多个；<b>2.1 及以前</b>要用 <code>@AttributeOverrides</code> 包起来。</p>
+</div>
+</div>
+
+<h3>Spring Data 侧：<code>@NoRepositoryBean</code> 的用法</h3>
+<div class="filename">…/ch07/repositories/BillingDetailsRepository.java</div>
+<pre><code><span class="ann">@NoRepositoryBean</span>                                <span class="cmt">← 关键</span>
+<span class="kw">public interface</span> BillingDetailsRepository&lt;T <span class="kw">extends</span> BillingDetails, ID&gt;
+                  <span class="kw">extends</span> JpaRepository&lt;T, ID&gt; {
+    List&lt;T&gt; findByOwner(String owner);
+}
+
+<span class="cmt">// 两个具体 repository</span>
+<span class="kw">public interface</span> BankAccountRepository <span class="kw">extends</span> BillingDetailsRepository&lt;BankAccount, Long&gt; {
+    List&lt;BankAccount&gt; findBySwift(String swift);
+}
+<span class="kw">public interface</span> CreditCardRepository <span class="kw">extends</span> BillingDetailsRepository&lt;CreditCard, Long&gt; {
+    List&lt;CreditCard&gt; findByExpYear(String expYear);
+}</code></pre>
+
+<div class="tip"><b>为什么必须加 <code>@NoRepositoryBean</code></b><p>它阻止这个接口被实例化成 Spring Data JPA 的 repository 实例。<b>因为这套 schema 下根本没有 BILLINGDETAILS 表。</b>它的用途只是<b>被子 repository 继承</b>，所以泛型化为 <code>T extends BillingDetails</code>。它含有的 <code>findByOwner</code> 之所以可行，是因为 <code>owner</code> 字段会被同时包含进 <code>CREDITCARD</code> 和 <code>BANKACCOUNT</code> 两张表。</p></div>
+
+<h3>这个策略的四个问题</h3>
+<div class="keyhint"><span class="k">① 不支持多态关联</span><span>数据库里关联通常表示为外键。子类各自映射到不同表时，<b>指向超类的多态关联无法表示为简单外键</b> —— 根本没有 <code>BILLINGDETAILS</code> 这张表可引用。在领域模型里 <code>BillingDetails</code> 与 <code>User</code> 关联，就意味着 <code>CREDITCARD</code> 和 <code>BANKACCOUNT</code> <b>都</b>要有指向 <code>USERS</code> 的外键。这些问题都不好解决。</span></div>
+<div class="keyhint"><span class="k">② 多态查询要拆成多条 SQL</span><span><code>select bd from BillingDetails bd</code> 会变成<b>两条</b>语句（每个具体子类一条），Hibernate 再在内存里合并结果集。反过来，<b>针对具体类的查询很平凡且性能好</b>——只用其中一条。</span></div>
+<div class="keyhint"><span class="k">③ schema 演进复杂</span><span>不同表的不同列<b>语义完全相同</b>。重命名或修改超类属性类型 → 要改多张表的多个列。IDE 的很多标准重构操作需要手工调整，因为自动流程通常<b>不考虑 <code>@AttributeOverride</code></b>。</span></div>
+<div class="keyhint"><span class="k">④ 完整性约束难做</span><span>要实现适用于<b>所有子类</b>的数据库完整性约束困难得多。</span></div>
+
+<div class="warn"><b>推荐用法</b><p><b>只推荐用于类层次的顶层</b>——那里通常不需要多态，而且未来不太可能修改超类。对某些真实领域模型可行，<b>但不适合 CaveatEmptor</b>（查询和其他实体都要引用 <code>BillingDetails</code>）。</p></div>
+
+<h2 id="s2"><span class="num">7.2</span>每具体类一张表 + UNION</h2>
+<p><span class="badge">源码目录 mapping-inheritance-tableperclass</span></p>
+
+<div class="note"><b>注意</b><p>JPA 标准规定 <code>TABLE_PER_CLASS</code> 是<b>可选的</b>，所以并非所有 JPA 实现都支持。</p></div>
+
+<pre><code><span class="ann">@Entity</span>                                                    <span class="cmt">← 不再是 @MappedSuperclass</span>
+<span class="ann">@Inheritance</span>(strategy = InheritanceType.<span class="hl">TABLE_PER_CLASS</span>)
+<span class="kw">public abstract class</span> BillingDetails {
+    <span class="ann">@Id</span>
+    <span class="ann">@GeneratedValue</span>(generator = <span class="str">"ID_GENERATOR"</span>)
+    <span class="kw">private</span> Long id;                <span class="cmt">// 现在<b>必须</b>在超类，供所有子类和它们的表共享</span>
+    <span class="ann">@NotNull</span>
+    <span class="kw">private</span> String owner;
+}
+
+<span class="cmt">// 子类只需 @Entity，所有具体类映射都从超类继承持久化属性</span>
+<span class="ann">@Entity</span> <span class="ann">@AttributeOverride</span>(name=<span class="str">"owner"</span>, column=<span class="ann">@Column</span>(name=<span class="str">"CC_OWNER"</span>, nullable=<span class="kw">false</span>))
+<span class="kw">public class</span> CreditCard <span class="kw">extends</span> BillingDetails { … }
+
+<span class="ann">@Entity</span>
+<span class="kw">public class</span> BankAccount <span class="kw">extends</span> BillingDetails { … }</code></pre>
+
+<div class="tip"><b>repository 侧的变化</b><p>去掉 <code>@NoRepositoryBean</code>。这个改动加上 <code>BillingDetails</code> 现在标了 <code>@Entity</code>，就让 <code>BillingDetailsRepository</code> 能真正与数据库交互了。</p></div>
+
+<figure><div class="fig-box">
+<svg viewBox="0 0 840 330" xmlns="http://www.w3.org/2000/svg" font-family="Inter,system-ui,sans-serif">
+  <rect x="20" y="16" width="800" height="40" rx="7" fill="var(--java-soft)" stroke="var(--java)"/>
+  <text x="420" y="41" text-anchor="middle" font-size="12.5" fill="var(--ink)"><tspan font-family="monospace">billingDetailsRepository.findAll()</tspan>　或　<tspan font-family="monospace">select bd from BillingDetails bd</tspan>　→ 都生成下面这条 SQL</text>
+
+  <rect x="20" y="66" width="500" height="250" rx="8" fill="var(--code-bg)" stroke="var(--line-strong)"/>
+  <g font-family="monospace" font-size="11.5" fill="var(--ink)">
+    <text x="38" y="88">select ID, OWNER, EXPMONTH, EXPYEAR, CARDNUMBER,</text>
+    <text x="38" y="104">       ACCOUNT, BANKNAME, SWIFT, <tspan fill="var(--accent)">CLAZZ_</tspan></text>
+    <text x="38" y="120">from (</text>
+    <text x="54" y="136">  select ID, OWNER, EXPMONTH, EXPYEAR, CARDNUMBER,</text>
+    <text x="54" y="152" fill="var(--warn)">         null as ACCOUNT, null as BANKNAME, null as SWIFT,</text>
+    <text x="54" y="168" fill="var(--accent)">         1 as CLAZZ_</text>
+    <text x="54" y="184">  from CREDITCARD</text>
+    <text x="54" y="202" fill="var(--sql)" font-weight="700">  union all</text>
+    <text x="54" y="220">  select ID, OWNER,</text>
+    <text x="54" y="236" fill="var(--warn)">         null as EXPMONTH, null as EXPYEAR, null as CARDNUMBER,</text>
+    <text x="54" y="252">         ACCOUNT, BANKNAME, SWIFT,</text>
+    <text x="54" y="268" fill="var(--accent)">         2 as CLAZZ_</text>
+    <text x="54" y="284">  from BANKACCOUNT</text>
+    <text x="38" y="304">) as BILLINGDETAILS</text>
+  </g>
+
+  <rect x="540" y="66" width="280" height="250" rx="8" fill="var(--sql-soft)" stroke="var(--sql)" stroke-width="1.6"/>
+  <text x="680" y="90" text-anchor="middle" font-size="12.5" font-weight="700" fill="var(--sql)">为什么这样写</text>
+  <text x="556" y="116" font-size="11.5" fill="var(--ink)">• 用 <tspan font-weight="700">FROM 子句子查询</tspan>从所有具体类的表</text>
+  <text x="568" y="132" font-size="11.5" fill="var(--ink)">  里取出全部 BillingDetails 实例</text>
+  <text x="556" y="158" font-size="11.5" fill="var(--ink)">• UNION 要求被合并的查询<tspan font-weight="700">投影相同的列</tspan>，</text>
+  <text x="568" y="174" font-size="11.5" fill="var(--ink)">  所以必须用 <tspan font-family="monospace">null as XXX</tspan> 补齐不存在的列</text>
+  <text x="556" y="200" font-size="11.5" fill="var(--ink)">• 中间结果插入<tspan font-weight="700">字面量</tspan> 1 / 2，Hibernate 据此</text>
+  <text x="568" y="216" font-size="11.5" fill="var(--ink)">  为某一行<tspan font-weight="700">实例化正确的类</tspan></text>
+  <text x="556" y="244" font-size="11.5" fill="var(--sql)" font-weight="700">性能会比两条独立语句好吗？</text>
+  <text x="556" y="264" font-size="11.5" fill="var(--ink)">这里可以<tspan font-weight="700">让数据库优化器</tspan>去找合并多表行的</text>
+  <text x="556" y="280" font-size="11.5" fill="var(--ink)">最佳执行计划，而不是像隐式多态那样在</text>
+  <text x="556" y="296" font-size="11.5" fill="var(--ink)">Hibernate 的加载引擎里<tspan font-weight="700">用内存合并结果集</tspan></text>
+</svg>
+</div><figcaption>图 7-A　<code>TABLE_PER_CLASS</code> 的多态查询：UNION + 类字面量</figcaption></figure>
+
+<div class="tip"><b>最重要的收益</b><p><b>能处理多态关联</b>。比如 <code>User</code> → <code>BillingDetails</code> 的关联映射现在成为可能 —— Hibernate 可以用 UNION 查询<b>模拟出一张单表</b>作为关联映射的目标。</p>
+<p style="margin-top:6px">但要记住：<b>SQL schema 仍然对继承一无所知</b>，表结构和图 7.1 完全一样，表之间<b>没有任何关系</b>，只是碰巧有（很多）相似的列。如果 <code>BillingDetails</code> 是具体类，还需要额外一张表来放它的实例。</p></div>
+
+<h2 id="s3"><span class="num">7.3</span>每个类层次一张表</h2>
+<p><span class="badge">源码目录 mapping-inheritance-singletable</span></p>
+
+<p>把整个类层次映射到<b>一张表</b>，这张表包含层次中所有类的所有属性的列。额外的<b>类型判别列</b>（或判别公式）的值标明某一行代表的是哪个具体子类。</p>
+
+<pre><code><span class="ann">@Entity</span>
+<span class="ann">@Inheritance</span>(strategy = InheritanceType.<span class="hl">SINGLE_TABLE</span>)
+<span class="ann">@DiscriminatorColumn</span>(name = <span class="str">"BD_TYPE"</span>)          <span class="cmt">// 不写则默认列名 DTYPE，值为字符串</span>
+<span class="kw">public abstract class</span> BillingDetails {
+    <span class="ann">@Id</span> <span class="ann">@GeneratedValue</span>(generator = <span class="str">"ID_GENERATOR"</span>)
+    <span class="kw">private</span> Long id;
+
+    <span class="ann">@NotNull</span>
+    <span class="ann">@Column</span>(nullable = <span class="kw">false</span>)                     <span class="cmt">// 超类的共享属性可以是 NOT NULL</span>
+    <span class="kw">private</span> String owner;
+}
+
+<span class="ann">@Entity</span>
+<span class="ann">@DiscriminatorValue</span>(<span class="str">"CC"</span>)                         <span class="cmt">// 每个具体类都该显式给判别值</span>
+<span class="kw">public class</span> CreditCard <span class="kw">extends</span> BillingDetails {
+    <span class="ann">@NotNull</span> <span class="kw">private</span> String cardNumber;      <span class="cmt">// schema 里<b>不能</b>有 NOT NULL 约束！</span>
+    <span class="ann">@NotNull</span> <span class="kw">private</span> String expMonth;
+    <span class="ann">@NotNull</span> <span class="kw">private</span> String expYear;
+}</code></pre>
+
+<div class="cols">
+<div>
+<div class="tip"><b>优点：性能与简洁的赢家</b>
+<ul style="margin-bottom:0">
+<li><b>表示多态性能最好</b> —— 多态查询和非多态查询都很快</li>
+<li><b>甚至可以手写查询</b>；临时报表不需要复杂的 join 或 union</li>
+<li><b>schema 演进直截了当</b></li>
+</ul></div>
+</div>
+<div>
+<div class="pit"><b>两个严重问题</b>
+<p><b>① 数据完整性</b>：子类声明的属性对应的列<b>必须可空</b>。如果各子类都定义了若干非空属性，<b>丢失 NOT NULL 约束</b>从数据正确性角度可能很严重 —— 信用卡的到期日是必填的，但 schema 无法强制这条规则，<b>一个简单的编程错误就能写进无效数据</b>。</p>
+<p style="margin-top:6px"><b>② 规范化</b>：在非键列之间制造了<b>函数依赖，违反第三范式</b>。为性能而反规范化往往具有误导性 —— 它牺牲了长期的稳定性、可维护性和数据完整性，去换取那些<b>本来也可以靠优化 SQL 执行计划得到</b>的即时收益（换句话说：去问 DBA）。</p></div>
+</div>
+</div>
+
+<div class="note"><b>Hibernate 的两个实现怪癖</b>
+<p>① 生成数据库 schema 时 Hibernate <b>忽略</b> Bean Validation 的 <code>@NotNull</code>，所以超类共享属性要用 <code>@Column(nullable = false)</code> 来声明非空。</p>
+<p style="margin-top:6px">② 子类属性的 <code>@NotNull</code> <b>在 DDL 生成时被忽略，但运行期插入行之前仍会被遵守</b>。这能帮你避免编程错误（不会不小心存下没有到期日的信用卡数据）。当然，别的行为不那么规矩的应用仍然可以往这个库里写错误数据。</p>
+<p style="margin-top:6px">③ 不显式指定判别值时：用 Hibernate XML 文件默认取<b>全限定类名</b>；用注解或 JPA XML 默认取<b>简单实体名</b>。<b>JPA 没有为非字符串判别类型规定默认值</b>，各提供者可能不同 —— <b>所以总是显式给具体类指定判别值</b>。</p></div>
+
+<div class="cols">
+<div>
+<div class="filename">多态查询：一条简单 SELECT</div>
+<pre><code>select ID, OWNER, EXPMONTH, EXPYEAR, CARDNUMBER,
+       ACCOUNT, BANKNAME, SWIFT, BD_TYPE
+from BILLINGDETAILS</code></pre>
+</div>
+<div>
+<div class="filename">子类查询：加一个判别列限制</div>
+<pre><code>select ID, OWNER, EXPMONTH, EXPYEAR, CARDNUMBER
+from BILLINGDETAILS
+where <span class="hl">BD_TYPE='CC'</span></code></pre>
+</div>
+</div>
+
+<h3>没有判别列怎么办：<code>@DiscriminatorFormula</code></h3>
+<p><span class="badge">源码目录 mapping-inheritance-singletableformula</span>　遗留 schema 里往往没有自由加一列。此时可以用<b>表达式</b>为每行算出一个判别值（判别公式<b>不是 JPA 规范的一部分</b>，是 Hibernate 扩展）：</p>
+<pre><code><span class="ann">@Entity</span>
+<span class="ann">@Inheritance</span>(strategy = InheritanceType.SINGLE_TABLE)
+<span class="ann">@org.hibernate.annotations.DiscriminatorFormula</span>(
+        <span class="str">"case when CARDNUMBER is not null then 'CC' else 'BA' end"</span>
+)
+<span class="kw">public abstract class</span> BillingDetails { … }</code></pre>
+<p>依靠 SQL 的 <code>CASE/WHEN</code> 表达式判断某一行代表信用卡还是银行账户；结果是字面量 <code>CC</code> 或 <code>BA</code>，与子类映射上声明的判别值对应。</p>
+
+<h2 id="s4"><span class="num">7.4</span>每子类一张表 + JOIN</h2>
+<p><span class="badge">源码目录 mapping-inheritance-joined</span></p>
+
+<p>把继承关系表示成 <b>SQL 外键关联</b>：<b>每个声明了持久化属性的类或子类（包括抽象类甚至接口）都有自己的表</b>。与第一种策略不同，这里具体 <code>@Entity</code> 的表<b>只含子类自己声明的非继承属性的列</b>，外加一个既是主键又是超类表外键的列。</p>
+
+<figure><div class="fig-box">
+<svg viewBox="0 0 840 300" xmlns="http://www.w3.org/2000/svg" font-family="Inter,system-ui,sans-serif">
+  <defs><marker id="j7" markerWidth="9" markerHeight="9" refX="8" refY="4.5" orient="auto"><path d="M0 0 L9 4.5 L0 9 z" fill="var(--accent)"/></marker></defs>
+  <rect x="300" y="20" width="200" height="72" rx="7" fill="var(--sql-soft)" stroke="var(--sql)" stroke-width="1.8"/>
+  <text x="400" y="42" text-anchor="middle" font-size="12" font-weight="700" fill="var(--ink)">BILLINGDETAILS</text>
+  <line x1="300" y1="50" x2="500" y2="50" stroke="var(--sql)"/>
+  <text x="318" y="68" font-family="monospace" font-size="11" fill="var(--accent)">ID «PK»</text>
+  <text x="318" y="84" font-family="monospace" font-size="11" fill="var(--ink-soft)">OWNER</text>
+
+  <path d="M170 148 L170 116 L400 116 L400 94" fill="none" stroke="var(--accent)" stroke-width="1.5" marker-end="url(#j7)"/>
+  <path d="M630 148 L630 116 L400 116" fill="none" stroke="var(--accent)" stroke-width="1.5"/>
+  <text x="255" y="110" font-size="10.5" fill="var(--accent)">FK</text>
+  <text x="530" y="110" font-size="10.5" fill="var(--accent)">FK</text>
+
+  <rect x="70" y="150" width="200" height="92" rx="7" fill="var(--sql-soft)" stroke="var(--sql)" stroke-width="1.6"/>
+  <text x="170" y="172" text-anchor="middle" font-size="12" font-weight="700" fill="var(--ink)">CREDITCARD</text>
+  <line x1="70" y1="180" x2="270" y2="180" stroke="var(--sql)"/>
+  <text x="86" y="198" font-family="monospace" font-size="10.5" fill="var(--accent)">CREDITCARD_ID «PK» «FK»</text>
+  <text x="86" y="214" font-family="monospace" font-size="10.5" fill="var(--ink-soft)">CARDNUMBER</text>
+  <text x="86" y="230" font-family="monospace" font-size="10.5" fill="var(--ink-soft)">EXPMONTH / EXPYEAR</text>
+
+  <rect x="530" y="150" width="200" height="92" rx="7" fill="var(--sql-soft)" stroke="var(--sql)" stroke-width="1.6"/>
+  <text x="630" y="172" text-anchor="middle" font-size="12" font-weight="700" fill="var(--ink)">BANKACCOUNT</text>
+  <line x1="530" y1="180" x2="730" y2="180" stroke="var(--sql)"/>
+  <text x="546" y="198" font-family="monospace" font-size="10.5" fill="var(--accent)">ID «PK» «FK»</text>
+  <text x="546" y="214" font-family="monospace" font-size="10.5" fill="var(--ink-soft)">ACCOUNT / BANKNAME</text>
+  <text x="546" y="230" font-family="monospace" font-size="10.5" fill="var(--ink-soft)">SWIFT</text>
+
+  <rect x="20" y="256" width="800" height="38" rx="7" fill="var(--accent-soft)" stroke="var(--accent)"/>
+  <text x="420" y="272" text-anchor="middle" font-size="12" fill="var(--ink)">持久化一个 CreditCard 实例 → Hibernate <tspan font-weight="700">插入两行</tspan>：超类属性进 BILLINGDETAILS，子类属性进 CREDITCARD</text>
+  <text x="420" y="288" text-anchor="middle" font-size="12" fill="var(--ink)">两行由<tspan font-weight="700">共享的主键</tspan>连接；之后靠子类表与超类表的 <tspan font-weight="700">JOIN</tspan> 取回子类实例</text>
+</svg>
+</div><figcaption>图 7-3　is a 关系被表示成 has a（外键）关系</figcaption></figure>
+
+<pre><code><span class="ann">@Entity</span>
+<span class="ann">@Inheritance</span>(strategy = InheritanceType.<span class="hl">JOINED</span>)      <span class="cmt">// <b>不需要判别列</b></span>
+<span class="kw">public abstract class</span> BillingDetails {
+    <span class="ann">@Id</span> <span class="ann">@GeneratedValue</span>(generator = <span class="str">"ID_GENERATOR"</span>)
+    <span class="kw">private</span> Long id;
+    <span class="ann">@NotNull</span> <span class="kw">private</span> String owner;
+}
+
+<span class="ann">@Entity</span>
+<span class="kw">public class</span> BankAccount <span class="kw">extends</span> BillingDetails {     <span class="cmt">// 无标识符属性：自动继承 ID 属性和列</span>
+    <span class="ann">@NotNull</span> <span class="kw">private</span> String account;
+    <span class="ann">@NotNull</span> <span class="kw">private</span> String bankname;
+    <span class="ann">@NotNull</span> <span class="kw">private</span> String swift;
+}
+
+<span class="ann">@Entity</span>
+<span class="ann">@PrimaryKeyJoinColumn</span>(name = <span class="str">"CREDITCARD_ID"</span>)          <span class="cmt">// 想显式指定连接列名就写它</span>
+<span class="kw">public class</span> CreditCard <span class="kw">extends</span> BillingDetails { … }</code></pre>
+<p>子类表的主键列若与超类主键列同名（或应当同名），<b>就不必指定连接列</b>。<code>BANKACCOUNT</code> 与 <code>CREDITCARD</code> 的主键列同时也带有指向 <code>BILLINGDETAILS</code> 主键的<b>外键约束</b>。</p>
+
+<div class="cols">
+<div>
+<div class="filename">多态查询 → 外连接 + CASE…WHEN</div>
+<pre><code>select
+    BD.ID, BD.OWNER,
+    CC.EXPMONTH, CC.EXPYEAR, CC.CARDNUMBER,
+    BA.ACCOUNT, BA.BANKNAME, BA.SWIFT,
+    <span class="hl">case
+        when CC.CREDITCARD_ID is not null then 1
+        when BA.ID is not null then 2
+        when BD.ID is not null then 0
+    end</span>
+from BILLINGDETAILS BD
+    left outer join CREDITCARD  CC on BD.ID=CC.CREDITCARD_ID
+    left outer join BANKACCOUNT BA on BD.ID=BA.ID</code></pre>
+<p style="font-size:14px"><code>CASE…WHEN</code> 检测子类表中行的<b>存在与否</b>，据此判断 <code>BILLINGDETAILS</code> 某一行的具体子类。</p>
+</div>
+<div>
+<div class="filename">窄子类查询 → 内连接</div>
+<pre><code>select CREDITCARD_ID, OWNER,
+       EXPMONTH, EXPYEAR, CARDNUMBER
+from CREDITCARD
+    <span class="hl">inner join</span> BILLINGDETAILS on CREDITCARD_ID=ID</code></pre>
+<div class="tip" style="margin-top:14px"><b>优点</b><p><b>规范化了 SQL schema</b>。schema 演进和完整性约束定义都很直接。指向某个子类表的外键<b>可以表示到该具体子类的多态关联</b>。</p></div>
+<div class="pit"><b>缺点</b><p>手写实现更难，<b>连临时报表都更复杂</b>——如果你打算把 Spring Data JPA/Hibernate 代码与手写 SQL 混用，这是个重要考量（常见且可移植的做法是用 JPQL 并给方法加 JPQL 查询注解）。而且<b>看似简单，作者的经验是复杂类层次下性能可能无法接受</b>：查询总是需要跨多表的 join 或多次顺序读取。</p></div>
+</div>
+</div>
+
+<div class="note"><b>JOINED 需要判别列吗？</b><p>Hibernate <b>不需要</b>特殊的判别列来实现 <code>JOINED</code>，JPA 规范也没有这个要求 —— <code>CASE…WHEN</code> 是区分每行实体类型的聪明办法。但你可能看到别处的 JPA 示例同时用 <code>JOINED</code> 和 <code>@DiscriminatorColumn</code>：显然有些 JPA 提供者不用 <code>CASE…WHEN</code>，即使 <code>JOINED</code> 也只靠判别值。<b>Hibernate 不需要判别列，但如果你声明了 <code>@DiscriminatorColumn</code>，它就会用</b>（老版本 Hibernate 会忽略）。想忽略它，开启配置项 <code>hibernate.discriminator.ignore_explicit_for_joined</code>。</p></div>
+
+<h2 id="s5"><span class="num">7.5</span>混合继承策略</h2>
+<p><span class="badge">源码目录 mapping-inheritance-mixed</span></p>
+
+<p>整个层次只能用 <code>TABLE_PER_CLASS</code>、<code>SINGLE_TABLE</code> 或 <code>JOINED</code> 之一，<b>不能混用</b>……<b>除非用点技巧</b>：可以为<b>某个特定子类</b>切换映射策略。</p>
+
+<figure><div class="fig-box">
+<svg viewBox="0 0 780 260" xmlns="http://www.w3.org/2000/svg" font-family="Inter,system-ui,sans-serif">
+  <defs><marker id="m7" markerWidth="9" markerHeight="9" refX="8" refY="4.5" orient="auto"><path d="M0 0 L9 4.5 L0 9 z" fill="var(--accent)"/></marker></defs>
+  <rect x="60" y="30" width="240" height="140" rx="7" fill="var(--sql-soft)" stroke="var(--sql)" stroke-width="1.8"/>
+  <text x="180" y="52" text-anchor="middle" font-size="12.5" font-weight="700" fill="var(--ink)">BILLINGDETAILS</text>
+  <line x1="60" y1="60" x2="300" y2="60" stroke="var(--sql)"/>
+  <g font-family="monospace" font-size="11" fill="var(--ink-soft)">
+    <text x="78" y="80" fill="var(--accent)">ID «PK»</text>
+    <text x="78" y="98" fill="var(--accent)">BD_TYPE «Discriminator»</text>
+    <text x="78" y="116">OWNER</text>
+    <text x="78" y="134">ACCOUNT</text>
+    <text x="78" y="152">BANKNAME / SWIFT</text>
+  </g>
+  <text x="180" y="188" text-anchor="middle" font-size="11.5" fill="var(--ink-soft)">超类用 SINGLE_TABLE</text>
+
+  <path d="M310 100 L400 100" stroke="var(--accent)" stroke-width="1.8" marker-end="url(#m7)"/>
+  <text x="355" y="90" text-anchor="middle" font-size="10.5" fill="var(--accent)">FK</text>
+  <text x="355" y="116" text-anchor="middle" font-size="10.5" fill="var(--ink-faint)">outer join</text>
+
+  <rect x="410" y="30" width="250" height="140" rx="7" fill="var(--accent-soft)" stroke="var(--accent)" stroke-width="1.8"/>
+  <text x="535" y="52" text-anchor="middle" font-size="12.5" font-weight="700" fill="var(--ink)">CREDITCARD　<tspan font-size="10" fill="var(--accent)">（次表）</tspan></text>
+  <line x1="410" y1="60" x2="660" y2="60" stroke="var(--accent)"/>
+  <g font-family="monospace" font-size="11" fill="var(--ink-soft)">
+    <text x="428" y="80" fill="var(--accent)">CREDITCARD_ID «PK» «FK»</text>
+    <text x="428" y="98" fill="var(--sql)">CARDNUMBER    NOT NULL ✓</text>
+    <text x="428" y="116" fill="var(--sql)">EXPMONTH      NOT NULL ✓</text>
+    <text x="428" y="134" fill="var(--sql)">EXPYEAR       NOT NULL ✓</text>
+  </g>
+  <text x="535" y="188" text-anchor="middle" font-size="11.5" fill="var(--sql)" font-weight="700">被拆出去的子类可以有 NOT NULL！</text>
+
+  <rect x="60" y="206" width="600" height="42" rx="7" fill="var(--warn-soft)" stroke="var(--warn)"/>
+  <text x="360" y="224" text-anchor="middle" font-size="11.5" fill="var(--ink)">运行期 Hibernate 用<tspan font-weight="700">外连接</tspan>多态地取回 BillingDetails 及全部子类实例：</text>
+  <text x="360" y="242" text-anchor="middle" font-family="monospace" font-size="11" fill="var(--ink)">from BILLINGDETAILS left outer join CREDITCARD on ID=CREDITCARD_ID</text>
+</svg>
+</div><figcaption>图 7-4　把一个子类「拆」进它自己的次表（secondary table）</figcaption></figure>
+
+<div class="filename">…/ch07/model/CreditCard.java</div>
+<pre><code><span class="ann">@Entity</span>
+<span class="ann">@DiscriminatorValue</span>(<span class="str">"CC"</span>)
+<span class="ann">@SecondaryTable</span>(
+        name = <span class="str">"CREDITCARD"</span>,
+        pkJoinColumns = <span class="ann">@PrimaryKeyJoinColumn</span>(name = <span class="str">"CREDITCARD_ID"</span>)
+)
+<span class="kw">public class</span> CreditCard <span class="kw">extends</span> BillingDetails {
+    <span class="ann">@NotNull</span>
+    <span class="ann">@Column</span>(<span class="hl">table = "CREDITCARD"</span>, nullable = <span class="kw">false</span>)   <span class="cmt">// @Column 的 table 参数：指明来自哪张次表</span>
+    <span class="kw">private</span> String cardNumber;
+
+    <span class="ann">@Column</span>(table = <span class="str">"CREDITCARD"</span>, nullable = <span class="kw">false</span>)
+    <span class="kw">private</span> String expMonth;
+
+    <span class="ann">@Column</span>(table = <span class="str">"CREDITCARD"</span>, nullable = <span class="kw">false</span>)
+    <span class="kw">private</span> String expYear;
+}</code></pre>
+
+<div class="keyhint"><span class="k">这个映射的价值</span><span><code>SINGLE_TABLE</code> 强制子类的所有列可空；<b>拆出去之后就能把 <code>CREDITCARD</code> 表的列声明为 <code>NOT NULL</code>，保证数据完整性</b>。不指定次表的主键连接列时，会用单表继承表的主键名（这里是 <code>ID</code>）。</span></div>
+<div class="keyhint"><span class="k">适用场景</span><span>如果你想再加一个继承 <code>BillingDetails</code> 的新类（比如 Paypal），这就是可行方案。</span></div>
+<div class="keyhint"><span class="k">注意上限</span><span>对<b>特别宽</b>的类层次，这个外连接会成为问题 —— 某些数据库（如 Oracle）<b>限制外连接中的表数量</b>。宽层次下，可考虑换成执行「立即第二次 SELECT」的抓取策略而非外连接。</span></div>
+
+<h2 id="s6"><span class="num">7.6</span>可嵌入类的继承</h2>
+<p><span class="badge">源码目录 mapping-inheritance-embeddable</span></p>
+
+<p>可嵌入类是其拥有者实体的<b>组件</b>，因此本章讲的实体继承规则<b>不适用</b>。作为 Hibernate 扩展，可嵌入类可以从超类（或接口）继承一些持久化属性。</p>
+
+<figure><div class="fig-box">
+<svg viewBox="0 0 800 300" xmlns="http://www.w3.org/2000/svg" font-family="Inter,system-ui,sans-serif">
+  <defs><marker id="e7" markerWidth="12" markerHeight="12" refX="11" refY="6" orient="auto"><path d="M0 0 L12 6 L0 12 z" fill="var(--bg)" stroke="var(--java)" stroke-width="1.2"/></marker></defs>
+  <rect x="40" y="20" width="150" height="40" rx="7" fill="var(--java-soft)" stroke="var(--java)" stroke-width="1.6"/>
+  <text x="115" y="45" text-anchor="middle" font-size="13" font-weight="700" fill="var(--ink)">Item</text>
+
+  <rect x="40" y="90" width="150" height="52" rx="7" fill="var(--panel)" stroke="var(--java)" stroke-width="1.6" stroke-dasharray="6 3"/>
+  <text x="115" y="110" text-anchor="middle" font-size="12" font-style="italic" font-weight="700" fill="var(--ink)">Measurement</text>
+  <text x="115" y="128" text-anchor="middle" font-family="monospace" font-size="10" fill="var(--ink-soft)">name · symbol</text>
+  <text x="115" y="80" text-anchor="middle" font-family="monospace" font-size="10" fill="var(--accent)">@MappedSuperclass</text>
+
+  <path d="M70 190 L70 162 L115 162 L115 144" fill="none" stroke="var(--java)" stroke-width="1.4" marker-end="url(#e7)"/>
+  <path d="M165 190 L165 162 L115 162" fill="none" stroke="var(--java)" stroke-width="1.4"/>
+  <rect x="14" y="192" width="112" height="72" rx="7" fill="var(--sql-soft)" stroke="var(--sql)"/>
+  <text x="70" y="212" text-anchor="middle" font-size="11.5" font-weight="700" fill="var(--ink)">Dimensions</text>
+  <text x="70" y="228" text-anchor="middle" font-family="monospace" font-size="9.5" fill="var(--accent)">@Embeddable</text>
+  <text x="70" y="244" text-anchor="middle" font-family="monospace" font-size="9.5" fill="var(--ink-soft)">depth/height/</text>
+  <text x="70" y="257" text-anchor="middle" font-family="monospace" font-size="9.5" fill="var(--ink-soft)">width</text>
+  <rect x="136" y="192" width="112" height="72" rx="7" fill="var(--sql-soft)" stroke="var(--sql)"/>
+  <text x="192" y="212" text-anchor="middle" font-size="11.5" font-weight="700" fill="var(--ink)">Weight</text>
+  <text x="192" y="228" text-anchor="middle" font-family="monospace" font-size="9.5" fill="var(--accent)">@Embeddable</text>
+  <text x="192" y="244" text-anchor="middle" font-family="monospace" font-size="9.5" fill="var(--ink-soft)">value</text>
+
+  <rect x="300" y="20" width="200" height="250" rx="8" fill="var(--panel)" stroke="var(--line-strong)" stroke-width="1.6"/>
+  <text x="400" y="42" text-anchor="middle" font-size="12" font-style="italic" fill="var(--ink-faint)">« Table »</text>
+  <text x="400" y="60" text-anchor="middle" font-size="14" font-weight="700" fill="var(--ink)">ITEM</text>
+  <line x1="300" y1="70" x2="500" y2="70" stroke="var(--line-strong)"/>
+  <g font-family="monospace" font-size="11" fill="var(--ink-soft)">
+    <text x="316" y="90" fill="var(--accent)">ID «PK»</text>
+    <text x="316" y="108">NAME · …</text>
+  </g>
+  <rect x="308" y="118" width="184" height="70" rx="5" fill="var(--sql-soft)" stroke="var(--sql)"/>
+  <g font-family="monospace" font-size="10.5" fill="var(--ink)">
+    <text x="316" y="136" fill="var(--accent)">DIMENSIONS_NAME</text>
+    <text x="316" y="152" fill="var(--accent)">DIMENSIONS_SYMBOL</text>
+    <text x="316" y="168">DEPTH · HEIGHT</text>
+    <text x="316" y="182">WIDTH</text>
+  </g>
+  <rect x="308" y="196" width="184" height="62" rx="5" fill="var(--sql-soft)" stroke="var(--sql)"/>
+  <g font-family="monospace" font-size="10.5" fill="var(--ink)">
+    <text x="316" y="214" fill="var(--accent)">WEIGHT_NAME</text>
+    <text x="316" y="230" fill="var(--accent)">WEIGHT_SYMBOL</text>
+    <text x="316" y="248">WEIGHT</text>
+  </g>
+
+  <rect x="520" y="20" width="270" height="120" rx="8" fill="var(--accent-soft)" stroke="var(--accent)"/>
+  <text x="655" y="42" text-anchor="middle" font-size="12.5" font-weight="700" fill="var(--accent)">为什么必须覆盖列名</text>
+  <text x="536" y="66" font-size="11.5" fill="var(--ink)">Item 同时嵌入 Dimensions 和 Weight，</text>
+  <text x="536" y="84" font-size="11.5" fill="var(--ink)">不覆盖就会映射到<tspan font-weight="700">冲突的列名</tspan>（都叫 NAME/SYMBOL）</text>
+  <text x="536" y="110" font-size="11.5" fill="var(--ink)">作者偏好：在 <tspan font-family="monospace">@Embeddable</tspan> 类上<tspan font-weight="700">覆盖一次</tspan>，</text>
+  <text x="536" y="126" font-size="11.5" fill="var(--ink)">这样这些类的<tspan font-weight="700">使用者不必再去解决冲突</tspan></text>
+
+  <rect x="520" y="152" width="270" height="118" rx="8" fill="var(--danger-soft)" stroke="var(--danger)"/>
+  <text x="655" y="174" text-anchor="middle" font-size="12.5" font-weight="700" fill="var(--danger)">要提防的陷阱</text>
+  <text x="536" y="198" font-size="11.5" fill="var(--ink)">在实体里嵌入一个<tspan font-weight="700">抽象超类类型</tspan>的属性</text>
+  <text x="536" y="214" font-size="11.5" fill="var(--ink)">（比如 <tspan font-family="monospace">Measurement</tspan>）<tspan font-weight="700">永远行不通</tspan></text>
+  <text x="536" y="238" font-size="11.5" fill="var(--ink)">因为<tspan font-weight="700">没有判别器</tspan>，提供者无从判断库里的值</text>
+  <text x="536" y="254" font-size="11.5" fill="var(--ink)">是 Dimensions 还是 Weight</text>
+  <text x="536" y="266" font-size="11" fill="var(--ink-soft)">→ 引用<tspan font-weight="700">永远是具体类，不是多态的</tspan></text>
+</svg>
+</div><figcaption>图 7-5　可嵌入类连同继承来的属性一起映射</figcaption></figure>
+
+<div class="cols">
+<div>
+<pre><code><span class="ann">@MappedSuperclass</span>
+<span class="kw">public abstract class</span> Measurement {
+    <span class="ann">@NotNull</span> <span class="kw">private</span> String name;
+    <span class="ann">@NotNull</span> <span class="kw">private</span> String symbol;
+}
+
+<span class="ann">@Embeddable</span>
+<span class="ann">@AttributeOverride</span>(name = <span class="str">"name"</span>,
+        column = <span class="ann">@Column</span>(name = <span class="str">"DIMENSIONS_NAME"</span>))
+<span class="ann">@AttributeOverride</span>(name = <span class="str">"symbol"</span>,
+        column = <span class="ann">@Column</span>(name = <span class="str">"DIMENSIONS_SYMBOL"</span>))
+<span class="kw">public class</span> Dimensions <span class="kw">extends</span> Measurement {
+    <span class="ann">@NotNull</span> <span class="kw">private</span> BigDecimal depth, height, width;
+}</code></pre>
+</div>
+<div>
+<pre><code><span class="ann">@Embeddable</span>
+<span class="ann">@AttributeOverride</span>(name = <span class="str">"name"</span>,
+        column = <span class="ann">@Column</span>(name = <span class="str">"WEIGHT_NAME"</span>))
+<span class="ann">@AttributeOverride</span>(name = <span class="str">"symbol"</span>,
+        column = <span class="ann">@Column</span>(name = <span class="str">"WEIGHT_SYMBOL"</span>))
+<span class="kw">public class</span> Weight <span class="kw">extends</span> Measurement {
+    <span class="ann">@NotNull</span> <span class="ann">@Column</span>(name = <span class="str">"WEIGHT"</span>)
+    <span class="kw">private</span> BigDecimal value;
+}
+
+<span class="ann">@Entity</span>
+<span class="kw">public class</span> Item {
+    <span class="kw">private</span> Dimensions dimensions;   <span class="cmt">// 普通的嵌入属性</span>
+    <span class="kw">private</span> Weight weight;
+}</code></pre>
+</div>
+</div>
+
+<div class="note"><b>另一条支持多态的路</b><p>对照 §6.3.2「转换组件的属性」那一节的可嵌入类继承方案（<code>Zipcode</code> / <code>GermanZipcode</code> / <code>SwissZipcode</code>）：<b>它支持多态，但需要你自己写类型判别代码</b>。</p></div>
+
+<h2 id="s7"><span class="num">7.7</span>如何选择策略</h2>
+
+<figure><div class="fig-box">
+<svg viewBox="0 0 840 420" xmlns="http://www.w3.org/2000/svg" font-family="Inter,system-ui,sans-serif">
+  <defs><marker id="d7" markerWidth="9" markerHeight="9" refX="8" refY="4.5" orient="auto"><path d="M0 0 L9 4.5 L0 9 z" fill="var(--ink-soft)"/></marker></defs>
+  <rect x="250" y="14" width="340" height="52" rx="8" fill="var(--java-soft)" stroke="var(--java)" stroke-width="1.8"/>
+  <text x="420" y="36" text-anchor="middle" font-size="13" font-weight="700" fill="var(--java)">需要多态关联或多态查询吗？</text>
+  <text x="420" y="56" text-anchor="middle" font-size="11" fill="var(--ink-soft)">即：会不会写 <tspan font-family="monospace">select bd from BillingDetails bd</tspan>？有没有类关联到 BillingDetails？</text>
+
+  <path d="M300 68 L170 100" stroke="var(--ink-soft)" stroke-width="1.4" marker-end="url(#d7)"/>
+  <text x="205" y="86" font-size="12" font-weight="700" fill="var(--danger)">不需要</text>
+  <path d="M540 68 L640 100" stroke="var(--ink-soft)" stroke-width="1.4" marker-end="url(#d7)"/>
+  <text x="610" y="86" font-size="12" font-weight="700" fill="var(--sql)">需要</text>
+
+  <rect x="20" y="104" width="300" height="106" rx="8" fill="var(--panel)" stroke="var(--line-strong)"/>
+  <text x="170" y="126" text-anchor="middle" font-size="12.5" font-weight="700" fill="var(--ink)">倾向「每具体类一张表」</text>
+  <text x="38" y="150" font-size="11.5" fill="var(--ink)">但<tspan font-weight="700">更推荐显式的、基于 UNION 的映射</tspan>：</text>
+  <text x="38" y="170" font-family="monospace" font-size="12" font-weight="700" fill="var(--accent)">InheritanceType.TABLE_PER_CLASS</text>
+  <text x="38" y="192" font-size="11.5" fill="var(--ink)">理由：日后<tspan font-weight="700">仍然可以</tspan>做（已优化的）</text>
+  <text x="38" y="206" font-size="11.5" fill="var(--ink)">多态查询和多态关联</text>
+
+  <rect x="440" y="104" width="380" height="46" rx="8" fill="var(--java-soft)" stroke="var(--java)"/>
+  <text x="630" y="132" text-anchor="middle" font-size="12.5" font-weight="700" fill="var(--java)">子类声明的属性多不多？</text>
+
+  <path d="M540 152 L440 186" stroke="var(--ink-soft)" stroke-width="1.4" marker-end="url(#d7)"/>
+  <text x="420" y="176" font-size="11.5" fill="var(--ink-soft)">少（主要差别在<tspan font-weight="700">行为</tspan>）</text>
+  <path d="M700 152 L700 186" stroke="var(--ink-soft)" stroke-width="1.4" marker-end="url(#d7)"/>
+  <text x="712" y="176" font-size="11.5" fill="var(--ink-soft)">多（主要差别在<tspan font-weight="700">数据</tspan>）</text>
+
+  <rect x="340" y="190" width="230" height="110" rx="8" fill="var(--panel)" stroke="var(--line-strong)"/>
+  <text x="455" y="214" text-anchor="middle" font-family="monospace" font-size="12.5" font-weight="700" fill="var(--accent)">SINGLE_TABLE</text>
+  <text x="356" y="238" font-size="11.5" fill="var(--ink)">前提：只需把<tspan font-weight="700">极少数列</tspan>设为可空</text>
+  <text x="356" y="262" font-size="11.5" fill="var(--ink)">还要说服自己（和 DBA）：</text>
+  <text x="356" y="278" font-size="11.5" fill="var(--ink)">反规范化的 schema 长期不会出问题</text>
+
+  <rect x="590" y="190" width="230" height="110" rx="8" fill="var(--panel)" stroke="var(--line-strong)"/>
+  <text x="705" y="214" text-anchor="middle" font-family="monospace" font-size="12.5" font-weight="700" fill="var(--accent)">JOINED</text>
+  <text x="606" y="238" font-size="11.5" fill="var(--ink)">或者：视层次的<tspan font-weight="700">宽度与深度</tspan>、以及</text>
+  <text x="606" y="254" font-size="11.5" fill="var(--ink)"><tspan font-weight="700">join 与 union 的成本对比</tspan>，</text>
+  <text x="606" y="270" font-size="11.5" fill="var(--ink)">改用 <tspan font-family="monospace">TABLE_PER_CLASS</tspan></text>
+  <text x="606" y="290" font-size="11" fill="var(--ink-faint)">这个决定可能需要拿真实数据评估执行计划</text>
+
+  <rect x="20" y="318" width="800" height="94" rx="8" fill="var(--accent-soft)" stroke="var(--accent)" stroke-width="1.6"/>
+  <text x="420" y="340" text-anchor="middle" font-size="13" font-weight="700" fill="var(--accent)">作者的收尾建议</text>
+  <text x="40" y="364" font-size="12" fill="var(--ink)">• 默认只对<tspan font-weight="700">简单问题</tspan>选 <tspan font-family="monospace">SINGLE_TABLE</tspan>；复杂场景、或数据建模者坚持 NOT NULL 与规范化的重要性并压倒你时，考虑 <tspan font-family="monospace">JOINED</tspan></text>
+  <text x="40" y="386" font-size="12" fill="var(--ink)">• 到那一步时不妨自问：<tspan font-weight="700">是不是干脆在类模型里把继承重构成委托更好？</tspan>出于与持久化/ORM 无关的种种原因，复杂继承往往最好避免</text>
+  <text x="40" y="406" font-size="12" fill="var(--ink)">• Hibernate 是领域模型与关系模型之间的缓冲，<tspan font-weight="700">但这不意味着设计类时可以完全无视持久化关切</tspan></text>
+</svg>
+</div><figcaption>图 7-B　继承映射策略的决策树</figcaption></figure>
+
+<div class="note"><b>两个额外事实</b>
+<p>① <b>不能把继承注解放在接口上</b>——JPA 没有标准化这一点。但 Hibernate 的<b>隐式多态足够聪明</b>能处理这类特例：假设加一个业务接口 <code>ElectronicPaymentOption</code>（没有持久化意涵，但 <code>CreditCard</code> 之类的持久化类会实现它），<b>无论 <code>BillingDetails</code> 层次怎么映射</b>，Hibernate 都能正确回答 <code>select o from ElectronicPaymentOption o</code>。<b>即使有不属于该层次的其他持久化类也实现了这个接口</b>，Hibernate 依然知道该查哪些表、构造哪些实例、如何返回多态结果。</p>
+<p style="margin-top:6px">② <b>所有映射策略都能用于抽象类。</b>即便你查询或加载抽象类，Hibernate 也不会试图去实例化它。</p></div>
+
+<h2 id="s8"><span class="num">7.8</span>多态关联</h2>
+
+<h3 id="s81">7.8.1　多态多对一关联</h3>
+<p><span class="badge">源码目录 mapping-inheritance-manytoone</span></p>
+
+<div class="cols">
+<div>
+<div class="filename">…/ch07/model/User.java</div>
+<pre><code><span class="ann">@Entity</span>
+<span class="ann">@Table</span>(name = <span class="str">"USERS"</span>)
+<span class="kw">public class</span> User {
+    <span class="ann">@ManyToOne</span>
+    <span class="kw">private</span> BillingDetails defaultBilling;   <span class="cmt">// 目标是抽象类</span>
+}</code></pre>
+<p style="font-size:14px"><code>USERS</code> 表多出连接/外键列 <code>DEFAULTBILLING_ID</code>，<b>可空</b>（用户可能没设默认支付方式）。因为 <code>BillingDetails</code> 是抽象的，运行期这个关联必然指向某个子类实例。</p>
+</div>
+<div>
+<div class="tip"><b>启用多态关联不需要做任何特别的事</b><p>只要关联的<b>目标类</b>用 <code>@Entity</code> + <code>@Inheritance</code> 映射，<b>这个关联天然就是多态的</b>。</p></div>
+<pre><code><span class="cmt">// 建立到 CreditCard 子类实例的关联</span>
+CreditCard creditCard = <span class="kw">new</span> CreditCard(
+    <span class="str">"John Smith"</span>, <span class="str">"123456789"</span>, <span class="str">"10"</span>, <span class="str">"2030"</span>);
+User john = <span class="kw">new</span> User(<span class="str">"John Smith"</span>);
+john.setDefaultBilling(creditCard);
+creditCardRepository.save(creditCard);
+userRepository.save(john);
+
+<span class="cmt">// 第二个工作单元里导航该关联，Hibernate 自动取回 CreditCard 实例</span>
+List&lt;User&gt; users = userRepository.findAll();
+users.get(0).getDefaultBilling().<span class="hl">pay</span>(123);   <span class="cmt">// ← 调用的是具体子类的 pay()</span></code></pre>
+</div>
+</div>
+<p><b>一对一关联的处理方式完全相同。</b></p>
+
+<h3 id="s82">7.8.2　多态集合</h3>
+<p><span class="badge">源码目录 mapping-inheritance-onetomany</span></p>
+
+<div class="cols">
+<div>
+<div class="filename">…/ch07/model/User.java（反向端）</div>
+<pre><code><span class="ann">@Entity</span>
+<span class="ann">@Table</span>(name = <span class="str">"USERS"</span>)
+<span class="kw">public class</span> User {
+    <span class="ann">@OneToMany</span>(mappedBy = <span class="str">"user"</span>)
+    <span class="kw">private</span> Set&lt;BillingDetails&gt; billingDetails
+            = <span class="kw">new</span> HashSet&lt;&gt;();
+}</code></pre>
+</div>
+<div>
+<div class="filename">…/ch07/model/BillingDetails.java（拥有端 = 持有外键的一侧）</div>
+<pre><code><span class="ann">@Entity</span>
+<span class="ann">@Inheritance</span>(strategy = InheritanceType.TABLE_PER_CLASS)
+<span class="kw">public abstract class</span> BillingDetails {
+    <span class="ann">@ManyToOne</span>
+    <span class="kw">private</span> User user;
+}</code></pre>
+</div>
+</div>
+
+<div class="pit"><b>唯一的限制</b><p>这个关联映射本身<b>毫无特别之处</b>，<code>BillingDetails</code> 层次用 <code>TABLE_PER_CLASS</code>、<code>SINGLE_TABLE</code> 或 <code>JOINED</code> 都行 —— Hibernate 足够聪明，加载集合元素时会用带 <code>JOIN</code> 或 <code>UNION</code> 的正确 SQL。<b>但 <code>BillingDetails</code> 不能是 <code>@MappedSuperclass</code></b>（§7.1 解释过原因），它<b>必须</b>用 <code>@Entity</code> + <code>@Inheritance</code> 映射。</p></div>
+
+<div class="summary" id="s9">
+<h3>本章小结</h3>
+<ul>
+<li><b>每具体类一表 + 隐式多态</b>（<code>@MappedSuperclass</code>）是映射实体继承层次<b>最简单</b>的策略，但<b>对多态关联支持不佳</b>；不同表的不同列语义完全相同，使 schema 演进更复杂。<b>只推荐用于类层次顶层</b>，那里通常不需要多态且超类未来不太会改。</li>
+<li><b>每具体类一表 + UNION</b>（<code>TABLE_PER_CLASS</code>）是<b>可选</b>特性，JPA 实现<b>未必支持</b>，但它<b>能处理多态关联</b>。</li>
+<li><b>每类层次一表</b>（<code>SINGLE_TABLE</code>）在<b>性能与简洁性上都是赢家</b>：无需复杂 join 或 union 就能做临时报表，schema 演进直接。</li>
+<li>单表策略的<b>一大问题是数据完整性</b>（必须把一些列声明为可空）；另一个顾虑是<b>规范化</b>——它在非键列之间制造函数依赖，<b>违反第三范式</b>。</li>
+<li><b>每子类一表 + JOIN</b>（<code>JOINED</code>）的首要优势是<b>规范化 SQL schema</b>，schema 演进与完整性约束定义都很直接；缺点是<b>手写更难</b>，且复杂类层次下<b>性能可能不可接受</b>。</li>
+<li>可用 <code>@SecondaryTable</code> 把某个子类<b>拆出单表策略</b>，换回 NOT NULL 约束；<code>@MappedSuperclass</code> 也可用于<b>可嵌入类的继承</b>，但那样的引用<b>不是多态的</b>。</li>
+</ul>
+</div>
+
+<div class="pager">
+  <a href="ch06.html">← 第 6 章　映射值类型</a>
+  <a href="ch08.html">第 8 章　映射集合与实体关联 →</a>
+</div>
+</main>
+</div>
+</body>
+</html>

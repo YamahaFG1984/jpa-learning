@@ -1,0 +1,1040 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>第 6 章 · 映射值类型</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="topbar"><div class="topbar-inner">
+  <a class="brand" href="index.html">Java Persistence 讲义</a>
+  <span class="spacer"></span>
+  <a href="ch05.html">← 上一章</a>
+  <a href="index.html">目录</a>
+  <a href="ch07.html">下一章 →</a>
+</div></div>
+
+<div class="wrap">
+<nav class="toc">
+  <h4>本章目录</h4>
+  <a href="#s1">6.1 映射基本属性</a>
+  <a class="sub" href="#s11">覆盖默认值</a>
+  <a class="sub" href="#s12">定制属性访问</a>
+  <a class="sub" href="#s13">派生属性</a>
+  <a class="sub" href="#s14">列值转换</a>
+  <a class="sub" href="#s15">生成值与默认值</a>
+  <a class="sub" href="#s16">@Temporal</a>
+  <a class="sub" href="#s17">映射枚举</a>
+  <a href="#s2">6.2 映射可嵌入组件</a>
+  <a class="sub" href="#s21">数据库 schema</a>
+  <a class="sub" href="#s22">让类可嵌入</a>
+  <a class="sub" href="#s23">覆盖嵌入属性</a>
+  <a class="sub" href="#s24">嵌套嵌入组件</a>
+  <a href="#s3">6.3 类型转换器</a>
+  <a class="sub" href="#s31">内置类型</a>
+  <a class="sub" href="#s32">自定义 JPA 转换器</a>
+  <a class="sub" href="#s33">Hibernate UserType</a>
+  <a href="#s4">本章小结</a>
+</nav>
+
+<main>
+<div class="hero">
+  <div class="eyebrow">Part 2 · 映射策略</div>
+  <h1>第 6 章　映射值类型</h1>
+  <p>上一章讲实体，这一章讲<b>值类型</b>——分两类：JDK 自带的基本值类型（<code>String</code>、<code>Date</code>、基本类型及其包装类），和你自己定义的值类型类（CaveatEmptor 里的 <code>Address</code>、<code>MonetaryAmount</code>）。最后深入到<b>类型转换器</b>这个 ORM 最灵活的扩展点。</p>
+</div>
+
+<div class="note"><b>JPA 2 的重要新特性</b><p><b>JPA 2.2 支持 Java 8 的 Date and Time API。</b>不再需要 <code>@Temporal</code> 这类以前用来注解 <code>java.util.Date</code> 字段的额外映射注解。</p></div>
+
+<h2 id="s1"><span class="num">6.1</span>映射基本属性</h2>
+
+<p>映射持久化类（无论是实体还是可嵌入类型）时，<b>它的所有属性默认都是持久化的</b>。JPA 按下面这套规则决定怎么处理每个属性：</p>
+
+<figure><div class="fig-box">
+<svg viewBox="0 0 840 420" xmlns="http://www.w3.org/2000/svg" font-family="Inter,system-ui,sans-serif">
+  <defs><marker id="c6a" markerWidth="9" markerHeight="9" refX="8" refY="4.5" orient="auto"><path d="M0 0 L9 4.5 L0 9 z" fill="var(--ink-soft)"/></marker></defs>
+  <rect x="290" y="16" width="260" height="34" rx="17" fill="var(--java-soft)" stroke="var(--java)" stroke-width="1.6"/>
+  <text x="420" y="38" text-anchor="middle" font-size="13" font-weight="700" fill="var(--java)">持久化类的一个属性</text>
+  <path d="M420 50 L420 70" stroke="var(--ink-soft)" stroke-width="1.4" marker-end="url(#c6a)"/>
+
+  <rect x="150" y="72" width="540" height="66" rx="8" fill="var(--sql-soft)" stroke="var(--sql)" stroke-width="1.6"/>
+  <text x="420" y="93" text-anchor="middle" font-size="12.5" font-weight="700" fill="var(--sql)">① 是基本类型/包装类，或 String、BigInteger、BigDecimal、byte[]、Byte[]、char[]、Character[]，</text>
+  <text x="420" y="110" text-anchor="middle" font-size="12.5" font-weight="700" fill="var(--sql)">或 LocalDateTime、LocalDate、java.util.Date/Calendar、java.sql.Date/Time/Timestamp？</text>
+  <text x="420" y="130" text-anchor="middle" font-size="11.5" fill="var(--ink)">→ <tspan font-weight="700">自动持久化</tspan>：存进一个 SQL 类型合适、<tspan font-weight="700">列名与属性名相同</tspan>的列</text>
+  <path d="M420 138 L420 158" stroke="var(--ink-soft)" stroke-width="1.4" marker-end="url(#c6a)"/>
+  <text x="435" y="152" font-size="10.5" fill="var(--ink-faint)">否则</text>
+
+  <rect x="150" y="160" width="540" height="56" rx="8" fill="var(--java-soft)" stroke="var(--java)" stroke-width="1.6"/>
+  <text x="420" y="182" text-anchor="middle" font-size="12.5" font-weight="700" fill="var(--java)">② 属性的类被标了 @Embeddable，或属性本身标了 @Embedded？</text>
+  <text x="420" y="204" text-anchor="middle" font-size="11.5" fill="var(--ink)">→ 映射为拥有者类的<tspan font-weight="700">嵌入式组件</tspan>（§6.2）</text>
+  <path d="M420 216 L420 236" stroke="var(--ink-soft)" stroke-width="1.4" marker-end="url(#c6a)"/>
+  <text x="435" y="230" font-size="10.5" fill="var(--ink-faint)">否则</text>
+
+  <rect x="150" y="238" width="540" height="84" rx="8" fill="var(--warn-soft)" stroke="var(--warn)" stroke-width="1.6"/>
+  <text x="420" y="260" text-anchor="middle" font-size="12.5" font-weight="700" fill="var(--warn)">③ 类型是 java.io.Serializable？→ 以<tspan text-decoration="underline">序列化形式</tspan>存储</text>
+  <text x="420" y="280" text-anchor="middle" font-size="11.5" fill="var(--ink)"><tspan font-weight="700" fill="var(--danger)">兼容性问题</tspan>：用一种类格式存，日后想用另一种格式读</text>
+  <text x="420" y="297" text-anchor="middle" font-size="11.5" fill="var(--ink)"><tspan font-weight="700" fill="var(--danger)">性能问题</tspan>：序列化/反序列化开销大</text>
+  <text x="420" y="315" text-anchor="middle" font-size="11.5" fill="var(--danger)">→ <tspan font-weight="700">永远优先映射 Java 类，而不是往库里存一串字节</tspan></text>
+  <path d="M420 322 L420 342" stroke="var(--ink-soft)" stroke-width="1.4" marker-end="url(#c6a)"/>
+  <text x="435" y="336" font-size="10.5" fill="var(--ink-faint)">否则</text>
+
+  <rect x="230" y="344" width="380" height="42" rx="8" fill="var(--danger-soft)" stroke="var(--danger)" stroke-width="1.6"/>
+  <text x="420" y="370" text-anchor="middle" font-size="12.5" font-weight="700" fill="var(--danger)">④ 启动时抛异常：不理解该属性的类型</text>
+
+  <rect x="120" y="398" width="600" height="0"/>
+  <text x="420" y="410" text-anchor="middle" font-size="12" fill="var(--ink-soft)">这套「<tspan font-weight="700">按例外配置（configuration by exception）</tspan>」意味着：不必为了持久化去注解属性，只在<tspan font-weight="700">例外情况</tspan>下才配置映射</text>
+</svg>
+</div><figcaption>图 6-A　JPA 判定属性如何持久化的四条规则</figcaption></figure>
+
+<div class="pit"><b>为什么不该依赖序列化存储</b><p>数据比应用活得久。当这个应用几年后消失，维护数据库里那些二进制信息的人会发现：<b>序列化版本所映射的那些类已经不存在了</b>。</p></div>
+
+<h3 id="s11">6.1.1　覆盖基本属性的默认行为</h3>
+
+<h4>排除属性：@Transient vs transient</h4>
+<p><code>Item#initialPrice</code> 该持久化，但<code>Item#totalPriceIncludingTax</code>（只在运行时算出来用一下）不该。</p>
+<div class="tablewrap"><table>
+<thead><tr><th style="width:220px">写法</th><th>效果</th></tr></thead>
+<tbody>
+<tr><td>Java 关键字 <code>transient</code></td><td><b>同时</b>把字段从 Java 序列化和持久化中排除（JPA 提供者也认它）</td></tr>
+<tr><td><code>@javax.persistence.Transient</code></td><td><b>只</b>把字段从持久化中排除</td></tr>
+</tbody></table></div>
+
+<div class="tip"><b>怎么判断一个属性该不该持久化？问自己五个问题</b>
+<ol style="margin-bottom:0">
+<li>这是塑造实例形态的<b>基本属性</b>吗？</li>
+<li>从一开始就需要它，还是能<b>由别的属性算出来</b>？</li>
+<li>过一段时间后<b>重建</b>这个信息还有意义吗，还是那时它已不再重要？</li>
+<li>是<b>敏感信息</b>吗（比如明文密码），是否宁可不持久化以免日后泄露？</li>
+<li>是<b>换个环境就没意义</b>的信息吗（比如在另一个网络里毫无意义的本地 IP）？</li>
+</ol></div>
+
+<h4>三种声明「必填」的方式</h4>
+<div class="cols">
+<div>
+<pre><code><span class="cmt">// ① @Basic —— 只有 optional 和 fetch 两个参数</span>
+<span class="ann">@Basic</span>(optional = <span class="kw">false</span>)
+BigDecimal initialPrice;
+
+<span class="cmt">// ② @Column</span>
+<span class="ann">@Column</span>(nullable = <span class="kw">false</span>)
+BigDecimal initialPrice;
+
+<span class="cmt">// ③ Bean Validation（§3.3.2）—— 推荐</span>
+<span class="ann">@NotNull</span>
+BigDecimal initialPrice;</code></pre>
+</div>
+<div>
+<div class="card">
+<h4>三者对 JPA 提供者的效果相同</h4>
+<p style="font-size:14px">保存时做 null 检查 + schema 里生成 <code>NOT NULL</code> 约束。</p>
+<p style="font-size:14px;margin-bottom:0"><b>作者推荐 <code>@NotNull</code></b>：这样你可以手工校验 <code>Item</code> 实例，展现层的 UI 代码也能自动执行校验。<b>最终结果差别不大，但「不拿一条注定失败的语句去打数据库」更干净。</b></p>
+</div>
+<div class="filename" style="margin-top:14px">@Column 还能改列名</div>
+<pre><code><span class="ann">@Column</span>(name = <span class="str">"START_PRICE"</span>, nullable = <span class="kw">false</span>)
+BigDecimal initialPrice;</code></pre>
+</div>
+</div>
+
+<div class="warn"><b>默认全都是可空的</b><p>默认情况下所有持久化属性都<b>可为 null、可选</b>，也就是说一个 <code>Item</code> 可以有未知的 <code>initialPrice</code>。若不标为非可选而试图存 null，<b>数据库会拒绝该 SQL 语句</b>，抛出约束违反异常。</p></div>
+
+<h3 id="s12">6.1.2　定制属性访问</h3>
+
+<figure><div class="fig-box">
+<svg viewBox="0 0 840 340" xmlns="http://www.w3.org/2000/svg" font-family="Inter,system-ui,sans-serif">
+  <rect x="20" y="18" width="800" height="58" rx="8" fill="var(--accent-soft)" stroke="var(--accent)" stroke-width="1.8"/>
+  <text x="420" y="42" text-anchor="middle" font-size="13.5" font-weight="700" fill="var(--accent)">默认访问策略由「必需的 @Id 注解所在位置」继承而来</text>
+  <text x="420" y="64" text-anchor="middle" font-size="12" fill="var(--ink)"><tspan font-family="monospace">@Id</tspan> 在<tspan font-weight="700">字段</tspan>上 ⇒ 该实体的其他所有映射注解也<tspan font-weight="700">必须在字段上</tspan>　·　<tspan fill="var(--danger)" font-weight="700">setter 上的注解一律不被支持</tspan></text>
+
+  <rect x="20" y="90" width="390" height="112" rx="8" fill="var(--java-soft)" stroke="var(--java)"/>
+  <text x="215" y="112" text-anchor="middle" font-size="13" font-weight="700" fill="var(--java)">默认策略的传染范围</text>
+  <text x="38" y="134" font-size="11.5" fill="var(--ink)">• 任何 <tspan font-family="monospace">@Embedded</tspan> 类<tspan font-weight="700">继承拥有它的根实体</tspan>的策略</text>
+  <text x="38" y="156" font-size="11.5" fill="var(--ink)">• 任何 <tspan font-family="monospace">@MappedSuperclass</tspan> 的属性也按被映射</text>
+  <text x="52" y="172" font-size="11.5" fill="var(--ink)">  实体类的默认或显式策略来访问（第 7 章）</text>
+  <text x="38" y="194" font-size="11" fill="var(--ink-faint)">→ 所以「@Id 放哪里」是一个影响面很大的决定</text>
+
+  <rect x="430" y="90" width="390" height="112" rx="8" fill="var(--sql-soft)" stroke="var(--sql)"/>
+  <text x="625" y="112" text-anchor="middle" font-size="13" font-weight="700" fill="var(--sql)">用 @Access 覆盖</text>
+  <text x="448" y="134" font-family="monospace" font-size="11.5" fill="var(--ink)">AccessType.FIELD　　通过字段访问</text>
+  <text x="448" y="154" font-family="monospace" font-size="11.5" fill="var(--ink)">AccessType.PROPERTY　通过 getter 访问</text>
+  <text x="448" y="176" font-size="11.5" fill="var(--ink)">放在<tspan font-weight="700">类/实体级</tspan>：全类按该策略；此时其他映射注解</text>
+  <text x="448" y="192" font-size="11.5" fill="var(--ink)">（含 <tspan font-family="monospace">@Id</tspan>）放字段或 getter 上<tspan font-weight="700">都行</tspan></text>
+
+  <rect x="20" y="216" width="800" height="110" rx="8" fill="var(--panel)" stroke="var(--line-strong)"/>
+  <text x="420" y="238" text-anchor="middle" font-size="12.5" font-weight="700" fill="var(--ink)">也可以只覆盖<tspan font-weight="700">单个属性</tspan>的访问策略 —— 注意其他映射注解（如 @Column）<tspan font-weight="700">位置不变</tspan>，变的只是运行期怎么访问实例</text>
+  <g font-family="monospace" font-size="11.5">
+    <text x="46" y="262" fill="var(--accent)">@Entity public class Item {</text>
+    <text x="62" y="280" fill="var(--ink)">@Id @GeneratedValue(generator="ID_GENERATOR") private Long id;   <tspan fill="var(--ink-faint)">// Item 默认字段访问</tspan></text>
+    <text x="62" y="298" fill="var(--sql)">@Access(AccessType.PROPERTY)</text>
+    <text x="62" y="314" fill="var(--ink)">@Column(name="ITEM_NAME") private String name;   <tspan fill="var(--ink-faint)">// ← 只有它走 getName()/setName()</tspan></text>
+  </g>
+</svg>
+</div><figcaption>图 6-B　访问策略的默认继承与覆盖</figcaption></figure>
+
+<div class="filename">Ch06/mapping-value-types/src/main/java/…/ch06/model/Item.java</div>
+<pre><code><span class="ann">@Entity</span>
+<span class="kw">public class</span> Item {
+    <span class="ann">@Id</span>
+    <span class="ann">@GeneratedValue</span>(generator = <span class="str">"ID_GENERATOR"</span>)
+    <span class="kw">private</span> Long id;                                    <span class="cmt">❶ @Id 在字段 → 实体默认字段访问</span>
+
+    <span class="ann">@Access</span>(AccessType.PROPERTY)                        <span class="cmt">❷ 唯独 name 切换成访问器访问</span>
+    <span class="ann">@Column</span>(name = <span class="str">"ITEM_NAME"</span>)
+    <span class="kw">private</span> String name;
+
+    <span class="kw">public</span> String getName() { <span class="kw">return</span> name; }
+    <span class="kw">public void</span> setName(String name) {                   <span class="cmt">❸ 加载和存储 item 时会调用它们</span>
+        <span class="kw">this</span>.name = !name.startsWith(<span class="str">"AUCTION: "</span>) ? <span class="str">"AUCTION: "</span> + name : name;
+    }
+}</code></pre>
+
+<div class="tip"><b>字段访问 vs 属性访问，怎么选</b>
+<p><b>字段访问</b>：可以<b>省掉</b>那些不该暴露的字段的 getter；而且字段声明只占一行，访问器要铺开好几行 —— <b>代码更易读</b>。</p>
+<p style="margin-top:6px"><b>属性访问</b>：访问器方法可以执行<b>额外逻辑</b>。如果你希望持久化对象时发生这些逻辑，就用属性访问；如果希望持久化时<b>避开</b>这些额外动作，就用字段访问。</p></div>
+
+<h3 id="s13">6.1.3　派生属性：值来自 SQL 表达式</h3>
+
+<div class="filename">Ch06/mapping-value-types/…/ch06/model/Item.java</div>
+<pre><code><span class="ann">@Formula</span>(<span class="str">"CONCAT(SUBSTR(DESCRIPTION, 1, 12), '...')"</span>)
+<span class="kw">private</span> String shortDescription;
+
+<span class="ann">@Formula</span>(<span class="str">"(SELECT AVG(B.AMOUNT) FROM BID B WHERE B.ITEM_ID = ID)"</span>)   <span class="cmt">// 甚至可以是子查询</span>
+<span class="kw">private</span> BigDecimal averageBidAmount;</code></pre>
+
+<div class="tablewrap"><table>
+<thead><tr><th style="width:180px">特性</th><th>说明</th></tr></thead>
+<tbody>
+<tr><td>何时求值</td><td><b>每次从数据库取回 Item 时</b>求值，其他时候都不。因此若别的属性被改了，<b>结果可能过时</b></td></tr>
+<tr><td>出现在哪些 SQL 里</td><td><b>只在 SELECT 中</b>，永远不出现在 INSERT / UPDATE 里。加载实例时公式被嵌进 SELECT 子句</td></tr>
+<tr><td>在哪里计算</td><td>在<b>数据库</b>里计算</td></tr>
+<tr><td>能写什么</td><td>可引用表的列、调用特定数据库的 SQL 函数、甚至包含子查询</td></tr>
+<tr><td>列名解析</td><td><b>未限定的列名</b>指的是该派生属性所属类的那张表的列</td></tr>
+</tbody></table></div>
+
+<div class="warn"><b>可移植性代价</b><p>SQL 表达式<b>原样</b>传给底层数据库。依赖厂商特有的运算符或关键字会把映射元数据绑死在某个数据库产品上 —— 上例中的 <code>CONCAT()</code> 就是 MySQL 特有的。</p></div>
+
+<h3 id="s14">6.1.4　转换列值：@ColumnTransformer</h3>
+
+<p>数据库列 <code>IMPERIALWEIGHT</code> 存<b>磅</b>，应用属性 <code>Item#metricWeight</code> 用<b>千克</b>。</p>
+
+<figure><div class="fig-box">
+<svg viewBox="0 0 840 300" xmlns="http://www.w3.org/2000/svg" font-family="Inter,system-ui,sans-serif">
+  <defs><marker id="ct" markerWidth="9" markerHeight="9" refX="8" refY="4.5" orient="auto"><path d="M0 0 L9 4.5 L0 9 z" fill="var(--accent)"/></marker></defs>
+  <rect x="20" y="20" width="200" height="70" rx="8" fill="var(--java-soft)" stroke="var(--java)" stroke-width="1.6"/>
+  <text x="120" y="44" text-anchor="middle" font-size="13" font-weight="700" fill="var(--java)">Java 应用层</text>
+  <text x="120" y="66" text-anchor="middle" font-family="monospace" font-size="12" fill="var(--ink)">metricWeight</text>
+  <text x="120" y="82" text-anchor="middle" font-size="11" fill="var(--ink-soft)">千克</text>
+
+  <rect x="620" y="20" width="200" height="70" rx="8" fill="var(--sql-soft)" stroke="var(--sql)" stroke-width="1.6"/>
+  <text x="720" y="44" text-anchor="middle" font-size="13" font-weight="700" fill="var(--sql)">数据库列</text>
+  <text x="720" y="66" text-anchor="middle" font-family="monospace" font-size="12" fill="var(--ink)">IMPERIALWEIGHT</text>
+  <text x="720" y="82" text-anchor="middle" font-size="11" fill="var(--ink-soft)">磅</text>
+
+  <path d="M612 42 L228 42" stroke="var(--accent)" stroke-width="2" marker-end="url(#ct)"/>
+  <text x="420" y="34" text-anchor="middle" font-size="11.5" font-weight="700" fill="var(--accent)">read = "IMPERIALWEIGHT / 2.20462"</text>
+  <text x="420" y="56" text-anchor="middle" font-size="10.5" fill="var(--ink-soft)">表达式嵌进 SELECT，<tspan font-weight="700">在数据库里算</tspan>，公制值直接返回给应用层</text>
+
+  <path d="M228 78 L612 78" stroke="var(--accent)" stroke-width="2" marker-end="url(#ct)"/>
+  <text x="420" y="102" text-anchor="middle" font-size="11.5" font-weight="700" fill="var(--accent)">write = "? * 2.20462"</text>
+  <text x="420" y="120" text-anchor="middle" font-size="10.5" fill="var(--ink-soft)">公制值填进那个<tspan font-weight="700">必需的、唯一的占位符</tspan>（问号），SQL 表达式算出真正要插入/更新的值</text>
+
+  <rect x="20" y="138" width="800" height="52" rx="8" fill="var(--panel)" stroke="var(--line-strong)"/>
+  <g font-family="monospace" font-size="12">
+    <text x="46" y="160" fill="var(--accent)">@Column(name = "IMPERIALWEIGHT")</text>
+    <text x="46" y="178" fill="var(--accent)">@ColumnTransformer(read = "IMPERIALWEIGHT / 2.20462", write = "? * 2.20462")  <tspan fill="var(--ink)">private double metricWeight;</tspan></text>
+  </g>
+
+  <rect x="20" y="204" width="800" height="86" rx="8" fill="var(--warn-soft)" stroke="var(--warn)" stroke-width="1.6"/>
+  <text x="420" y="226" text-anchor="middle" font-size="13" font-weight="700" fill="var(--warn)">转换器也会作用于查询限制条件里 —— 这是个性能陷阱</text>
+  <text x="46" y="250" font-family="monospace" font-size="11.5" fill="var(--ink)">em.createQuery("SELECT i FROM Item i WHERE i.metricWeight = :w").setParameter("w", 2.0)</text>
+  <text x="46" y="270" font-family="monospace" font-size="11.5" fill="var(--sql)">→ 实际 SQL 的 WHERE：  i.IMPERIALWEIGHT / 2.20462 = ?</text>
+  <text x="46" y="286" font-size="11.5" fill="var(--danger)">数据库多半<tspan font-weight="700">用不上索引</tspan>，只能<tspan font-weight="700">全表扫描</tspan> —— 因为要算出所有 ITEM 行的重量才能求值这个限制条件</text>
+</svg>
+</div><figcaption>图 6-C　<code>@ColumnTransformer</code> 的双向表达式，以及它对索引的影响</figcaption></figure>
+
+<h3 id="s15">6.1.5　数据库生成的值与默认值</h3>
+
+<p>创建时间戳、商品默认价格、每次修改都跑的触发器 —— 这些值由数据库生成。<b>把属性标为「生成的」，就把「插入/更新后再回查一次」的责任交给了框架</b>：一旦对声明了生成属性的实体发出 INSERT 或 UPDATE，SQL 会<b>紧接着做一次 SELECT</b> 取回生成的值。</p>
+
+<div class="filename">Ch06/mapping-value-types/…/ch06/model/Item.java</div>
+<pre><code><span class="ann">@CreationTimestamp</span>                      <span class="cmt">// 实例插入数据库前，自动设为当前日期</span>
+<span class="kw">private</span> LocalDate createdOn;
+
+<span class="ann">@UpdateTimestamp</span>                        <span class="cmt">// 实例被更新时自动生成</span>
+<span class="kw">private</span> LocalDateTime lastModified;
+
+<span class="ann">@Column</span>(insertable = <span class="kw">false</span>)             <span class="cmt">// 该属性不参与 INSERT</span>
+<span class="ann">@ColumnDefault</span>(<span class="str">"1.00"</span>)                   <span class="cmt">// 导出/生成 DDL 时设置列的默认值</span>
+<span class="ann">@Generated</span>(org.hibernate.annotations.GenerationTime.INSERT)
+<span class="kw">private</span> BigDecimal initialPrice;</code></pre>
+
+<div class="tablewrap"><table>
+<thead><tr><th style="width:230px"><code>GenerationTime</code></th><th>行为</th></tr></thead>
+<tbody>
+<tr><td><code>ALWAYS</code></td><td><b>每次</b> SQL UPDATE 或 INSERT 之后都刷新实体实例</td></tr>
+<tr><td><code>INSERT</code></td><td>只在 SQL <b>INSERT 之后</b>刷新，用来取回数据库提供的默认值</td></tr>
+</tbody></table></div>
+
+<h3 id="s16">6.1.6　<code>@Temporal</code> 注解（Java 8 之前的遗留写法）</h3>
+<pre><code><span class="ann">@CreationTimestamp</span>
+<span class="ann">@Temporal</span>(TemporalType.DATE)
+<span class="kw">private</span> Date createdOn;
+
+<span class="ann">@UpdateTimestamp</span>
+<span class="ann">@Temporal</span>(TemporalType.TIMESTAMP)
+<span class="kw">private</span> Date lastModified;</code></pre>
+<p><code>TemporalType</code> 可选 <code>DATE</code>、<code>TIME</code>、<code>TIMESTAMP</code>，决定把时间值的<b>哪一部分</b>存进数据库；<b>没有 <code>@Temporal</code> 时默认是 <code>TIMESTAMP</code></b>。</p>
+<div class="tip"><b>用 Java 8 就不需要它</b><p><code>java.time</code> 包里的 <code>LocalDate</code>、<code>LocalDateTime</code>、<code>LocalTime</code> <b>自身就带着时间精度</b>（日期 / 日期+时间 / 仅时间），所以 JPA 2.2 起不再需要 <code>@Temporal</code>。</p></div>
+
+<h3 id="s17">6.1.7　映射枚举</h3>
+
+<div class="cols">
+<div>
+<div class="filename">…/ch06/model/AuctionType.java</div>
+<pre><code><span class="kw">public enum</span> AuctionType {
+    HIGHEST_BID,
+    LOWEST_BID,
+    FIXED_PRICE
+}</code></pre>
+</div>
+<div>
+<div class="filename">…/ch06/model/Item.java</div>
+<pre><code><span class="ann">@NotNull</span>
+<span class="ann">@Enumerated</span>(<span class="hl">EnumType.STRING</span>)
+<span class="kw">private</span> AuctionType auctionType =
+        AuctionType.HIGHEST_BID;</code></pre>
+</div>
+</div>
+
+<div class="pit"><b>默认（ORDINAL）是个脆弱的选择</b><p>不加 <code>@Enumerated</code>，框架会存<b>序数位置</b>：<code>HIGHEST_BID</code>→1、<code>LOWEST_BID</code>→2、<code>FIXED_PRICE</code>→3。<b>一旦你改动枚举、插入一个新常量，已存在的值就不再对应同一个位置，应用就坏了。</b>因此 <code>EnumType.STRING</code> 是更好的选择 —— 直接存枚举值的标签。</p></div>
+
+<h2 id="s2"><span class="num">6.2</span>映射可嵌入组件</h2>
+
+<p><code>User</code> 与 <code>Address</code> 之间是<b>聚合</b>（part-of 关系）的一种更强形式：<b>组合（composition）</b> —— 部分的生命周期<b>完全依赖</b>整体。<code>Address</code> 不能脱离 <code>User</code> 存在，所以 UML 里被组合的类通常就是 ORM 的<b>值类型候选</b>。</p>
+
+<h3 id="s21">6.2.1　目标数据库 schema</h3>
+
+<figure><div class="fig-box">
+<svg viewBox="0 0 840 340" xmlns="http://www.w3.org/2000/svg" font-family="Inter,system-ui,sans-serif">
+  <defs><marker id="c6m" markerWidth="9" markerHeight="9" refX="8" refY="4.5" orient="auto"><path d="M0 0 L9 4.5 L0 9 z" fill="var(--accent)"/></marker></defs>
+  <text x="220" y="24" text-anchor="middle" font-size="13" font-weight="700" fill="var(--java)">领域模型：一个实体 + 两个值类型引用</text>
+  ><rect x="40" y="40" width="160" height="90" rx="7" fill="var(--java-soft)" stroke="var(--java)" stroke-width="1.6"/>
+  <text x="120" y="60" text-anchor="middle" font-size="13" font-weight="700" fill="var(--ink)">User</text>
+  <line x1="40" y1="68" x2="200" y2="68" stroke="var(--java)"/>
+  <text x="52" y="86" font-size="11" fill="var(--ink-soft)">username : String</text>
+  <text x="52" y="104" font-size="11" fill="var(--ink-soft)">firstname : String</text>
+  <text x="52" y="122" font-size="11" fill="var(--ink-soft)">lastname : String</text>
+
+  <rect x="270" y="40" width="150" height="90" rx="7" fill="var(--sql-soft)" stroke="var(--sql)" stroke-width="1.8"/>
+  <text x="345" y="60" text-anchor="middle" font-size="13" font-weight="700" fill="var(--ink)">Address</text>
+  <line x1="270" y1="68" x2="420" y2="68" stroke="var(--sql)"/>
+  <text x="282" y="86" font-size="11" fill="var(--ink-soft)">street : String</text>
+  <text x="282" y="104" font-size="11" fill="var(--ink-soft)">zipcode : String</text>
+  <text x="282" y="122" font-size="11" fill="var(--ink-soft)">city : String</text>
+
+  <line x1="202" y1="70" x2="268" y2="62" stroke="var(--java)" stroke-width="1.5"/>
+  <line x1="202" y1="100" x2="268" y2="108" stroke="var(--java)" stroke-width="1.5"/>
+  <text x="235" y="60" text-anchor="middle" font-size="10" font-weight="700" fill="var(--accent)">home</text>
+  <text x="235" y="122" text-anchor="middle" font-size="10" font-weight="700" fill="var(--accent)">billing</text>
+
+  <path d="M440 90 L500 90" stroke="var(--accent)" stroke-width="2" marker-end="url(#c6m)"/>
+  <text x="470" y="82" text-anchor="middle" font-size="10.5" fill="var(--accent)">映射</text>
+
+  <rect x="520" y="30" width="200" height="290" rx="8" fill="var(--panel)" stroke="var(--line-strong)" stroke-width="1.6"/>
+  <text x="620" y="52" text-anchor="middle" font-size="12" font-style="italic" fill="var(--ink-faint)">« Table »</text>
+  <text x="620" y="70" text-anchor="middle" font-size="14" font-weight="700" fill="var(--ink)">USERS</text>
+  <line x1="520" y1="80" x2="720" y2="80" stroke="var(--line-strong)"/>
+  <g font-family="monospace" font-size="11.5" fill="var(--ink)">
+    <text x="536" y="100">ID  <tspan font-size="10" fill="var(--accent)">&lt;&lt;PK&gt;&gt;</tspan></text>
+    <text x="536" y="120">USERNAME</text>
+    <text x="536" y="140">FIRSTNAME</text>
+    <text x="536" y="160">LASTNAME</text>
+  </g>
+  <rect x="528" y="170" width="184" height="66" rx="5" fill="var(--sql-soft)" stroke="var(--sql)"/>
+  <g font-family="monospace" font-size="11.5" fill="var(--ink)">
+    <text x="536" y="190">STREET</text>
+    <text x="536" y="208">ZIPCODE</text>
+    <text x="536" y="226">CITY</text>
+  </g>
+  <rect x="528" y="242" width="184" height="66" rx="5" fill="var(--sql-soft)" stroke="var(--sql)"/>
+  <g font-family="monospace" font-size="11" fill="var(--ink)">
+    <text x="536" y="262">BILLING_STREET</text>
+    <text x="536" y="280">BILLING_ZIPCODE</text>
+    <text x="536" y="298">BILLING_CITY</text>
+  </g>
+  <text x="770" y="205" text-anchor="middle" font-size="11" fill="var(--sql)" transform="rotate(90 770 205)">组件列 component columns</text>
+
+  <rect x="30" y="150" width="400" height="170" rx="8" fill="var(--accent-soft)" stroke="var(--accent)"/>
+  <text x="230" y="172" text-anchor="middle" font-size="13" font-weight="700" fill="var(--accent)">这个 schema 反映了值类型语义</text>
+  <text x="48" y="196" font-size="11.5" fill="var(--ink)">• <tspan font-weight="700">只有一张映射表</tspan> USERS，一行同时保存某个 User</text>
+  <text x="60" y="212" font-size="11.5" fill="var(--ink)">  及其 homeAddress 与 billingAddress</text>
+  <text x="48" y="236" font-size="11.5" fill="var(--ink)">• 某个 Address <tspan font-weight="700">不能被共享</tspan>，它<tspan font-weight="700">没有自己的标识</tspan>；</text>
+  <text x="60" y="252" font-size="11.5" fill="var(--ink)">  它的主键就是<tspan font-weight="700">拥有者实体</tspan>的数据库标识符</text>
+  <text x="48" y="276" font-size="11.5" fill="var(--ink)">• 生命周期依赖：拥有者被保存 → 组件被保存；</text>
+  <text x="60" y="292" font-size="11.5" fill="var(--ink)">  拥有者被删除 → 组件被删除。<tspan font-weight="700">不需要任何特殊 SQL</tspan></text>
+  <text x="60" y="310" font-size="11.5" fill="var(--ink-faint)">  —— 数据全在同一行里</text>
+</svg>
+</div><figcaption>图 6-1/6-2　组合关系映射：组件的列被嵌入实体表中</figcaption></figure>
+
+<div class="note"><b>如果别的实体也引用 Address</b><p>比如 <code>Shipment#deliveryAddress</code>，那么 <code>SHIPMENT</code> 表也会带上存放一个 <code>Address</code> 所需的全部列。<b>「类比表多」正是支撑细粒度领域模型的方式。</b></p></div>
+
+<h3 id="s22">6.2.2　让类可嵌入</h3>
+
+<div class="tip"><b>组件与实体的唯一区别就是数据库标识符</b><p>Java 里没有「组合」这个概念，类或属性没法被标记为组件。组件类<b>没有个体标识</b>，因此不需要标识符属性或标识符映射。<b>它就是一个普通 POJO。</b></p></div>
+
+<div class="filename">Ch06/mapping-value-types/…/ch06/model/Address.java</div>
+<pre><code><span class="ann">@Embeddable</span>                                <span class="cmt">❶ 不是 @Entity；没有标识符属性</span>
+<span class="kw">public class</span> Address {
+
+    <span class="ann">@NotNull</span>                               <span class="cmt">❷ DDL 生成时会被忽略！见下方警告</span>
+    <span class="ann">@Column</span>(nullable = <span class="kw">false</span>)               <span class="cmt">❸ 靠它来生成 DDL 约束</span>
+    <span class="kw">private</span> String street;
+
+    <span class="ann">@NotNull</span>
+    <span class="ann">@Column</span>(nullable = <span class="kw">false</span>, length = 5)    <span class="cmt">❹ length 覆盖默认的 VARCHAR(255)</span>
+    <span class="kw">private</span> String zipcode;
+
+    <span class="ann">@NotNull</span>
+    <span class="ann">@Column</span>(nullable = <span class="kw">false</span>)
+    <span class="kw">private</span> String city;                     <span class="cmt">❺ 默认 VARCHAR(255)</span>
+
+    <span class="kw">public</span> Address() { }                     <span class="cmt">❻ 框架调它建实例，再直接填字段</span>
+
+    <span class="kw">public</span> Address(String street, String zipcode, String city) {   <span class="cmt">❼ 便利构造器</span>
+        <span class="kw">this</span>.street = street; <span class="kw">this</span>.zipcode = zipcode; <span class="kw">this</span>.city = city;
+    }
+}</code></pre>
+
+<div class="pit"><b>已知缺陷：Hibernate Validator 不为组件属性生成 NOT NULL</b><p>写作时这个缺陷仍未修复：<b>生成数据库 schema 时，Hibernate 不会把可嵌入组件属性上的 <code>@NotNull</code> 映射为 <code>NOT NULL</code> 约束</b>，只在运行期用它做 Bean Validation。因此必须额外写 <code>@Column(nullable = false)</code> 才能在 schema 里生成约束。Hibernate 缺陷库编号 <b>HVAL-3</b>。</p></div>
+
+<div class="filename">…/ch06/model/User.java　—— 拥有者实体侧毫无特别之处</div>
+<pre><code><span class="ann">@Entity</span>
+<span class="ann">@Table</span>(name = <span class="str">"USERS"</span>)
+<span class="kw">public class</span> User {
+    <span class="ann">@Id</span>
+    <span class="ann">@GeneratedValue</span>(generator = Constants.ID_GENERATOR)
+    <span class="kw">private</span> Long id;
+
+    <span class="kw">private</span> Address homeAddress;   <span class="cmt">// Address 已是 @Embeddable，这里<b>无需任何注解</b></span>
+}</code></pre>
+
+<h4>注解该放在组件类的哪里？五条规则</h4>
+<div class="tablewrap"><table>
+<thead><tr><th style="width:290px">条件</th><th>注解位置 / 运行期访问方式</th></tr></thead>
+<tbody>
+<tr><td>拥有者 <code>@Entity</code> 是<b>字段访问</b><br><span style="font-size:12px;color:var(--ink-faint)">（隐式：<code>@Id</code> 在字段；显式：类上 <code>@Access(FIELD)</code>）</span></td><td>组件类的映射注解应在<b>字段</b>上，运行期直接读写字段。<code>Address</code> 上的 getter/setter <b>可选</b></td></tr>
+<tr><td>拥有者 <code>@Entity</code> 是<b>属性访问</b></td><td>组件类的映射注解应在 <b>getter</b> 上，运行期调 getter/setter</td></tr>
+<tr><td>拥有者的嵌入属性标了 <code>@Access(FIELD)</code><br><span style="font-size:12px;color:var(--ink-faint)">（如 <code>User#homeAddress</code>）</span></td><td>注解在 <code>Address</code> 的<b>字段</b>上，运行期访问字段</td></tr>
+<tr><td>拥有者的嵌入属性标了 <code>@Access(PROPERTY)</code></td><td>注解在 <code>Address</code> 的 <b>getter</b> 上，运行期用 getter/setter</td></tr>
+<tr><td><code>@Access</code> 标在<b>可嵌入类自身</b></td><td>用所选策略来读取该类上的映射注解并做运行期访问</td></tr>
+</tbody></table></div>
+
+<div class="warn"><b>null 引用的尴尬：没有优雅的表示方式</b>
+<p>设想 <code>STREET</code>、<code>ZIPCODE</code>、<code>CITY</code> 都可空。加载一个没有地址信息的 <code>User</code> 时，<code>someUser.getHomeAddress()</code> 该返回什么？<b>返回 null</b>。反过来，框架把 null 的嵌入属性存成<b>所有组件列都是 NULL</b>。</p>
+<p style="margin-top:6px"><b>后果</b>：如果你存了一个「空的」<code>Address</code>（实例存在但所有属性都是 null），再加载这个 <code>User</code> 时会<b>拿不到任何 Address 实例</b>。这很反直觉 —— <b>你本来就不该让这些列可空</b>，也应避免三值逻辑，因为你多半希望用户有一个真实地址。</p></div>
+
+<div class="note"><b>equals() / hashCode()</b><p>应该重写 <code>Address</code> 的 <code>equals()</code> 和 <code>hashCode()</code> 以<b>按值比较</b>实例。不过只要你不需要比较实例（比如把它们放进 <code>HashSet</code>），这就不是关键问题。§8.2.1 会在集合语境下讨论它。</p></div>
+
+<h3 id="s23">6.2.3　覆盖嵌入属性</h3>
+<p>要在同一张 <code>USERS</code> 表里存<b>第二个</b> <code>Address</code>（<code>billingAddress</code>），会和已有的 <code>STREET</code>/<code>ZIPCODE</code>/<code>CITY</code> 三列冲突 —— 用 <code>@AttributeOverride</code> 改列名：</p>
+
+<div class="filename">Ch06/mapping-value-types/…/ch06/model/User.java</div>
+<pre><code><span class="ann">@Entity</span>
+<span class="ann">@Table</span>(name = <span class="str">"USERS"</span>)
+<span class="kw">public class</span> User {
+
+    <span class="ann">@Embedded</span>                                         <span class="cmt">❶ 其实不是必需的，见下</span>
+    <span class="ann">@AttributeOverride</span>(name = <span class="str">"street"</span>,
+        column = <span class="ann">@Column</span>(name = <span class="str">"BILLING_STREET"</span>))
+    <span class="ann">@AttributeOverride</span>(name = <span class="str">"zipcode"</span>,               <span class="cmt">❷ 可重复注解，逐个覆盖属性映射</span>
+        column = <span class="ann">@Column</span>(name = <span class="str">"BILLING_ZIPCODE"</span>, length = 5))
+    <span class="ann">@AttributeOverride</span>(name = <span class="str">"city"</span>,
+        column = <span class="ann">@Column</span>(name = <span class="str">"BILLING_CITY"</span>))
+    <span class="kw">private</span> Address billingAddress;
+}</code></pre>
+
+<div class="keyhint"><span class="k">❶ @Embedded 何时有用</span><span>标组件类或标拥有者里的属性<b>二选一即可</b>（都标也无害，但没好处）。<code>@Embedded</code> 在这种情况下有用：你要映射一个<b>第三方组件类</b>，没有源码、没有注解，但有正确的 getter/setter（像普通 JavaBean）。</span></div>
+
+<div class="pit"><b><code>@AttributeOverride</code> 是「完全」覆盖</b><p>被覆盖属性上<b>任何</b> JPA 或 Hibernate 注解都被<b>忽略</b>。也就是说 <code>Address</code> 类上的 <code>@Column</code> 全部失效 —— <b>所有 <code>BILLING_*</code> 列都变成可空的！</b>（不过 Bean Validation 仍然认组件属性上的 <code>@NotNull</code>；被覆盖的只是<b>持久化注解</b>。）</p></div>
+
+<div class="cols">
+<div>
+<div class="filename">…/repositories/UserRepository.java</div>
+<pre><code><span class="kw">public interface</span> UserRepository
+        <span class="kw">extends</span> CrudRepository&lt;User, Long&gt; { }</code></pre>
+</div>
+<div>
+<div class="filename">…/repositories/ItemRepository.java</div>
+<pre><code><span class="kw">public interface</span> ItemRepository
+        <span class="kw">extends</span> CrudRepository&lt;Item, Long&gt; {
+   Iterable&lt;Item&gt; findByMetricWeight(<span class="kw">double</span> weight);
+}</code></pre>
+</div>
+</div>
+
+<div class="filename">Ch06/mapping-value-types/src/test/java/…/MappingValuesSpringDataJPATest.java（节选）</div>
+<pre><code>User user = <span class="kw">new</span> User();
+user.setUsername(<span class="str">"username"</span>);
+user.setHomeAddress(<span class="kw">new</span> Address(<span class="str">"Flowers Street"</span>, <span class="str">"12345"</span>, <span class="str">"Boston"</span>));
+userRepository.save(user);
+
+Item item = <span class="kw">new</span> Item();
+item.setName(<span class="str">"Some Item"</span>);
+item.setMetricWeight(2);
+item.setDescription(<span class="str">"descriptiondescription"</span>);
+itemRepository.save(item);
+
+List&lt;Item&gt; items = (List&lt;Item&gt;) itemRepository.findByMetricWeight(2.0);
+
+assertAll(
+  () -&gt; assertEquals(<span class="str">"Flowers Street"</span>, users.get(0).getHomeAddress().getStreet()),
+  () -&gt; assertEquals(<span class="hl">"AUCTION: Some Item"</span>, items.get(0).getName()),      <span class="cmt">// ← setName 里的逻辑生效了</span>
+  () -&gt; assertEquals(AuctionType.HIGHEST_BID, items.get(0).getAuctionType()),
+  () -&gt; assertEquals(<span class="hl">"descriptiond..."</span>, items.get(0).getShortDescription()), <span class="cmt">// ← @Formula 算出来的</span>
+  () -&gt; assertEquals(2.0, items.get(0).getMetricWeight()),                <span class="cmt">// ← @ColumnTransformer 往返</span>
+  () -&gt; assertEquals(LocalDate.now(), items.get(0).getCreatedOn()),       <span class="cmt">// ← @CreationTimestamp</span>
+  () -&gt; assertTrue(ChronoUnit.SECONDS.between(LocalDateTime.now(),
+                   items.get(0).getLastModified()) &lt; 1),                 <span class="cmt">// ← 容忍 1 秒取回延迟</span>
+  () -&gt; assertEquals(<span class="kw">new</span> BigDecimal(<span class="str">"1.00"</span>), items.get(0).getInitialPrice())  <span class="cmt">// ← @ColumnDefault</span>
+);</code></pre>
+
+<h3 id="s24">6.2.4　映射嵌套的嵌入组件</h3>
+
+<p>把 <code>Address</code> 里的简单 <code>city</code> 字符串再抽成一个 <code>City</code> 可嵌入类。<b>SQL schema 仍然只有一张 USERS 表。</b></p>
+
+<figure><div class="fig-box">
+<svg viewBox="0 0 840 250" xmlns="http://www.w3.org/2000/svg" font-family="Inter,system-ui,sans-serif">
+  <defs><marker id="c6n" markerWidth="9" markerHeight="9" refX="8" refY="4.5" orient="auto"><path d="M0 0 L9 4.5 L0 9 z" fill="var(--accent)"/></marker></defs>
+  <rect x="20" y="40" width="140" height="86" rx="7" fill="var(--java-soft)" stroke="var(--java)" stroke-width="1.6"/>
+  <text x="90" y="60" text-anchor="middle" font-size="12.5" font-weight="700" fill="var(--ink)">User</text>
+  <line x1="20" y1="68" x2="160" y2="68" stroke="var(--java)"/>
+  <text x="30" y="86" font-size="10.5" fill="var(--ink-soft)">username : String</text>
+  <text x="30" y="102" font-size="10.5" fill="var(--ink-soft)">firstname : String</text>
+  <text x="30" y="118" font-size="10.5" fill="var(--ink-soft)">lastname : String</text>
+
+  <line x1="162" y1="80" x2="198" y2="80" stroke="var(--java)" stroke-width="1.5"/>
+  <rect x="200" y="46" width="130" height="60" rx="7" fill="var(--sql-soft)" stroke="var(--sql)" stroke-width="1.6"/>
+  <text x="265" y="66" text-anchor="middle" font-size="12.5" font-weight="700" fill="var(--ink)">Address</text>
+  <line x1="200" y1="74" x2="330" y2="74" stroke="var(--sql)"/>
+  <text x="210" y="92" font-size="10.5" fill="var(--ink-soft)">street : String</text>
+
+  <line x1="332" y1="80" x2="368" y2="80" stroke="var(--sql)" stroke-width="1.5"/>
+  <rect x="370" y="40" width="140" height="86" rx="7" fill="var(--sql-soft)" stroke="var(--sql)" stroke-width="1.6"/>
+  <text x="440" y="60" text-anchor="middle" font-size="12.5" font-weight="700" fill="var(--ink)">City</text>
+  <line x1="370" y1="68" x2="510" y2="68" stroke="var(--sql)"/>
+  <text x="380" y="86" font-size="10.5" fill="var(--ink-soft)">zipcode : String</text>
+  <text x="380" y="102" font-size="10.5" fill="var(--ink-soft)">name : String</text>
+  <text x="380" y="118" font-size="10.5" fill="var(--ink-soft)">country : String</text>
+
+  <path d="M525 83 L575 83" stroke="var(--accent)" stroke-width="2" marker-end="url(#c6n)"/>
+
+  <rect x="600" y="20" width="180" height="212" rx="8" fill="var(--panel)" stroke="var(--line-strong)" stroke-width="1.6"/>
+  <text x="690" y="42" text-anchor="middle" font-size="12" font-style="italic" fill="var(--ink-faint)">« Table »</text>
+  <text x="690" y="60" text-anchor="middle" font-size="14" font-weight="700" fill="var(--ink)">USERS</text>
+  <line x1="600" y1="70" x2="780" y2="70" stroke="var(--line-strong)"/>
+  <g font-family="monospace" font-size="11.5" fill="var(--ink)">
+    <text x="616" y="90">ID  <tspan font-size="10" fill="var(--accent)">&lt;&lt;PK&gt;&gt;</tspan></text>
+    <text x="616" y="110">USERNAME</text>
+    <text x="616" y="130">FIRSTNAME</text>
+    <text x="616" y="150">LASTNAME</text>
+  </g>
+  <rect x="608" y="160" width="164" height="64" rx="5" fill="var(--sql-soft)" stroke="var(--sql)"/>
+  <g font-family="monospace" font-size="11.5" fill="var(--ink)">
+    <text x="616" y="178">STREET</text>
+    <text x="616" y="194">ZIPCODE</text>
+    <text x="616" y="210">CITY</text>
+    <text x="700" y="194">COUNTRY</text>
+  </g>
+
+  <rect x="20" y="150" width="500" height="82" rx="8" fill="var(--accent-soft)" stroke="var(--accent)"/>
+  <text x="270" y="172" text-anchor="middle" font-size="12.5" font-weight="700" fill="var(--accent)">规则：无论嵌套多深，所有嵌入属性都映射到<tspan font-weight="700">拥有者实体那张表</tspan>的列</text>
+  <text x="40" y="196" font-size="11.5" fill="var(--ink)">City 的 <tspan font-family="monospace">name</tspan> 属性映射到 <tspan font-family="monospace">CITY</tspan> 列：可在 Address 里写 @AttributeOverride，</text>
+  <text x="40" y="214" font-size="11.5" fill="var(--ink)">也可在根实体 User 上覆盖 —— 嵌套属性用<tspan font-weight="700">点号</tspan>引用：</text>
+  <text x="40" y="228" font-family="monospace" font-size="11" fill="var(--accent)">@AttributeOverride(name = "city.name")   // 指向 Address#city#name</text>
+</svg>
+</div><figcaption>图 6-3/6-4　嵌套组合：Address 里再嵌一个 City，列仍然全在 USERS 表</figcaption></figure>
+
+<div class="cols">
+<div>
+<div class="filename">mapping-value-types2/…/model/Address.java</div>
+<pre><code><span class="ann">@Embeddable</span>
+<span class="kw">public class</span> Address {
+    <span class="ann">@NotNull</span> <span class="ann">@Column</span>(nullable = <span class="kw">false</span>)
+    <span class="kw">private</span> String street;
+
+    <span class="ann">@NotNull</span>
+    <span class="ann">@AttributeOverride</span>(name = <span class="str">"name"</span>,
+        column = <span class="ann">@Column</span>(name = <span class="str">"CITY"</span>, nullable = <span class="kw">false</span>))
+    <span class="kw">private</span> City city;
+}</code></pre>
+</div>
+<div>
+<div class="filename">mapping-value-types2/…/model/City.java</div>
+<pre><code><span class="ann">@Embeddable</span>
+<span class="kw">public class</span> City {
+    <span class="ann">@NotNull</span> <span class="ann">@Column</span>(nullable = <span class="kw">false</span>, length = 5)
+    <span class="kw">private</span> String zipcode;
+
+    <span class="ann">@NotNull</span> <span class="ann">@Column</span>(nullable = <span class="kw">false</span>)
+    <span class="kw">private</span> String name;
+
+    <span class="ann">@NotNull</span> <span class="ann">@Column</span>(nullable = <span class="kw">false</span>)
+    <span class="kw">private</span> String country;
+}</code></pre>
+</div>
+</div>
+
+<h2 id="s3"><span class="num">6.3</span>用转换器映射 Java 类型与 SQL 类型</h2>
+
+<figure><div class="fig-box">
+<svg viewBox="0 0 840 300" xmlns="http://www.w3.org/2000/svg" font-family="Inter,system-ui,sans-serif">
+  <rect x="20" y="20" width="800" height="52" rx="8" fill="var(--sql-soft)" stroke="var(--sql)" stroke-width="1.8"/>
+  <text x="420" y="44" text-anchor="middle" font-size="14" font-weight="700" fill="var(--sql)">① 内置类型适配器（built-in types）</text>
+  <text x="420" y="63" text-anchor="middle" font-size="11.5" fill="var(--ink)">任何 JPA 提供者都必须支持的最小 Java↔SQL 转换集；Hibernate 全支持，还额外提供实用的非标准适配器</text>
+
+  <rect x="20" y="86" width="800" height="66" rx="8" fill="var(--java-soft)" stroke="var(--java)" stroke-width="1.8"/>
+  <text x="420" y="110" text-anchor="middle" font-size="14" font-weight="700" fill="var(--java)">② JPA <tspan font-family="monospace">AttributeConverter</tspan>（标准扩展点）</text>
+  <text x="420" y="130" text-anchor="middle" font-size="11.5" fill="var(--ink)">用 <tspan font-family="monospace">@Converter</tspan> + <tspan font-family="monospace">@Convert</tspan>，在 Java 属性类型与<tspan font-weight="700">单个</tspan>数据库列类型之间双向转换</text>
+  <text x="420" y="146" text-anchor="middle" font-size="11" fill="var(--danger)">限制：不支持多列；查询引擎不认识内部属性（写不出 <tspan font-family="monospace">where i.buyNowPrice.amount &gt; 100</tspan>）</text>
+
+  <rect x="20" y="166" width="800" height="66" rx="8" fill="var(--accent-soft)" stroke="var(--accent)" stroke-width="2"/>
+  <text x="420" y="190" text-anchor="middle" font-size="14" font-weight="700" fill="var(--accent)">③ Hibernate 原生 <tspan font-family="monospace">org.hibernate.usertype.*</tspan>（低层扩展点）</text>
+  <text x="420" y="210" text-anchor="middle" font-size="11.5" fill="var(--ink)">直接操作 JDBC <tspan font-family="monospace">PreparedStatement</tspan> / <tspan font-family="monospace">ResultSet</tspan>；可控制缓存与脏检查；<tspan font-weight="700">可跨多列</tspan>；<tspan font-weight="700">可集成查询引擎</tspan></text>
+  <text x="420" y="226" text-anchor="middle" font-size="11" fill="var(--ink-soft)">代价：绑定 Hibernate，代码量大</text>
+
+  <rect x="20" y="248" width="800" height="42" rx="8" fill="var(--panel)" stroke="var(--line-strong)"/>
+  <text x="420" y="268" text-anchor="middle" font-size="12" font-weight="700" fill="var(--ink)">这套可扩展的类型系统是 Hibernate 的核心特性之一，也是它如此灵活的重要原因</text>
+  <text x="420" y="284" text-anchor="middle" font-size="11.5" fill="var(--ink-soft)">它在 Java 领域模型与 SQL schema 之间提供了一层<tspan font-weight="700">额外的、灵活的缓冲</tspan>，让两侧都更能扛住变化</text>
+</svg>
+</div><figcaption>图 6-D　类型转换的三个层次，从内置到完全自定义</figcaption></figure>
+
+<h3 id="s31">6.3.1　内置类型</h3>
+
+<div class="cols">
+<div>
+<h4>基本类型与数值类型</h4>
+<div class="tablewrap"><table>
+<thead><tr><th>Hibernate 名</th><th>Java 类型</th><th>ANSI SQL</th></tr></thead>
+<tbody>
+<tr><td><code>integer</code></td><td><code>int</code>, <code>Integer</code></td><td>INTEGER</td></tr>
+<tr><td><code>long</code></td><td><code>long</code>, <code>Long</code></td><td>BIGINT</td></tr>
+<tr><td><code>short</code></td><td><code>short</code>, <code>Short</code></td><td>SMALLINT</td></tr>
+<tr><td><code>float</code></td><td><code>float</code>, <code>Float</code></td><td>FLOAT</td></tr>
+<tr><td><code>double</code></td><td><code>double</code>, <code>Double</code></td><td>DOUBLE</td></tr>
+<tr><td><code>byte</code></td><td><code>byte</code>, <code>Byte</code></td><td>TINYINT</td></tr>
+<tr><td><code>boolean</code></td><td><code>boolean</code>, <code>Boolean</code></td><td>BOOLEAN</td></tr>
+<tr><td><code>big_decimal</code></td><td><code>BigDecimal</code></td><td>NUMERIC</td></tr>
+<tr><td><code>big_integer</code></td><td><code>BigInteger</code></td><td>NUMERIC</td></tr>
+</tbody></table></div>
+</div>
+<div>
+<h4>字符与字符串类型</h4>
+<div class="tablewrap"><table>
+<thead><tr><th>Hibernate 名</th><th>Java 类型</th><th>ANSI SQL</th></tr></thead>
+<tbody>
+<tr><td><code>string</code></td><td><code>String</code></td><td>VARCHAR</td></tr>
+<tr><td><code>character</code></td><td><code>char[]</code>, <code>Character[]</code>, <code>String</code></td><td>CHAR</td></tr>
+<tr><td><code>yes_no</code></td><td><code>boolean</code>, <code>Boolean</code></td><td>CHAR(1) 'Y'/'N'</td></tr>
+<tr><td><code>true_false</code></td><td><code>boolean</code>, <code>Boolean</code></td><td>CHAR(1) 'T'/'F'</td></tr>
+<tr><td><code>class</code></td><td><code>java.lang.Class</code></td><td>VARCHAR</td></tr>
+<tr><td><code>locale</code></td><td><code>java.util.Locale</code></td><td>VARCHAR</td></tr>
+<tr><td><code>timezone</code></td><td><code>java.util.TimeZone</code></td><td>VARCHAR</td></tr>
+<tr><td><code>currency</code></td><td><code>java.util.Currency</code></td><td>VARCHAR</td></tr>
+</tbody></table></div>
+</div>
+</div>
+
+<div class="note"><b>ANSI 标准类型 → 厂商类型：方言负责翻译</b>
+<p>表里写的是 <b>ANSI 标准类型名</b>，多数 DBMS 厂商忽略 SQL 标准的这一部分（通常因为它们的遗留类型系统早于标准）。JDBC 提供了对厂商类型的<b>部分抽象</b>，让 Hibernate 执行 INSERT/UPDATE 时能用 ANSI 标准类型；<b>生成 schema 时</b>，Hibernate 用配置的 SQL 方言把 ANSI 类型翻译成合适的厂商类型。</p>
+<p style="margin-top:6px">想知道具体映射？看方言源码。例如 <code>H2Dialect</code> 里就有：<code>registerColumnType(Types.NUMERIC, "decimal($p,$s)")</code>。<code>BigDecimal</code> 属性的默认精度与标度是 <b>NUMERIC(19, 2)</b>，用 <code>@Column</code> 的 <code>precision</code> / <code>scale</code> 参数可覆盖。</p></div>
+
+<div class="keyhint"><span class="k">String 的长度决定 SQL 类型</span><span>属性标了 <code>@Column(length = …)</code> 或 Bean Validation 的 <code>@Length</code> 时，Hibernate 按大小挑类型，且取决于方言。以 MySQL 为例：≤65,535 → <code>VARCHAR(length)</code>；≤16,777,215 → <code>MEDIUMTEXT</code>；更大 → <code>LONGTEXT</code>。<b>Hibernate 对所有 <code>String</code> 属性的默认长度是 255</b>，所以不做任何映射时 <code>String</code> → <code>VARCHAR(255)</code>。</span></div>
+<div class="keyhint"><span class="k">国际化字符类型</span><span>数据库通常整库或整表设一个合理的（UTF-8）字符集。需要更细控制、想切到国家化变体（<code>NVARCHAR</code>、<code>NCHAR</code>、<code>NCLOB</code>）时，用 <code>@org.hibernate.annotations.Nationalized</code>。</span></div>
+<div class="keyhint"><span class="k">遗留库 / 类型系统受限的 DBMS</span><span>Oracle <b>连真值类型都没有</b>（而这是关系模型唯一要求的类型）。许多既有 Oracle schema 用 Y/N 或 T/F 字符表示布尔值；Hibernate 的 Oracle 方言默认期待并生成 <code>NUMBER(1,0)</code> 列。</span></div>
+
+<h4>日期与时间类型</h4>
+<div class="tablewrap"><table>
+<thead><tr><th>Hibernate 名</th><th>Java 类型</th><th>ANSI SQL</th><th>Hibernate 名</th><th>Java 类型</th><th>ANSI SQL</th></tr></thead>
+<tbody>
+<tr><td><code>date</code></td><td><code>java.util.Date</code>, <code>java.sql.Date</code></td><td>DATE</td><td><code>instant</code></td><td><code>java.time.Instant</code></td><td>TIMESTAMP</td></tr>
+<tr><td><code>time</code></td><td><code>java.util.Date</code>, <code>java.sql.Time</code></td><td>TIME</td><td><code>localdatetime</code></td><td><code>LocalDateTime</code></td><td>TIMESTAMP</td></tr>
+<tr><td><code>timestamp</code></td><td><code>java.util.Date</code>, <code>Timestamp</code></td><td>TIMESTAMP</td><td><code>localdate</code></td><td><code>LocalDate</code></td><td>DATE</td></tr>
+<tr><td><code>calendar</code></td><td><code>java.util.Calendar</code></td><td>TIMESTAMP</td><td><code>localtime</code></td><td><code>LocalTime</code></td><td>TIME</td></tr>
+<tr><td><code>calendar_date</code></td><td><code>java.util.Calendar</code></td><td>DATE</td><td><code>offsetdatetime</code></td><td><code>OffsetDateTime</code></td><td>TIMESTAMP</td></tr>
+<tr><td><code>duration</code></td><td><code>java.time.Duration</code></td><td>BIGINT</td><td><code>offsettime</code> / <code>zoneddatetime</code></td><td><code>OffsetTime</code> / <code>ZonedDateTime</code></td><td>TIME / TIMESTAMP</td></tr>
+</tbody></table></div>
+
+<div class="pit"><b><code>java.util.Date</code> 的经典大坑</b>
+<p><b>存进去的是 <code>java.util.Date</code>，加载回来的不是。</b>Hibernate 会按映射的 <code>TemporalType</code> 返回 <code>java.sql.Date</code>、<code>java.sql.Time</code> 或 <code>java.sql.Timestamp</code>。</p>
+<p style="margin-top:6px"><b>为什么</b>：数据库类型精度更高。<code>java.util.Date</code> 是毫秒精度，而 <code>java.sql.Timestamp</code> 包含数据库里可能存在的<b>纳秒</b>信息。Hibernate 不会为了塞进 <code>java.util.Date</code> 而截掉这部分信息 —— 于是用 <code>equals()</code> 比较 <code>java.util.Date</code> 时会出问题：<b>它与 <code>java.sql.Timestamp</code> 子类的 <code>equals()</code> 不对称</b>。</p>
+<p style="margin-top:6px"><b>解法</b>（与 Hibernate 无关的通用建议）：<b>不要调 <code>aDate.equals(bDate)</code></b>。用 Unix 毫秒比较，例如 <code>aDate.getTime() &gt; bDate.getTime()</code>。<b>但要小心：<code>HashSet</code> 这类集合内部也会调 <code>equals()</code> —— 千万别在同一个集合里混放 <code>java.util.Date</code> 与 <code>java.sql.Date|Time|Timestamp</code>。</b></p>
+<p style="margin-top:6px"><code>Calendar</code> 属性没有这个问题（存 <code>Calendar</code> 就返回 <code>Calendar</code>，由 <code>Calendar.getInstance()</code> 创建，实际类型取决于 locale 和时区）。<b>而只要你改用 Java 8 的 <code>LocalDate</code>/<code>LocalTime</code>/<code>LocalDateTime</code>，这些烦恼全部消失。</b></p></div>
+
+<h4>二进制与大值类型</h4>
+<div class="tablewrap"><table>
+<thead><tr><th>Hibernate 名</th><th>Java 类型</th><th>ANSI SQL</th><th>备注</th></tr></thead>
+<tbody>
+<tr><td><code>binary</code></td><td><code>byte[]</code>, <code>Byte[]</code></td><td>VARBINARY</td><td><b>只有它能作标识符属性的类型</b>；实际类型看方言：PostgreSQL <code>BYTEA</code>、Oracle <code>RAW</code>（长度≥2000 用 <code>LONG RAW</code>）、MySQL 默认 <code>TINYBLOB</code>（按 length 可为 BLOB/MEDIUMBLOB/LONGBLOB）</td></tr>
+<tr><td><code>text</code></td><td><code>String</code></td><td>CLOB</td><td></td></tr>
+<tr><td><code>clob</code></td><td><code>java.sql.Clob</code></td><td>CLOB</td><td>Character Large Object</td></tr>
+<tr><td><code>blob</code></td><td><code>java.sql.Blob</code></td><td>BLOB</td><td>Binary Large Object</td></tr>
+<tr><td><code>serializable</code></td><td><code>java.io.Serializable</code></td><td>VARBINARY</td><td>兜底的序列化回退</td></tr>
+</tbody></table></div>
+
+<div class="cols">
+<div>
+<div class="filename">@Lob 的便捷写法 —— 但<b>没有懒加载</b></div>
+<pre><code><span class="ann">@Entity</span>
+<span class="kw">public class</span> Item {
+    <span class="ann">@Lob</span> <span class="kw">private byte</span>[] image;      <span class="cmt">// → BLOB</span>
+    <span class="ann">@Lob</span> <span class="kw">private</span> String description; <span class="cmt">// → CLOB</span>
+}</code></pre>
+<p style="font-size:14px">要懒加载得靠<b>编译后字节码增强</b>注入拦截代码（§12.1.2）。</p>
+</div>
+<div>
+<div class="filename">改用 JDBC LOB 类型 —— <b>免字节码增强的懒加载</b></div>
+<pre><code><span class="ann">@Entity</span>
+<span class="kw">public class</span> Item {
+    <span class="ann">@Lob</span> <span class="kw">private</span> java.sql.Blob imageBlob;
+    <span class="ann">@Lob</span> <span class="kw">private</span> java.sql.Clob description;
+}</code></pre>
+<p style="font-size:14px">代价：<b>领域模型被绑定到 JDBC</b>，单元测试里没有数据库连接就访问不了 LOB 属性。</p>
+</div>
+</div>
+
+<pre><code><span class="cmt">// 拥有者实体加载时，属性值只是个占位符；在同一事务内访问它才真正物化，甚至可直接流式传输</span>
+Item item = em.find(Item.class, ITEM_ID);
+InputStream imageDataStream = item.getImageBlob().getBinaryStream();     <span class="cmt">// 直接流式读取字节</span>
+ByteArrayOutputStream outStream = <span class="kw">new</span> ByteArrayOutputStream();
+StreamUtils.copy(imageDataStream, outStream);                           <span class="cmt">// org.springframework.util.StreamUtils</span>
+<span class="kw">byte</span>[] imageBytes = outStream.toByteArray();                            <span class="cmt">// 或物化进内存</span>
+
+<span class="cmt">// 创建并设置 Blob：从 InputStream 直接读 byteLength 个字节写入数据库，不占临时内存</span>
+Session session = em.unwrap(Session.class);        <span class="cmt">// 需要原生 Hibernate API</span>
+Blob blob = session.getLobHelper().createBlob(imageInputStream, byteLength);
+someItem.setImageBlob(blob);
+em.persist(someItem);</code></pre>
+
+<h4>显式选择类型适配器</h4>
+<div class="cols">
+<div>
+<pre><code><span class="ann">@Entity</span>
+<span class="kw">public class</span> Item {
+    <span class="ann">@org.hibernate.annotations.Type</span>(type = <span class="str">"yes_no"</span>)
+    <span class="kw">private boolean</span> verified = <span class="kw">false</span>;
+}
+<span class="cmt">// 不再映射到 BIT，而是取值 Y / N 的 CHAR 列</span></code></pre>
+</div>
+<div>
+<pre><code><span class="cmt">// 在 Hibernate 引导配置里<b>全局</b>覆盖某个适配器</span>
+metaBuilder.applyBasicType(
+    <span class="kw">new</span> MyUserType(), <span class="kw">new</span> String[]{<span class="str">"date"</span>});
+<span class="cmt">// 从此所有 java.util.Date 属性的值转换
+// 都委托给这个自定义实现</span></code></pre>
+</div>
+</div>
+
+<h3 id="s32">6.3.2　创建自定义 JPA 转换器</h3>
+
+<div class="note"><b>业务背景（一个贯穿三节的演进故事）</b><p>在线拍卖系统要支持<b>多币种</b>。这类改动很复杂：要改 schema、可能要迁移数据、还要更新所有访问该库的应用。本节展示 JPA 转换器与 Hibernate 可扩展类型系统如何在这个过程中<b>充当缓冲</b>。</p></div>
+
+<div class="filename">Ch06/mapping-value-types2/…/ch06/model/MonetaryAmount.java</div>
+<pre><code><span class="kw">public class</span> MonetaryAmount <span class="kw">implements</span> Serializable {   <span class="cmt">❶ 见下方说明</span>
+    <span class="kw">private final</span> BigDecimal value;
+    <span class="kw">private final</span> Currency currency;
+
+    <span class="kw">public</span> MonetaryAmount(BigDecimal value, Currency currency) { … }
+    <span class="kw">public</span> BigDecimal getValue()   { <span class="kw">return</span> value; }
+    <span class="kw">public</span> Currency   getCurrency(){ <span class="kw">return</span> currency; }
+
+    <span class="ann">@Override</span> <span class="kw">public boolean</span> equals(Object o) { … }   <span class="cmt">❷ 「按值」比较金额</span>
+    <span class="ann">@Override</span> <span class="kw">public int</span> hashCode() { <span class="kw">return</span> Objects.hash(value, currency); }
+
+    <span class="kw">public</span> String toString() { <span class="kw">return</span> value + <span class="str">" "</span> + currency; }        <span class="cmt">❸</span>
+
+    <span class="kw">public static</span> MonetaryAmount fromString(String s) {              <span class="cmt">❹ 静态工厂</span>
+        String[] split = s.split(<span class="str">" "</span>);
+        <span class="kw">return new</span> MonetaryAmount(<span class="kw">new</span> BigDecimal(split[0]),
+                                  Currency.getInstance(split[1]));
+    }
+}</code></pre>
+
+<div class="tip"><b>❶ 为什么值类型类应实现 <code>Serializable</code></b><p>Hibernate 把实体实例数据存入<b>共享二级缓存</b>时会<b>拆解（disassemble）</b>实体状态。若实体有 <code>MonetaryAmount</code> 属性，缓存区里存的是该属性值的<b>序列化表示</b>；从缓存区取回实体数据时再<b>反序列化并重新组装</b>。</p></div>
+
+<h4>第一步：DBA 只能改列类型 → 用 <code>AttributeConverter</code></h4>
+<p>把 <code>BUYNOWPRICE</code> 存进 <code>ITEM</code> 表的一个 <code>VARCHAR</code> 列，把币种代码<b>拼在金额字符串后面</b>，例如 <code>11.23 USD</code> 或 <code>99 EUR</code>。</p>
+
+<div class="cols">
+<div>
+<div class="filename">…/ch06/model/Item.java</div>
+<pre><code><span class="ann">@NotNull</span>
+<span class="ann">@Convert</span>(converter = MonetaryAmountConverter.class)
+<span class="ann">@Column</span>(name = <span class="str">"PRICE"</span>, length = 63)
+<span class="kw">private</span> MonetaryAmount buyNowPrice;</code></pre>
+</div>
+<div>
+<div class="filename">…/ch06/converter/MonetaryAmountConverter.java</div>
+<pre><code><span class="ann">@Converter</span>
+<span class="kw">public class</span> MonetaryAmountConverter
+  <span class="kw">implements</span> AttributeConverter&lt;MonetaryAmount, String&gt; {
+
+    <span class="ann">@Override</span>
+    <span class="kw">public</span> String convertToDatabaseColumn(MonetaryAmount m) {
+        <span class="kw">return</span> m.toString();
+    }
+    <span class="ann">@Override</span>
+    <span class="kw">public</span> MonetaryAmount convertToEntityAttribute(String s) {
+        <span class="kw">return</span> MonetaryAmount.fromString(s);
+    }
+}</code></pre>
+</div>
+</div>
+<p><code>AttributeConverter</code> 的两个泛型参数分别是 <b>Java 属性类型</b>和 <b>schema 中的类型</b>；类必须标 <code>@Converter</code>。</p>
+
+<div class="tip"><b>缓冲的价值体现在这里</b><p>日后 DBA 升级 schema、为金额和币种提供独立的列时，<b>只需改几处</b>：把 <code>MonetaryAmountConverter</code> 从项目里去掉，把 <code>MonetaryAmount</code> 变成 <code>@Embeddable</code>，它就自动映射到两列。而且<b>选择性地启停转换器也很容易</b> —— 万一 schema 里有些表还没升级。</p></div>
+
+<h4>把转换器用在组件的属性上</h4>
+<p>继续细粒度化：给 <code>Zipcode</code> 引入继承（德国邮编 5 位，瑞士 4 位）。</p>
+
+<figure><div class="fig-box">
+<svg viewBox="0 0 780 220" xmlns="http://www.w3.org/2000/svg" font-family="Inter,system-ui,sans-serif">
+  <defs><marker id="z6" markerWidth="13" markerHeight="13" refX="12" refY="6.5" orient="auto"><path d="M0 0 L13 6.5 L0 13 z" fill="var(--bg)" stroke="var(--java)" stroke-width="1.2"/></marker></defs>
+  <rect x="30" y="40" width="150" height="66" rx="7" fill="var(--sql-soft)" stroke="var(--sql)" stroke-width="1.6"/>
+  <text x="105" y="60" text-anchor="middle" font-size="12.5" font-weight="700" fill="var(--ink)">Address</text>
+  <line x1="30" y1="68" x2="180" y2="68" stroke="var(--sql)"/>
+  <text x="42" y="86" font-size="11" fill="var(--ink-soft)">street : String</text>
+  <text x="42" y="102" font-size="11" fill="var(--ink-soft)">city : String</text>
+
+  <line x1="182" y1="72" x2="288" y2="72" stroke="var(--sql)" stroke-width="1.5"/>
+  <rect x="290" y="40" width="150" height="50" rx="7" fill="var(--panel)" stroke="var(--java)" stroke-width="1.8" stroke-dasharray="6 3"/>
+  <text x="365" y="60" text-anchor="middle" font-size="12.5" font-style="italic" font-weight="700" fill="var(--ink)">Zipcode</text>
+  <line x1="290" y1="68" x2="440" y2="68" stroke="var(--java)"/>
+  <text x="302" y="84" font-size="11" fill="var(--ink-soft)">value : String</text>
+
+  <path d="M330 150 L330 116 L365 116 L365 92" fill="none" stroke="var(--java)" stroke-width="1.5" marker-end="url(#z6)"/>
+  <path d="M470 150 L470 116 L365 116" fill="none" stroke="var(--java)" stroke-width="1.5"/>
+  <rect x="255" y="152" width="150" height="40" rx="7" fill="var(--java-soft)" stroke="var(--java)"/>
+  <text x="330" y="177" text-anchor="middle" font-size="12.5" font-weight="700" fill="var(--ink)">GermanZipcode</text>
+  <rect x="395" y="152" width="150" height="40" rx="7" fill="var(--java-soft)" stroke="var(--java)"/>
+  <text x="470" y="177" text-anchor="middle" font-size="12.5" font-weight="700" fill="var(--ink)">SwissZipcode</text>
+
+  <rect x="560" y="40" width="200" height="152" rx="8" fill="var(--accent-soft)" stroke="var(--accent)"/>
+  <text x="660" y="62" text-anchor="middle" font-size="12.5" font-weight="700" fill="var(--accent)">转换器承担类型判别</text>
+  <text x="578" y="86" font-size="11.5" fill="var(--ink)">长度 5 → GermanZipcode</text>
+  <text x="578" y="106" font-size="11.5" fill="var(--ink)">长度 4 → SwissZipcode</text>
+  <text x="578" y="126" font-size="11.5" fill="var(--danger)">其他 → 抛异常</text>
+  <text x="578" y="154" font-size="11" fill="var(--ink-soft)">这是<tspan font-weight="700">自定义的类型判别</tspan></text>
+  <text x="578" y="170" font-size="11" fill="var(--ink-soft)">例程：由你决定给定值</text>
+  <text x="578" y="186" font-size="11" fill="var(--ink-soft)">应该变成哪个 Java 类型</text>
+</svg>
+</div><figcaption>图 6-5　抽象 <code>Zipcode</code> 与两个具体子类，转换器负责在加载时挑类型</figcaption></figure>
+
+<div class="cols">
+<div>
+<div class="filename">…/ch06/converter/ZipcodeConverter.java</div>
+<pre><code><span class="ann">@Converter</span>
+<span class="kw">public class</span> ZipcodeConverter
+    <span class="kw">implements</span> AttributeConverter&lt;Zipcode, String&gt; {
+
+    <span class="ann">@Override</span>
+    <span class="kw">public</span> String convertToDatabaseColumn(Zipcode a) {
+        <span class="kw">return</span> a.getValue();
+    }
+
+    <span class="ann">@Override</span>
+    <span class="kw">public</span> Zipcode convertToEntityAttribute(String s) {
+        <span class="kw">if</span> (s.length() == 5) <span class="kw">return new</span> GermanZipcode(s);
+        <span class="kw">else if</span> (s.length() == 4) <span class="kw">return new</span> SwissZipcode(s);
+        <span class="kw">throw new</span> IllegalArgumentException(
+            <span class="str">"Unsupported zipcode in database: "</span> + s);
+    }
+}</code></pre>
+</div>
+<div>
+<div class="filename">…/ch06/model/User.java　—— 用 attributeName 指路</div>
+<pre><code><span class="ann">@Entity</span>
+<span class="ann">@Table</span>(name = <span class="str">"USERS"</span>)
+<span class="kw">public class</span> User {
+    <span class="ann">@Convert</span>(
+        converter = ZipcodeConverter.class,
+        attributeName = <span class="str">"city.zipcode"</span>   <span class="cmt">// 点号路径</span>
+    )
+    <span class="kw">private</span> Address homeAddress;
+}</code></pre>
+<p style="font-size:14px"><code>zipcode</code> 不是 <code>Address</code> 的属性、而是嵌套的 <code>City</code> 的属性，所以写成嵌套路径 <code>city.zipcode</code>。<b>JPA 2.2 起</b>可以在同一个嵌入属性上叠加多个 <code>@Convert</code>；<b>JPA 2.1 及以前</b>必须用一个 <code>@Converts</code> 包起来。</p>
+</div>
+</div>
+
+<h4>用在集合与 Map 上的 <code>attributeName</code> 语法</h4>
+<div class="tablewrap"><table>
+<thead><tr><th style="width:250px">持久化属性</th><th>要转换的目标</th><th><code>attributeName</code></th></tr></thead>
+<tbody>
+<tr><td><code>Map&lt;Address, String&gt;</code></td><td>每个 map <b>键</b>的 zipcode 属性</td><td><code>key.zipcode</code></td></tr>
+<tr><td><code>Map&lt;String, Address&gt;</code></td><td>每个 map <b>值</b>的 zipcode 属性</td><td><code>value.zipcode</code></td></tr>
+<tr><td><code>Map&lt;Zipcode, String&gt;</code></td><td>每个条目的<b>键本身</b></td><td><code>key</code></td></tr>
+<tr><td><code>Map&lt;String, Zipcode&gt;</code></td><td>每个条目的<b>值本身</b></td><td><b>不设</b> attributeName</td></tr>
+</tbody></table></div>
+<p>嵌套时同样可写点号路径，如 <code>key.city.zipcode</code>。转换器也能用在集合的值上（如持久化的 <code>Set&lt;Zipcode&gt;</code>，配合 <code>@ElementCollection</code>，见第 8 章）。</p>
+
+<div class="pit"><b>JPA 转换器的限制</b>
+<ul style="margin-bottom:0">
+<li><b>不能</b>用在实体的<b>标识符</b>或<b>版本</b>属性上。</li>
+<li><b>不该</b>用在标了 <code>@Enumerated</code> 或 <code>@Temporal</code> 的属性上 —— 这些注解已经声明了该做何种转换。想为枚举或日期时间属性写自定义转换器，就<b>不要</b>再标这两个注解。</li>
+<li><b>不支持多列</b>转换。</li>
+<li><b>不与查询引擎集成</b>：写不出 <code>select i from Item i where i.buyNowPrice.amount &gt; 100</code> —— Hibernate 知道怎么把 <code>MonetaryAmount</code> 与字符串互转，却<b>不知道它有个 amount 属性</b>，因此无法解析这种查询。</li>
+</ul></div>
+
+<h3 id="s33">6.3.3　用 Hibernate UserType 扩展</h3>
+
+<div class="note"><b>业务背景第三幕</b><p>DBA 终于加了列：<code>ITEM</code> 表现在有 <code>BUYNOWPRICE_AMOUNT</code> / <code>BUYNOWPRICE_CURRENCY</code>，以及 <code>INITIALPRICE_AMOUNT</code> / <code>INITIALPRICE_CURRENCY</code>。<b>但还有一个附加要求</b>：因为还有别的老应用访问这个库，<b>存库前必须把每个金额换算成目标币种</b> —— <code>buyNowPrice</code> 存美元，<code>initialPrice</code> 存欧元。</p>
+<p style="margin-top:6px">「如果这个例子看着牵强，我们向你保证：真实世界里更糟的都有。共享数据库 schema 的演进代价高昂但必然，因为<b>数据总比应用活得久</b>。」</p></div>
+
+<h4><code>org.hibernate.usertype</code> 包里的扩展接口</h4>
+<div class="tablewrap"><table>
+<thead><tr><th style="width:220px">接口</th><th>能力</th></tr></thead>
+<tbody>
+<tr><td><code>UserType</code></td><td>直接与 JDBC 交互来转换值：存数据用 <code>PreparedStatement</code>，读数据用 <code>ResultSet</code>。还能控制 Hibernate <b>如何缓存与脏检查</b>这些值</td></tr>
+<tr><td><code>CompositeUserType</code></td><td>告诉 Hibernate <code>MonetaryAmount</code> 有 <code>amount</code> 和 <code>currency</code> 两个属性，于是<b>查询里能用点号引用</b>：<code>select avg(i.buyNowPrice.amount) from Item i</code></td></tr>
+<tr><td><code>ParameterizedType</code></td><td>在映射中给适配器传设置。<b>只写一个适配器，在映射属性时定制其行为</b>（有的映射转美元、有的转欧元）</td></tr>
+<tr><td><code>DynamicParameterizedType</code></td><td>更强的设置 API，能拿到<b>动态信息</b>（如映射的列名和表名）。<b>没有额外成本或复杂度，不妨直接用它代替 <code>ParameterizedType</code></b></td></tr>
+<tr><td><code>EnhancedUserType</code></td><td>可选接口，用于<b>标识符属性和判别列</b>的适配器。与 JPA 转换器不同，Hibernate 的 <code>UserType</code> <b>可以适配任何实体属性</b></td></tr>
+<tr><td><code>UserVersionType</code></td><td>可选接口，用于<b>版本属性</b>的适配器</td></tr>
+<tr><td><code>UserCollectionType</code></td><td>很少用。实现自定义集合时需要 —— 比如持久化非 JDK 集合（Guava 的 <code>Multiset</code>、<code>Multimap</code>、<code>BiMap</code>、<code>Table</code> 等）并保留其额外语义</td></tr>
+</tbody></table></div>
+
+<div class="filename">Ch06/mapping-value-types4/…/ch06/converter/MonetaryAmountUserType.java（结构与要点）</div>
+<pre><code><span class="kw">public class</span> MonetaryAmountUserType
+        <span class="kw">implements</span> CompositeUserType, DynamicParameterizedType {
+
+    <span class="kw">private</span> Currency convertTo;                                   <span class="cmt">// 目标币种</span>
+
+    <span class="kw">public void</span> setParameterValues(Properties parameters) {       <span class="cmt">// 来自 DynamicParameterizedType</span>
+        String p = parameters.getProperty(<span class="str">"convertTo"</span>);
+        <span class="kw">this</span>.convertTo = Currency.getInstance(p != <span class="kw">null</span> ? p : <span class="str">"USD"</span>);  <span class="cmt">// 未设置则默认美元</span>
+    }
+
+    <span class="kw">public</span> Class returnedClass() { <span class="kw">return</span> MonetaryAmount.class; }   <span class="cmt">// 适配的类</span>
+    <span class="kw">public boolean</span> isMutable() { <span class="kw">return false</span>; }                   <span class="cmt">// 知道它不可变 → Hibernate 可优化</span>
+    <span class="kw">public</span> Object deepCopy(Object value) { <span class="kw">return</span> value; }        <span class="cmt">// 不可变类直接返回原实例</span>
+
+    <span class="kw">public</span> Serializable disassemble(Object v, …) { <span class="kw">return</span> v.toString(); }  <span class="cmt">// 存入二级缓存时</span>
+    <span class="kw">public</span> Object assemble(Serializable cached, …) {                        <span class="cmt">// 从二级缓存读回时</span>
+        <span class="kw">return</span> MonetaryAmount.fromString((String) cached); }
+    <span class="kw">public</span> Object replace(Object original, …) { <span class="kw">return</span> original; }        <span class="cmt">// merge() 期间调用</span>
+
+    <span class="kw">public boolean</span> equals(Object x, Object y) { … }   <span class="cmt">// 用<b>值相等</b>判断是否变脏、要不要 UPDATE</span>
+    <span class="kw">public int</span> hashCode(Object x) { <span class="kw">return</span> x.hashCode(); }
+
+    <span class="kw">public</span> Object nullSafeGet(ResultSet rs, String[] names, …) <span class="kw">throws</span> SQLException {
+        BigDecimal amount = rs.getBigDecimal(names[0]);
+        <span class="kw">if</span> (rs.wasNull()) <span class="kw">return null</span>;
+        Currency currency = Currency.getInstance(rs.getString(names[1]));
+        <span class="kw">return new</span> MonetaryAmount(amount, currency);
+    }
+
+    <span class="kw">public void</span> nullSafeSet(PreparedStatement st, Object value, <span class="kw">int</span> index, …) <span class="kw">throws</span> SQLException {
+        <span class="kw">if</span> (value == <span class="kw">null</span>) {
+            st.setNull(index,     StandardBasicTypes.BIG_DECIMAL.sqlType());
+            st.setNull(index + 1, StandardBasicTypes.CURRENCY.sqlType());
+        } <span class="kw">else</span> {
+            MonetaryAmount dbAmount = convert((MonetaryAmount) value, convertTo);  <span class="cmt">// 换算到目标币种</span>
+            st.setBigDecimal(index,     dbAmount.getValue());
+            st.setString(index + 1, convertTo.getCurrencyCode());
+        }
+    }
+
+    <span class="kw">public</span> MonetaryAmount convert(MonetaryAmount a, Currency to) {   <span class="cmt">// 不是 UserType API 的方法</span>
+        <span class="kw">return new</span> MonetaryAmount(a.getValue().multiply(<span class="kw">new</span> BigDecimal(2)), to);
+        <span class="cmt">// ↑ 例子里简单地<b>翻倍</b>，方便验证转换是否生效；真实应用要换成真正的汇率换算</span>
+    }
+
+    <span class="cmt">// 下面这几个来自 CompositeUserType —— 正是它们让查询引擎认识 MonetaryAmount 的内部属性</span>
+    <span class="kw">public</span> String[] getPropertyNames() { <span class="kw">return new</span> String[]{<span class="str">"value"</span>, <span class="str">"currency"</span>}; }
+    <span class="kw">public</span> Type[] getPropertyTypes()  { <span class="kw">return new</span> Type[]{
+            StandardBasicTypes.BIG_DECIMAL, StandardBasicTypes.CURRENCY}; }
+    <span class="kw">public</span> Object getPropertyValue(Object c, <span class="kw">int</span> property) { … }
+    <span class="kw">public void</span> setPropertyValue(Object c, <span class="kw">int</span> p, Object v) {
+        <span class="kw">throw new</span> UnsupportedOperationException(<span class="str">"MonetaryAmount is immutable"</span>);
+    }
+}</code></pre>
+
+<h4>用类型定义（type definition）把适配器和参数打包</h4>
+
+<div class="filename">Ch06/mapping-value-types4/…/ch06/converter/package-info.java</div>
+<pre><code><span class="ann">@org.hibernate.annotations.TypeDefs</span>({
+    <span class="ann">@org.hibernate.annotations.TypeDef</span>(
+        name = <span class="str">"monetary_amount_usd"</span>,
+        typeClass = MonetaryAmountUserType.class,
+        parameters = {<span class="ann">@Parameter</span>(name = <span class="str">"convertTo"</span>, value = <span class="str">"USD"</span>)}),
+    <span class="ann">@org.hibernate.annotations.TypeDef</span>(
+        name = <span class="str">"monetary_amount_eur"</span>,
+        typeClass = MonetaryAmountUserType.class,
+        parameters = {<span class="ann">@Parameter</span>(name = <span class="str">"convertTo"</span>, value = <span class="str">"EUR"</span>)})
+})
+<span class="kw">package</span> com.manning.javapersistence.ch06.converter;
+<span class="kw">import</span> org.hibernate.annotations.Parameter;</code></pre>
+
+<div class="filename">Ch06/mapping-value-types4/…/ch06/model/Item.java</div>
+<pre><code><span class="ann">@Entity</span>
+<span class="kw">public class</span> Item {
+    <span class="ann">@NotNull</span>
+    <span class="ann">@org.hibernate.annotations.Type</span>(type = <span class="str">"monetary_amount_usd"</span>)
+    <span class="ann">@org.hibernate.annotations.Columns</span>(columns = {          <span class="cmt">← 注意注解顺序很重要！</span>
+        <span class="ann">@Column</span>(name = <span class="str">"BUYNOWPRICE_AMOUNT"</span>),
+        <span class="ann">@Column</span>(name = <span class="str">"BUYNOWPRICE_CURRENCY"</span>, length = 3)
+    })
+    <span class="kw">private</span> MonetaryAmount buyNowPrice;
+
+    <span class="ann">@NotNull</span>
+    <span class="ann">@org.hibernate.annotations.Type</span>(type = <span class="str">"monetary_amount_eur"</span>)
+    <span class="ann">@org.hibernate.annotations.Columns</span>(columns = {
+        <span class="ann">@Column</span>(name = <span class="str">"INITIALPRICE_AMOUNT"</span>),
+        <span class="ann">@Column</span>(name = <span class="str">"INITIALPRICE_CURRENCY"</span>, length = 3)
+    })
+    <span class="kw">private</span> MonetaryAmount initialPrice;
+}</code></pre>
+
+<div class="pit"><b>三点必须注意</b>
+<ol style="margin-bottom:0">
+<li><code>UserType</code> 若只转换<b>单列</b>，不需要 <code>@Column</code>。<code>MonetaryAmountUserType</code> 访问<b>两列</b>，所以必须显式声明两列。</li>
+<li>JPA <b>不支持</b>在单个属性上写多个 <code>@Column</code>，所以要用私有的 <code>@org.hibernate.annotations.Columns</code> 分组。</li>
+<li><b>注解的顺序现在很重要！</b>回看 <code>MonetaryAmountUserType</code>：很多操作依赖<b>数组的下标访问</b>。访问 <code>PreparedStatement</code> / <code>ResultSet</code> 的顺序，就是映射中声明列的顺序。</li>
+</ol>
+<p style="margin-top:8px">另外：<b>选 <code>UserType</code> 还是 <code>CompositeUserType</code>，与列数无关</b> —— 只取决于你是否想把值类型的属性暴露给查询。</p></div>
+
+<div class="cols">
+<div>
+<div class="filename">测试代码要跟着改（因为 convert 把值翻倍了）</div>
+<pre><code>item.setBuyNowPrice(<span class="kw">new</span> MonetaryAmount(
+    BigDecimal.valueOf(1.1), Currency.getInstance(<span class="str">"USD"</span>)));</code></pre>
+</div>
+<div>
+<div class="filename">断言</div>
+<pre><code><span class="cmt">// 旧：assertEquals("1.1 USD", …getBuyNowPrice().toString())</span>
+() -&gt; assertEquals(<span class="hl">"2.20 USD"</span>, items.get(0).getBuyNowPrice().toString())
+
+<span class="cmt">// 旧：assertEquals(new BigDecimal("1.00"), …getInitialPrice())</span>
+() -&gt; assertEquals(<span class="hl">"2.00 EUR"</span>, items.get(0).getInitialPrice().toString())</code></pre>
+</div>
+</div>
+
+<div class="summary" id="s4">
+<h3>本章小结</h3>
+<ul>
+<li>可以映射实体类的<b>基本属性</b>与<b>嵌入属性</b>。</li>
+<li>可以覆盖基本映射、改列名，使用<b>派生属性</b>（<code>@Formula</code>）、<b>默认值</b>（<code>@ColumnDefault</code>+<code>@Generated</code>）、<b>时间属性</b>与<b>枚举属性</b>，并为之编写测试。</li>
+<li>可以实现<b>可嵌入组件类</b>，构建细粒度领域模型；用 <code>@AttributeOverride</code> 在同一张表里放多份组件。</li>
+<li>组合中多个 Java 类（如 <code>Address</code> 和 <code>City</code>）的属性可以<b>全部映射到一张实体表</b>，无论嵌套多深。</li>
+<li>任何 JPA 提供者都支持一组最小的 Java↔SQL 类型转换，Hibernate 还提供额外适配器；用 <code>@org.hibernate.annotations.Type</code> 显式选择，或在引导配置里全局覆盖。</li>
+<li>可以用标准 JPA 扩展接口写<b>自定义类型转换器</b>（<code>AttributeConverter</code>，如 <code>MonetaryAmount</code>），也可以用原生的 <b>Hibernate <code>UserType</code> API</b> 写低层适配器 —— 后者支持<b>多列</b>并能<b>集成查询引擎</b>。</li>
+</ul>
+</div>
+
+<div class="pager">
+  <a href="ch05.html">← 第 5 章　映射持久化类</a>
+  <a href="ch07.html">第 7 章　映射继承 →</a>
+</div>
+</main>
+</div>
+</body>
+</html>

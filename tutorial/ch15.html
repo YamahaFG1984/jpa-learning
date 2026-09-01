@@ -1,0 +1,955 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>第 15 章 · 使用 Spring Data JDBC</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="topbar"><div class="topbar-inner">
+  <a class="brand" href="index.html">Java Persistence 讲义</a>
+  <span class="spacer"></span>
+  <a href="ch14.html">← 上一章</a>
+  <a href="index.html">目录</a>
+  <a href="ch16.html">下一章 →</a>
+</div></div>
+
+<div class="wrap">
+<nav class="toc">
+  <h4>本章目录</h4>
+  <a href="#s0">为什么还需要它</a>
+  <a href="#s1">15.1 创建项目</a>
+  <a class="sub" href="#s11">依赖与配置</a>
+  <a class="sub" href="#s12">schema.sql 与实体</a>
+  <a class="sub" href="#s13">仓库与测试基类</a>
+  <a href="#s2">15.2 查询</a>
+  <a class="sub" href="#s21">查询构建器机制</a>
+  <a class="sub" href="#s22">限制结果、排序、分页</a>
+  <a class="sub" href="#s23">流式结果</a>
+  <a class="sub" href="#s24">@Query 与 @Modifying</a>
+  <a href="#s3">15.3 关系建模</a>
+  <a class="sub" href="#s31">一对一</a>
+  <a class="sub" href="#s32">嵌入式</a>
+  <a class="sub" href="#s33">一对多</a>
+  <a class="sub" href="#s34">多对多</a>
+  <a href="#s4">JPA vs JDBC 总表</a>
+  <a href="#s5">本章小结</a>
+</nav>
+
+<main>
+<div class="hero">
+  <div class="eyebrow">Part 4 · 用 Spring 构建持久化应用</div>
+  <h1>第 15 章　使用 Spring Data JDBC</h1>
+  <p>Spring Data JDBC 的目标是<b>高效地处理基于 JDBC 的仓库</b>。它是 Spring Data 家族里更年轻的成员，<b>不提供缓存、不提供延迟加载</b>，因而是一个更简单、也更受限的 ORM。本章从零搭一个 Spring Boot + Spring Data JDBC 项目，走一遍查询、分页、流式、修改型查询，最后把一对一 / 嵌入 / 一对多 / 多对多四种关系都建一遍模。</p>
+</div>
+
+<div class="note"><b>本章的六个源码工程</b><p>同一个 CaveatEmptor 用户模块会逐步演进六次：<code>Ch15/spring-data-jdbc</code>（骨架）→ <code>spring-data-jdbc2</code>（查询方法）→ <code>spring-data-jdbc3</code>（一对一）→ <code>spring-data-jdbc4</code>（嵌入）→ <code>spring-data-jdbc5</code>（一对多）→ <code>spring-data-jdbc6</code>（多对多）。运行前先执行 <code>Ch15/Ch15.sql</code>。</p></div>
+
+<h2 id="s0"><span class="num">15.0</span> 已经有 JPA 了，为什么还要 Spring Data JDBC？</h2>
+
+<p>前面 14 章你已经充分体会到：<b>对象/关系映射（ORM）会给项目带来复杂度</b>。持久化上下文、脏检查、一级缓存、代理、延迟加载、<code>LazyInitializationException</code>、n+1 查询⋯⋯这些机制在解决问题的同时也带来了心智负担。有时候我们只想<b>去掉这层复杂度</b>，但又不想放弃 Spring 带来的好处。</p>
+
+<p>那么退回到「老式 JDBC」呢？也不行——你得自己开关连接、自己处理异常，写一大堆样板服务代码。</p>
+
+<div class="cols">
+<div class="card"><h4>Spring Data JDBC 给你什么</h4>
+<ul>
+<li>沿用你已经熟悉的概念：<b>实体、仓库、<code>@Query</code></b></li>
+<li>自带一个（很轻的）ORM：对象 ↔ 表的映射仍然自动完成</li>
+<li>Spring Boot 自动配置、依赖注入、声明式事务照旧</li>
+<li>2.0 起提供<b>查询构建器机制</b>（按方法名派生查询）</li>
+</ul></div>
+<div class="card"><h4>Spring Data JDBC 不给你什么</h4>
+<ul>
+<li><b>不用 JPQL，只写原生 SQL</b> → 没有可移植性，换数据库要重写</li>
+<li>实体加载<b>要么全加载、要么不加载</b>（没有延迟加载）</li>
+<li><b>没有缓存</b></li>
+<li><b>没有 Session、没有脏检查</b>——必须显式 <code>save()</code></li>
+<li><b>不支持 schema 自动生成</b>——DDL 得你自己写自己跑</li>
+</ul></div>
+</div>
+
+<figure>
+<div class="fig-box">
+<svg viewBox="0 0 820 400" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Spring Data JPA 与 Spring Data JDBC 的栈对比">
+  <text x="200" y="24" text-anchor="middle" font-size="14" font-weight="700" fill="var(--ink)">Spring Data JPA</text>
+  <text x="620" y="24" text-anchor="middle" font-size="14" font-weight="700" fill="var(--ink)">Spring Data JDBC</text>
+
+  <!-- left stack -->
+  <rect x="60" y="42" width="280" height="42" rx="6" fill="var(--accent-soft)" stroke="var(--accent)"/>
+  <text x="200" y="68" text-anchor="middle" font-size="13" fill="var(--ink)">你的 Repository 接口</text>
+
+  <rect x="60" y="96" width="280" height="42" rx="6" fill="var(--java-soft)" stroke="var(--java)"/>
+  <text x="200" y="115" text-anchor="middle" font-size="12.5" fill="var(--ink)">Spring Data JPA</text>
+  <text x="200" y="131" text-anchor="middle" font-size="11" fill="var(--ink-soft)">查询派生 · JPQL · 分页</text>
+
+  <rect x="60" y="150" width="280" height="70" rx="6" fill="var(--java-soft)" stroke="var(--java)"/>
+  <text x="200" y="170" text-anchor="middle" font-size="12.5" fill="var(--ink)">JPA / Hibernate</text>
+  <text x="200" y="188" text-anchor="middle" font-size="11" fill="var(--ink-soft)">持久化上下文 · 一级缓存 · 脏检查</text>
+  <text x="200" y="204" text-anchor="middle" font-size="11" fill="var(--ink-soft)">代理 · 延迟加载 · 二级缓存 · DDL 生成</text>
+
+  <rect x="60" y="232" width="280" height="38" rx="6" fill="var(--sql-soft)" stroke="var(--sql)"/>
+  <text x="200" y="256" text-anchor="middle" font-size="12.5" fill="var(--ink)">JDBC 驱动</text>
+
+  <rect x="60" y="282" width="280" height="38" rx="6" fill="var(--panel)" stroke="var(--line-strong)"/>
+  <text x="200" y="306" text-anchor="middle" font-size="12.5" fill="var(--ink)">数据库</text>
+
+  <!-- right stack -->
+  <rect x="480" y="42" width="280" height="42" rx="6" fill="var(--accent-soft)" stroke="var(--accent)"/>
+  <text x="620" y="68" text-anchor="middle" font-size="13" fill="var(--ink)">你的 Repository 接口</text>
+
+  <rect x="480" y="96" width="280" height="124" rx="6" fill="var(--sql-soft)" stroke="var(--sql)"/>
+  <text x="620" y="118" text-anchor="middle" font-size="12.5" fill="var(--ink)">Spring Data JDBC</text>
+  <text x="620" y="138" text-anchor="middle" font-size="11" fill="var(--ink-soft)">查询派生（2.0+） · 原生 SQL · 分页</text>
+  <text x="620" y="156" text-anchor="middle" font-size="11" fill="var(--ink-soft)">轻量 ORM：行 ↔ 对象</text>
+  <text x="620" y="182" text-anchor="middle" font-size="11.5" fill="var(--danger)">✗ 无持久化上下文　✗ 无缓存</text>
+  <text x="620" y="200" text-anchor="middle" font-size="11.5" fill="var(--danger)">✗ 无延迟加载　✗ 无脏检查　✗ 无 DDL 生成</text>
+
+  <rect x="480" y="232" width="280" height="38" rx="6" fill="var(--sql-soft)" stroke="var(--sql)"/>
+  <text x="620" y="256" text-anchor="middle" font-size="12.5" fill="var(--ink)">JDBC 驱动</text>
+
+  <rect x="480" y="282" width="280" height="38" rx="6" fill="var(--panel)" stroke="var(--line-strong)"/>
+  <text x="620" y="306" text-anchor="middle" font-size="12.5" fill="var(--ink)">数据库</text>
+
+  <!-- middle annotation -->
+  <path d="M348 190 L472 158" stroke="var(--accent)" stroke-width="1.6" fill="none" stroke-dasharray="4 3"/>
+  <text x="410" y="182" text-anchor="middle" font-size="11" fill="var(--accent)">整层被压扁</text>
+
+  <text x="410" y="352" text-anchor="middle" font-size="12" fill="var(--ink-soft)">上层 API 几乎一样（都是 <tspan font-family="var(--mono)">CrudRepository</tspan>），差别全在中间那一层的厚度</text>
+  <text x="410" y="374" text-anchor="middle" font-size="12" fill="var(--ink-soft)">左边：可移植但复杂　　右边：简单但绑定数据库方言</text>
+</svg>
+</div>
+<figcaption>图 15-A　两条栈的厚度差异。Spring Data JDBC 把 JPA 那一整层「运行时魔法」拿掉了，换来简单，代价是可移植性和自动化。</figcaption>
+</figure>
+
+<h2 id="s1"><span class="num">15.1</span> 创建一个 Spring Data JDBC 项目</h2>
+
+<h3 id="s11">依赖与配置</h3>
+
+<p>用 <a href="https://start.spring.io/">Spring Initializr</a> 建一个 Spring Boot 项目，group 为 <code>com.manning.javapersistence</code>，artifact 为 <code>spring-data-jdbc</code>，勾选两个依赖：<b>Spring Data JDBC</b> 和 <b>MySQL Driver</b>。</p>
+
+<div class="filename">Ch15/spring-data-jdbc/pom.xml</div>
+<pre><code>&lt;dependencies&gt;
+   &lt;dependency&gt;
+      &lt;groupId&gt;org.springframework.boot&lt;/groupId&gt;
+      <span class="hl">&lt;artifactId&gt;spring-boot-starter-data-jdbc&lt;/artifactId&gt;</span>   <span class="cmt">&lt;!-- A --&gt;</span>
+   &lt;/dependency&gt;
+   &lt;dependency&gt;
+      &lt;groupId&gt;mysql&lt;/groupId&gt;
+      &lt;artifactId&gt;mysql-connector-java&lt;/artifactId&gt;              <span class="cmt">&lt;!-- B --&gt;</span>
+      &lt;scope&gt;runtime&lt;/scope&gt;
+   &lt;/dependency&gt;
+   &lt;dependency&gt;
+      &lt;groupId&gt;org.springframework.boot&lt;/groupId&gt;
+      &lt;artifactId&gt;spring-boot-starter-test&lt;/artifactId&gt;          <span class="cmt">&lt;!-- C --&gt;</span>
+      &lt;scope&gt;test&lt;/scope&gt;
+   &lt;/dependency&gt;
+&lt;/dependencies&gt;</code></pre>
+
+<div class="keyhint">
+<div><span class="k">A</span> Spring Boot 通过 Spring Data JDBC 连接关系数据库的 starter 依赖。</div>
+<div><span class="k">B</span> MySQL 的 JDBC 驱动。<code>runtime</code> 作用域：只在运行时需要出现在 classpath 上。</div>
+<div><span class="k">C</span> 测试 starter，只在测试编译与执行阶段需要。</div>
+</div>
+
+<div class="filename">Ch15/spring-data-jdbc/src/main/resources/application.properties</div>
+<pre><code>spring.datasource.url=jdbc:mysql://localhost:3306/CH15_SPRINGDATAJDBC?serverTimezone=UTC
+spring.datasource.username=root
+spring.datasource.password=
+spring.jpa.properties.hibernate.dialect=org.hibernate.dialect.MySQL8Dialect
+<span class="hl">spring.sql.init.mode=always</span></code></pre>
+
+<div class="pit"><b>为什么必须写 <code>spring.sql.init.mode=always</code></b><p>Spring Boot <b>默认只对内嵌数据库</b>（H2、HSQLDB 等）执行初始化脚本。我们用的是 MySQL，属于「非内嵌」，所以要把初始化模式强制设为 <code>always</code>，<code>schema.sql</code> 才会在每次启动时被执行、重建 schema。</p></div>
+
+<h3 id="s12">schema.sql 与实体类</h3>
+
+<p>启动时 Spring Boot 会执行 classpath 上的 <code>schema.sql</code> 和 <code>data.sql</code>。<b>因为 Spring Data JDBC 不生成 DDL，这个文件就是你的 schema 唯一来源。</b></p>
+
+<div class="filename">Ch15/spring-data-jdbc/src/main/resources/schema.sql</div>
+<pre><code><span class="kw">DROP TABLE IF EXISTS</span> USERS;
+
+<span class="kw">CREATE TABLE</span> USERS (
+   ID INTEGER AUTO_INCREMENT PRIMARY KEY,
+   USERNAME VARCHAR(30),
+   REGISTRATION_DATE DATE
+);</code></pre>
+
+<figure>
+<div class="fig-box">
+<svg viewBox="0 0 820 300" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Spring Boot 启动时的初始化顺序">
+  <rect x="30" y="40" width="150" height="56" rx="8" fill="var(--accent-soft)" stroke="var(--accent)"/>
+  <text x="105" y="63" text-anchor="middle" font-size="12" fill="var(--ink)">应用启动</text>
+  <text x="105" y="82" text-anchor="middle" font-size="11" fill="var(--ink-soft)">@SpringBootApplication</text>
+
+  <path d="M182 68 L228 68" stroke="var(--ink-faint)" stroke-width="1.6" marker-end="url(#a15)"/>
+  <defs><marker id="a15" markerWidth="9" markerHeight="9" refX="8" refY="4.5" orient="auto"><path d="M0 0 L9 4.5 L0 9 z" fill="var(--ink-faint)"/></marker></defs>
+
+  <rect x="230" y="40" width="180" height="56" rx="8" fill="var(--java-soft)" stroke="var(--java)"/>
+  <text x="320" y="63" text-anchor="middle" font-size="12" fill="var(--ink)">读 application.properties</text>
+  <text x="320" y="82" text-anchor="middle" font-size="11" fill="var(--ink-soft)">建 DataSource 连接池</text>
+
+  <path d="M412 68 L458 68" stroke="var(--ink-faint)" stroke-width="1.6" marker-end="url(#a15)"/>
+
+  <rect x="460" y="40" width="180" height="56" rx="8" fill="var(--sql-soft)" stroke="var(--sql)"/>
+  <text x="550" y="63" text-anchor="middle" font-size="12" fill="var(--ink)">执行 schema.sql</text>
+  <text x="550" y="82" text-anchor="middle" font-size="11" fill="var(--ink-soft)">（init.mode=always 才会跑）</text>
+
+  <path d="M642 68 L688 68" stroke="var(--ink-faint)" stroke-width="1.6" marker-end="url(#a15)"/>
+  <rect x="690" y="40" width="100" height="56" rx="8" fill="var(--sql-soft)" stroke="var(--sql)"/>
+  <text x="740" y="72" text-anchor="middle" font-size="12" fill="var(--ink)">data.sql</text>
+
+  <path d="M320 100 L320 140" stroke="var(--ink-faint)" stroke-width="1.6" marker-end="url(#a15)"/>
+  <rect x="180" y="144" width="280" height="60" rx="8" fill="var(--accent-soft)" stroke="var(--accent)"/>
+  <text x="320" y="167" text-anchor="middle" font-size="12" fill="var(--ink)">扫描包，为每个 Repository 接口</text>
+  <text x="320" y="186" text-anchor="middle" font-size="12" fill="var(--ink)">生成代理实现类并注册为 bean</text>
+
+  <rect x="30" y="230" width="760" height="52" rx="8" fill="var(--warn-soft)" stroke="var(--warn)"/>
+  <text x="410" y="252" text-anchor="middle" font-size="12" fill="var(--ink)">对比 JPA：Hibernate 会在这里根据实体<tspan font-weight="700">反向生成 DDL</tspan>（hbm2ddl.auto）。</text>
+  <text x="410" y="271" text-anchor="middle" font-size="12" fill="var(--ink)">Spring Data JDBC 没有这一步 —— schema.sql 是唯一权威，实体只负责「读写已有的表」。</text>
+</svg>
+</div>
+<figcaption>图 15-B　Spring Boot + Spring Data JDBC 的启动顺序。表结构先于实体存在，方向和 JPA 的 schema 生成正好相反。</figcaption>
+</figure>
+
+<p>实体类用的注解<b>全部来自 <code>org.springframework.data</code> 包</b>，不是 <code>javax.persistence</code>：</p>
+
+<div class="tablewrap">
+<table>
+<thead><tr><th>Spring Data JDBC</th><th>对应的 JPA 注解</th><th>说明</th></tr></thead>
+<tbody>
+<tr><td><code>org.springframework.data.relational.core.mapping.Table</code></td><td><code>javax.persistence.Table</code></td><td>指定对应的表名</td></tr>
+<tr><td><code>org.springframework.data.annotation.Id</code></td><td><code>javax.persistence.Id</code></td><td>标识符字段。<b>没有 <code>@GeneratedValue</code></b>——由数据库的 <code>AUTO_INCREMENT</code> 负责</td></tr>
+<tr><td><code>org.springframework.data.relational.core.mapping.Column</code></td><td><code>javax.persistence.Column</code></td><td>指定列名；默认把驼峰转成蛇形（<code>registrationDate</code> → <code>REGISTRATION_DATE</code>）</td></tr>
+</tbody>
+</table>
+</div>
+
+<div class="filename">Ch15/spring-data-jdbc/src/main/java/com/manning/javapersistence/ch15/model/User.java</div>
+<pre><code><span class="ann">@Table</span>(<span class="str">"USERS"</span>)                          <span class="cmt">// A</span>
+<span class="kw">public class</span> User {
+
+    <span class="ann">@Id</span>                                    <span class="cmt">// B</span>
+    <span class="ann">@Column</span>(<span class="str">"ID"</span>)                          <span class="cmt">// C：这就是默认值，写不写都一样</span>
+    <span class="kw">private</span> Long id;
+
+    <span class="ann">@Column</span>(<span class="str">"USERNAME"</span>)                    <span class="cmt">// D</span>
+    <span class="kw">private</span> String username;
+
+    <span class="ann">@Column</span>(<span class="str">"REGISTRATION_DATE"</span>)           <span class="cmt">// E</span>
+    <span class="kw">private</span> LocalDate registrationDate;
+
+    <span class="cmt">// 构造器、getter、setter</span>
+}</code></pre>
+
+<div class="tip"><b>驼峰转蛇形是自动的</b><p>上面三个 <code>@Column</code> 写的都是默认值，可以全部删掉。Spring Data JDBC 会把类字段的驼峰命名转成表列的蛇形命名。只有当列名不符合这条规则时，才必须显式写 <code>@Column</code>。</p></div>
+
+<h3 id="s13">仓库接口与测试基类</h3>
+
+<div class="filename">Ch15/spring-data-jdbc/.../repositories/UserRepository.java</div>
+<pre><code><span class="ann">@Repository</span>
+<span class="kw">public interface</span> UserRepository <span class="kw">extends</span> CrudRepository&lt;User, Long&gt; {
+    List&lt;User&gt; findAll();
+}</code></pre>
+
+<div class="note"><b>又见 <code>CrudRepository</code></b><p>回忆 4.3 节：<code>CrudRepository</code> 是一个<b>技术无关的通用持久化接口</b>。它并不只服务于 JPA / 关系数据库——这里换成 Spring Data JDBC，你依然继承同一个接口，<code>save</code>、<code>findAll</code>、<code>findById</code> 这些方法照旧可用。第 17 章讲 MongoDB 时你还会再见到它。</p><p>这里唯一「多余」的一行 <code>List&lt;User&gt; findAll()</code> 只是<b>协变返回类型覆写</b>：把父接口的 <code>Iterable&lt;User&gt;</code> 收窄成 <code>List&lt;User&gt;</code>，方便后面的测试直接 <code>.size()</code>。</p></div>
+
+<div class="filename">Ch15/spring-data-jdbc/src/test/.../SpringDataJdbcApplicationTests.java</div>
+<pre><code><span class="ann">@SpringBootTest</span>
+<span class="ann">@TestInstance</span>(TestInstance.Lifecycle.PER_CLASS)
+<span class="kw">abstract class</span> SpringDataJdbcApplicationTests {
+
+    <span class="ann">@Autowired</span>                            <span class="cmt">// A</span>
+    UserRepository userRepository;
+
+    <span class="ann">@BeforeAll</span>
+    <span class="kw">void</span> beforeAll() {
+        userRepository.saveAll(generateUsers());
+    }
+
+    <span class="kw">private static</span> List&lt;User&gt; generateUsers() {
+        List&lt;User&gt; users = <span class="kw">new</span> ArrayList&lt;&gt;();
+        User john = <span class="kw">new</span> User(<span class="str">"john"</span>, LocalDate.of(<span class="str">2020</span>, Month.APRIL, <span class="str">13</span>));
+        <span class="cmt">// 一共创建 10 个用户</span>
+        users.add(john);
+        <span class="kw">return</span> users;
+    }
+
+    <span class="ann">@AfterAll</span>
+    <span class="kw">void</span> afterAll() {
+        userRepository.deleteAll();
+    }
+}</code></pre>
+
+<div class="keyhint">
+<div><span class="k">@SpringBootTest</span> 让 Spring Boot 去找主配置类（带 <code>@SpringBootApplication</code> 的那个），创建测试用的 <code>ApplicationContext</code>。</div>
+<div><span class="k">PER_CLASS</span> 让 JUnit 5 <b>只创建一个测试类实例</b>并复用于全部测试方法。这样 <code>@BeforeAll</code> / <code>@AfterAll</code> 方法<b>就不必是 static 的</b>，从而能直接使用注入的 <code>userRepository</code> 字段。</div>
+<div><span class="k">A</span> 能注入成功，是因为 <code>@SpringBootApplication</code> 开启了对所在包的扫描，把仓库代理注册进了容器。</div>
+</div>
+
+<h2 id="s2"><span class="num">15.2</span> 在 Spring Data JDBC 中使用查询</h2>
+
+<p>从 <code>spring-data-jdbc2</code> 开始，<code>User</code> 增加了 <code>email</code>、<code>level</code>、<code>active</code> 三个字段：用户有等级（决定能否出价超过某个金额），也有「活跃 / 已退休」状态。<b>别忘了同步改 <code>schema.sql</code>——没人会替你改。</b></p>
+
+<div class="cols">
+<div class="card"><h4>schema.sql（jdbc2）</h4>
+<pre><code><span class="kw">CREATE TABLE</span> USERS (
+   ID INTEGER AUTO_INCREMENT PRIMARY KEY,
+   ACTIVE BOOLEAN,
+   USERNAME VARCHAR(30),
+   EMAIL VARCHAR(30),
+   LEVEL INTEGER,
+   REGISTRATION_DATE DATE
+);</code></pre></div>
+<div class="card"><h4>User.java（jdbc2）</h4>
+<pre><code><span class="ann">@Table</span>(name = <span class="str">"USERS"</span>)
+<span class="kw">public class</span> User {
+    <span class="ann">@Id</span> <span class="kw">private</span> Long id;
+    <span class="kw">private</span> String username;
+    <span class="kw">private</span> LocalDate registrationDate;
+    <span class="kw">private</span> String email;
+    <span class="kw">private int</span> level;
+    <span class="kw">private boolean</span> active;
+}</code></pre></div>
+</div>
+
+<h3 id="s21">15.2.1 用查询构建器机制定义查询方法</h3>
+
+<figure>
+<div class="fig-box">
+<svg viewBox="0 0 820 300" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="查询构建器机制把方法名解析成 SQL">
+  <rect x="40" y="34" width="740" height="46" rx="8" fill="var(--accent-soft)" stroke="var(--accent)"/>
+  <text x="60" y="63" font-size="14" font-family="var(--mono)" fill="var(--ink)">List&lt;User&gt;  findBy  RegistrationDate  Between  (LocalDate start, LocalDate end)</text>
+
+  <path d="M120 84 L120 118" stroke="var(--accent)" stroke-width="1.5" marker-end="url(#a15b)"/>
+  <path d="M290 84 L290 118" stroke="var(--java)" stroke-width="1.5" marker-end="url(#a15b)"/>
+  <path d="M440 84 L440 118" stroke="var(--sql)" stroke-width="1.5" marker-end="url(#a15b)"/>
+  <path d="M620 84 L620 118" stroke="var(--warn)" stroke-width="1.5" marker-end="url(#a15b)"/>
+  <defs><marker id="a15b" markerWidth="9" markerHeight="9" refX="8" refY="4.5" orient="auto"><path d="M0 0 L9 4.5 L0 9 z" fill="var(--ink-faint)"/></marker></defs>
+
+  <rect x="46" y="122" width="150" height="56" rx="6" fill="var(--panel)" stroke="var(--accent)"/>
+  <text x="121" y="143" text-anchor="middle" font-size="11.5" fill="var(--ink)">① 前缀被剥掉</text>
+  <text x="121" y="161" text-anchor="middle" font-size="10.5" fill="var(--ink-soft)">find/get/query/read/count…By</text>
+
+  <rect x="212" y="122" width="150" height="56" rx="6" fill="var(--panel)" stroke="var(--java)"/>
+  <text x="287" y="143" text-anchor="middle" font-size="11.5" fill="var(--ink)">② 属性名</text>
+  <text x="287" y="161" text-anchor="middle" font-size="10.5" fill="var(--ink-soft)">对应 REGISTRATION_DATE 列</text>
+
+  <rect x="378" y="122" width="150" height="56" rx="6" fill="var(--panel)" stroke="var(--sql)"/>
+  <text x="453" y="143" text-anchor="middle" font-size="11.5" fill="var(--ink)">③ 关键字</text>
+  <text x="453" y="161" text-anchor="middle" font-size="10.5" fill="var(--ink-soft)">→ BETWEEN 条件</text>
+
+  <rect x="544" y="122" width="150" height="56" rx="6" fill="var(--panel)" stroke="var(--warn)"/>
+  <text x="619" y="143" text-anchor="middle" font-size="11.5" fill="var(--ink)">④ 参数按顺序绑定</text>
+  <text x="619" y="161" text-anchor="middle" font-size="10.5" fill="var(--ink-soft)">start, end</text>
+
+  <text x="710" y="152" font-size="11.5" fill="var(--ink-soft)">返回类型</text>
+  <text x="710" y="168" font-size="10.5" fill="var(--ink-soft)">决定 List/Optional</text>
+
+  <path d="M410 182 L410 210" stroke="var(--ink-faint)" stroke-width="1.6" marker-end="url(#a15b)"/>
+
+  <rect x="140" y="214" width="540" height="44" rx="8" fill="var(--sql-soft)" stroke="var(--sql)"/>
+  <text x="410" y="241" text-anchor="middle" font-size="13" font-family="var(--mono)" fill="var(--ink)">SELECT * FROM USERS WHERE REGISTRATION_DATE BETWEEN ? AND ?</text>
+
+  <text x="410" y="285" text-anchor="middle" font-size="11.5" fill="var(--danger)">注意：Spring Data JDBC 派生出来的是<tspan font-weight="700">原生 SQL</tspan>，不是 JPQL —— 而且目前只能用于 WHERE 子句，<tspan font-weight="700">不能带连接（join）</tspan>。</text>
+</svg>
+</div>
+<figcaption>图 15-C　查询构建器机制。整体思路与 Spring Data JPA（图 4-B）相同，但产出的是数据库方言相关的 SQL。</figcaption>
+</figure>
+
+<div class="filename">Ch15/spring-data-jdbc2/.../repositories/UserRepository.java</div>
+<pre><code><span class="kw">public interface</span> UserRepository <span class="kw">extends</span> CrudRepository&lt;User, Long&gt; {
+   List&lt;User&gt; findAll();
+   Optional&lt;User&gt; findByUsername(String username);
+   List&lt;User&gt; findAllByOrderByUsernameAsc();
+   List&lt;User&gt; findByRegistrationDateBetween(LocalDate start, LocalDate end);
+   List&lt;User&gt; findByUsernameAndEmail(String username, String email);
+   List&lt;User&gt; findByUsernameOrEmail(String username, String email);
+   List&lt;User&gt; findByUsernameIgnoreCase(String username);
+   List&lt;User&gt; findByLevelOrderByUsernameDesc(<span class="kw">int</span> level);
+   List&lt;User&gt; findByLevelGreaterThanEqual(<span class="kw">int</span> level);
+   List&lt;User&gt; findByUsernameContaining(String text);
+   List&lt;User&gt; findByUsernameLike(String text);
+   List&lt;User&gt; findByUsernameStartingWith(String start);
+   List&lt;User&gt; findByUsernameEndingWith(String end);
+   List&lt;User&gt; findByActive(<span class="kw">boolean</span> active);
+   List&lt;User&gt; findByRegistrationDateIn(Collection&lt;LocalDate&gt; dates);
+   List&lt;User&gt; findByRegistrationDateNotIn(Collection&lt;LocalDate&gt; dates);
+   <span class="cmt">// . . .</span>
+}</code></pre>
+
+<div class="tablewrap">
+<table>
+<caption>表 15.1　Spring Data JDBC 关键字与生成的条件</caption>
+<thead><tr><th>关键字</th><th>示例</th><th>条件</th></tr></thead>
+<tbody>
+<tr><td><code>Is</code>, <code>Equals</code></td><td><code>findByUsername(String name)</code><br><code>findByUsernameIs(...)</code> / <code>findByUsernameEquals(...)</code></td><td><code>username = name</code></td></tr>
+<tr><td><code>And</code></td><td><code>findByUsernameAndRegistrationDate(name, date)</code></td><td><code>username = name and registration_date = date</code></td></tr>
+<tr><td><code>Or</code></td><td><code>findByUsernameOrRegistrationDate(name, date)</code></td><td><code>username = name or registration_date = date</code></td></tr>
+<tr><td><code>LessThan</code></td><td><code>findByRegistrationDateLessThan(date)</code></td><td><code>registration_date &lt; date</code></td></tr>
+<tr><td><code>LessThanEqual</code></td><td><code>findByRegistrationDateLessThanEqual(date)</code></td><td><code>registration_date &lt;= date</code></td></tr>
+<tr><td><code>GreaterThan</code></td><td><code>findByRegistrationDateGreaterThan(date)</code></td><td><code>registration_date &gt; date</code></td></tr>
+<tr><td><code>GreaterThanEqual</code></td><td><code>findByRegistrationDateGreaterThanEqual(date)</code></td><td><code>registration_date &gt;= date</code></td></tr>
+<tr><td><code>Between</code></td><td><code>findByRegistrationDateBetween(from, to)</code></td><td><code>registration_date between from and to</code></td></tr>
+<tr><td><code>OrderBy</code></td><td><code>findByRegistrationDateOrderByUsernameDesc(date)</code></td><td><code>registration_date = date order by username desc</code></td></tr>
+<tr><td><code>Like</code> / <code>NotLike</code></td><td><code>findByUsernameLike(name)</code></td><td><code>username like name</code> / <code>not like</code></td></tr>
+<tr><td><code>Before</code> / <code>After</code></td><td><code>findByRegistrationDateBefore(date)</code></td><td><code>registration_date &lt; date</code> / <code>&gt; date</code></td></tr>
+<tr><td><code>Null</code>, <code>IsNull</code></td><td><code>findByRegistrationDate(Is)Null()</code></td><td><code>registration_date is null</code></td></tr>
+<tr><td><code>NotNull</code>, <code>IsNotNull</code></td><td><code>findByRegistrationDate(Is)NotNull()</code></td><td><code>registration_date is not null</code></td></tr>
+<tr><td><code>Not</code></td><td><code>findByUsernameNot(name)</code></td><td><code>username &lt;&gt; name</code></td></tr>
+</tbody>
+</table>
+</div>
+
+<div class="pit"><b>方法名写错，启动时就炸</b><p>如果方法名里的属性在实体上不存在（比如把 <code>findByLevel</code> 写成 <code>findByLevle</code>），你不会等到调用时才发现——<b>应用上下文加载时就会报错</b>。这是好事：错误尽早暴露。</p></div>
+
+<h3 id="s22">15.2.2 限制结果、排序与分页</h3>
+
+<p>和 Spring Data JPA 一样，<code>first</code> 与 <code>top</code> 关键字（两者等价）用来限制结果条数，后面可跟一个可选数字；不写数字则默认为 1。分页信息用 <code>Pageable</code> 接口表达，实践中用它的实现类 <code>PageRequest</code>，可以指定<b>页号、页大小和排序条件</b>。</p>
+
+<div class="filename">Ch15/spring-data-jdbc2/.../repositories/UserRepository.java</div>
+<pre><code>Optional&lt;User&gt; findFirstByOrderByUsernameAsc();
+Optional&lt;User&gt; findTopByOrderByRegistrationDateDesc();
+Page&lt;User&gt;     findAll(Pageable pageable);
+List&lt;User&gt;     findFirst2ByLevel(<span class="kw">int</span> level, Sort sort);
+List&lt;User&gt;     findByLevel(<span class="kw">int</span> level, Sort sort);
+List&lt;User&gt;     findByActive(<span class="kw">boolean</span> active, Pageable pageable);</code></pre>
+
+<figure>
+<div class="fig-box">
+<svg viewBox="0 0 820 250" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="PageRequest 的页号从 0 开始">
+  <text x="30" y="30" font-size="12.5" font-family="var(--mono)" fill="var(--ink)">userRepository.findAll(PageRequest.of(1, 3))</text>
+  <text x="380" y="30" font-size="12" fill="var(--ink-soft)">← 页号 1、每页 3 条</text>
+
+  <text x="30" y="66" font-size="12" fill="var(--ink-soft)">按 ID 排好的 10 个用户：</text>
+
+  <g font-size="11.5" text-anchor="middle">
+    <rect x="30" y="80" width="72" height="34" rx="5" fill="var(--panel)" stroke="var(--line-strong)"/><text x="66" y="102" fill="var(--ink-soft)">beth</text>
+    <rect x="106" y="80" width="72" height="34" rx="5" fill="var(--panel)" stroke="var(--line-strong)"/><text x="142" y="102" fill="var(--ink-soft)">burk</text>
+    <rect x="182" y="80" width="72" height="34" rx="5" fill="var(--panel)" stroke="var(--line-strong)"/><text x="218" y="102" fill="var(--ink-soft)">darren</text>
+
+    <rect x="264" y="80" width="72" height="34" rx="5" fill="var(--accent-soft)" stroke="var(--accent)" stroke-width="2"/><text x="300" y="102" fill="var(--ink)">james</text>
+    <rect x="340" y="80" width="72" height="34" rx="5" fill="var(--accent-soft)" stroke="var(--accent)" stroke-width="2"/><text x="376" y="102" fill="var(--ink)">john</text>
+    <rect x="416" y="80" width="72" height="34" rx="5" fill="var(--accent-soft)" stroke="var(--accent)" stroke-width="2"/><text x="452" y="102" fill="var(--ink)">julius</text>
+
+    <rect x="498" y="80" width="72" height="34" rx="5" fill="var(--panel)" stroke="var(--line-strong)"/><text x="534" y="102" fill="var(--ink-soft)">katie</text>
+    <rect x="574" y="80" width="72" height="34" rx="5" fill="var(--panel)" stroke="var(--line-strong)"/><text x="610" y="102" fill="var(--ink-soft)">marion</text>
+    <rect x="650" y="80" width="72" height="34" rx="5" fill="var(--panel)" stroke="var(--line-strong)"/><text x="686" y="102" fill="var(--ink-soft)">mike</text>
+    <rect x="726" y="80" width="72" height="34" rx="5" fill="var(--panel)" stroke="var(--line-strong)"/><text x="762" y="102" fill="var(--ink-soft)">stephanie</text>
+  </g>
+
+  <path d="M30 126 L254 126" stroke="var(--ink-faint)" stroke-width="1.2"/>
+  <text x="142" y="144" text-anchor="middle" font-size="11.5" fill="var(--ink-faint)">第 0 页</text>
+  <path d="M264 126 L488 126" stroke="var(--accent)" stroke-width="2"/>
+  <text x="376" y="144" text-anchor="middle" font-size="11.5" font-weight="700" fill="var(--accent)">第 1 页 ← 返回这一页</text>
+  <path d="M498 126 L722 126" stroke="var(--ink-faint)" stroke-width="1.2"/>
+  <text x="610" y="144" text-anchor="middle" font-size="11.5" fill="var(--ink-faint)">第 2 页</text>
+  <path d="M726 126 L798 126" stroke="var(--ink-faint)" stroke-width="1.2"/>
+  <text x="762" y="144" text-anchor="middle" font-size="11.5" fill="var(--ink-faint)">第 3 页</text>
+
+  <rect x="30" y="168" width="768" height="62" rx="8" fill="var(--warn-soft)" stroke="var(--warn)"/>
+  <text x="414" y="190" text-anchor="middle" font-size="12" fill="var(--ink)"><tspan font-weight="700">页号从 0 开始。</tspan> PageRequest.of(1, 3) 拿的是<tspan font-weight="700">第二页</tspan>，不是第一页。</text>
+  <text x="414" y="212" text-anchor="middle" font-size="12" fill="var(--ink)">PageRequest.of(1, 4, Sort.by("registrationDate")) = 按注册日期排序后，跳过前 4 条，取接下来 4 条。</text>
+</svg>
+</div>
+<figcaption>图 15-D　分页的页号语义。这是最常见的 off-by-one 来源。</figcaption>
+</figure>
+
+<div class="filename">Ch15/spring-data-jdbc2/src/test/.../FindUsersSortingAndPagingTest.java</div>
+<pre><code><span class="kw">public class</span> FindUsersSortingAndPagingTest <span class="kw">extends</span> SpringDataJdbcApplicationTests {
+
+    <span class="ann">@Test</span>
+    <span class="kw">void</span> testOrder() {
+        User user1 = userRepository.findFirstByOrderByUsernameAsc().get();          <span class="cmt">// A</span>
+        User user2 = userRepository.findTopByOrderByRegistrationDateDesc().get();
+        Page&lt;User&gt; userPage = userRepository.findAll(PageRequest.of(<span class="str">1</span>, <span class="str">3</span>));         <span class="cmt">// B</span>
+        List&lt;User&gt; users = userRepository.findFirst2ByLevel(<span class="str">2</span>,                       <span class="cmt">// C</span>
+                                          Sort.by(<span class="str">"registrationDate"</span>));
+        assertAll(
+            () -&gt; assertEquals(<span class="str">"beth"</span>,   user1.getUsername()),
+            () -&gt; assertEquals(<span class="str">"julius"</span>, user2.getUsername()),
+            () -&gt; assertEquals(<span class="str">2</span>, users.size()),
+            () -&gt; assertEquals(<span class="str">3</span>, userPage.getSize()),
+            () -&gt; assertEquals(<span class="str">"beth"</span>,   users.get(<span class="str">0</span>).getUsername()),
+            () -&gt; assertEquals(<span class="str">"marion"</span>, users.get(<span class="str">1</span>).getUsername()));
+    }
+
+    <span class="ann">@Test</span>
+    <span class="kw">void</span> testFindByLevel() {
+        <span class="hl">Sort.TypedSort&lt;User&gt; user = Sort.sort(User.class);</span>                          <span class="cmt">// D</span>
+        List&lt;User&gt; users = userRepository.findByLevel(<span class="str">3</span>,
+                   <span class="hl">user.by(User::getRegistrationDate).descending()</span>);              <span class="cmt">// E</span>
+        assertAll(
+            () -&gt; assertEquals(<span class="str">2</span>, users.size()),
+            () -&gt; assertEquals(<span class="str">"james"</span>, users.get(<span class="str">0</span>).getUsername()));
+    }
+
+    <span class="ann">@Test</span>
+    <span class="kw">void</span> testFindByActive() {
+        List&lt;User&gt; users = userRepository.findByActive(<span class="kw">true</span>,                        <span class="cmt">// F</span>
+                   PageRequest.of(<span class="str">1</span>, <span class="str">4</span>, Sort.by(<span class="str">"registrationDate"</span>)));
+        assertAll(
+            () -&gt; assertEquals(<span class="str">4</span>, users.size()),
+            () -&gt; assertEquals(<span class="str">"burk"</span>, users.get(<span class="str">0</span>).getUsername()));
+    }
+}</code></pre>
+
+<div class="keyhint">
+<div><span class="k">A</span> 按用户名升序取第一个用户；按注册日期降序取第一个用户。</div>
+<div><span class="k">B</span> 取全部用户并切页，返回页号 1、每页 3 条（<b>页号从 0 开始</b>）。</div>
+<div><span class="k">C</span> 取 level 为 2 的前两个用户，按注册日期排序。</div>
+<div><span class="k">D</span> <code>Sort.TypedSort</code> 继承 <code>Sort</code>，可以用<b>方法引用</b>指定排序属性——不再用容易写错的字符串。</div>
+<div><span class="k">E</span> 取 level 为 3 的用户，按注册日期降序。</div>
+<div><span class="k">F</span> 取活跃用户，按注册日期排序，切页后返回页号 1、每页 4 条。</div>
+</div>
+
+<div class="tip"><b><code>Sort.by("registrationDate")</code> vs <code>Sort.sort(User.class).by(User::getRegistrationDate)</code></b><p>前者是字符串——重构改字段名时不会跟着变，编译器也拦不住你。后者是<b>类型安全的</b>：<code>TypedSort</code> 用方法句柄（method handle）来指定属性，写错就编译不过。能用后者就用后者。这和第 19 章的 Querydsl 是同一种精神。</p></div>
+
+<h3 id="s23">15.2.3 流式结果</h3>
+
+<p>返回多条结果的查询方法可以用标准 Java 接口（<code>Iterable</code>、<code>List</code>、<code>Set</code>）。和 Spring Data JPA 一样，Spring Data JDBC 也支持 <code>Streamable</code>——它可以替代 <code>Iterable</code> 或任何集合类型，并且允许你<b>拼接多个 <code>Streamable</code></b>、直接对元素做 filter / map。</p>
+
+<p>使用场景：<b>不等整个集合（或整页）加载完，就开始处理最先流进来的结果。</b>与集合不同，流<b>只能消费一次且不可变</b>。</p>
+
+<div class="filename">Ch15/spring-data-jdbc2/.../repositories/UserRepository.java</div>
+<pre><code>Streamable&lt;User&gt; findByEmailContaining(String text);
+Streamable&lt;User&gt; findByLevel(<span class="kw">int</span> level);</code></pre>
+
+<div class="filename">Ch15/spring-data-jdbc2/src/test/.../QueryResultsTest.java</div>
+<pre><code><span class="ann">@Test</span>
+<span class="kw">void</span> testStreamable() {
+    <span class="kw">try</span> (Stream&lt;User&gt; result =
+             userRepository.findByEmailContaining(<span class="str">"someother"</span>)      <span class="cmt">// A</span>
+                 .and(userRepository.findByLevel(<span class="str">2</span>))                 <span class="cmt">// B</span>
+                 .stream().distinct()) {                              <span class="cmt">// C</span>
+        assertEquals(<span class="str">6</span>, result.count());                            <span class="cmt">// D</span>
+    }
+}</code></pre>
+
+<div class="pit"><b>必须关闭流</b><p>注意流是放在 <b>try-with-resources</b> 里的，所以会自动关闭。另一种做法是显式调用 <code>close()</code>。<b>否则这个流会一直占着底层的数据库连接不放。</b></p></div>
+
+<h3 id="s24">15.2.4 <code>@Query</code> 与 15.2.5 修改型查询</h3>
+
+<p>用 <code>@Query</code> 注解可以给方法指定自定义查询，此时<b>方法名不必遵循任何命名约定</b>。但和 Spring Data JPA 相比有两处关键差异：</p>
+
+<div class="cols">
+<div class="card"><h4>差异 1：只能用具名参数</h4><p>参数<b>只能按名字识别</b>，必须用 <code>@Param</code> 注解绑定到查询里的 <code>:NAME</code> 占位符。没有 <code>?1</code> 这种位置参数的写法。</p></div>
+<div class="card"><h4>差异 2：SQL，不是 JPQL</h4><p>写的是<b>原生 SQL</b>，因此<b>没有可移植性</b>——换数据库厂商就得重写所有查询。</p></div>
+</div>
+
+<div class="filename">Ch15/spring-data-jdbc2/.../repositories/UserRepository.java</div>
+<pre><code><span class="ann">@Query</span>(<span class="str">"SELECT COUNT(*) FROM USERS WHERE ACTIVE = :ACTIVE"</span>)                    <span class="cmt">// A</span>
+<span class="kw">int</span> findNumberOfUsersByActivity(<span class="ann">@Param</span>(<span class="str">"ACTIVE"</span>) <span class="kw">boolean</span> active);
+
+<span class="ann">@Query</span>(<span class="str">"SELECT * FROM USERS WHERE LEVEL = :LEVEL AND ACTIVE = :ACTIVE"</span>)      <span class="cmt">// B</span>
+List&lt;User&gt; findByLevelAndActive(<span class="ann">@Param</span>(<span class="str">"LEVEL"</span>) <span class="kw">int</span> level,
+                                <span class="ann">@Param</span>(<span class="str">"ACTIVE"</span>) <span class="kw">boolean</span> active);
+
+<span class="cmt">// —— 修改型查询：必须再加 @Modifying ——</span>
+<span class="hl">@Modifying</span>
+<span class="ann">@Query</span>(<span class="str">"UPDATE USERS SET LEVEL = :NEW_LEVEL WHERE LEVEL = :OLD_LEVEL"</span>)       <span class="cmt">// C</span>
+<span class="kw">int</span> updateLevel(<span class="ann">@Param</span>(<span class="str">"OLD_LEVEL"</span>) <span class="kw">int</span> oldLevel,
+                <span class="ann">@Param</span>(<span class="str">"NEW_LEVEL"</span>) <span class="kw">int</span> newLevel);
+
+<span class="hl">@Modifying</span>
+<span class="ann">@Query</span>(<span class="str">"DELETE FROM USERS WHERE LEVEL = :LEVEL"</span>)                            <span class="cmt">// D</span>
+<span class="kw">int</span> deleteByLevel(<span class="ann">@Param</span>(<span class="str">"LEVEL"</span>) <span class="kw">int</span> level);</code></pre>
+
+<div class="keyhint">
+<div><span class="k">A</span> 返回活跃用户的数量。</div>
+<div><span class="k">B</span> <code>@Param</code> 把查询里的 <code>:LEVEL</code> 与方法参数 <code>level</code>、<code>:ACTIVE</code> 与 <code>active</code> 对应起来。</div>
+<div><span class="k">C</span> 把 level 为 <code>oldLevel</code> 的用户改成 <code>newLevel</code>。<code>INSERT</code> / <code>UPDATE</code> / <code>DELETE</code> 及 DDL 语句都要加 <code>@Modifying</code>。</div>
+<div><span class="k">D</span> 删除指定 level 的全部用户，返回受影响行数。</div>
+</div>
+
+<div class="warn"><b>删除方法没有查询派生</b><p>写作本书时，<b>Spring Data JDBC 不支持 delete 方法的查询派生</b>（Spring Data JPA 支持）。也就是说你不能只写一个 <code>deleteByLevel(int level)</code> 方法名就完事——必须配上 <code>@Modifying</code> + <code>@Query</code> 明确写出 SQL。</p></div>
+
+<h2 id="s3"><span class="num">15.3</span> 用 Spring Data JDBC 建模关系</h2>
+
+<p>类之间的关联、表之间的关系，是 ORM 问题的核心。第 8 章我们看了 JPA / Spring Data JPA 的解法，现在看 Spring Data JDBC 的。</p>
+
+<div class="note"><b>核心机制：<code>@MappedCollection</code></b><p>JPA 用 <code>@OneToOne</code> / <code>@OneToMany</code> / <code>@ManyToMany</code> 三个注解表达三种基数。Spring Data JDBC 只有一个 <code>@MappedCollection</code>（1.1 引入），<b>基数由「你在类里声明的是单个引用还是集合」决定</b>：</p>
+<ul>
+<li>字段是 <code>private Address address;</code> → <b>一对一</b></li>
+<li>字段是 <code>private Set&lt;Address&gt; addresses;</code> → <b>一对多</b></li>
+<li>多对多？没有——你得<b>手写中间类</b>，把它降级成一对多</li>
+</ul>
+<p>换句话说：<b>关系建模的责任更多落在程序员的类设计上，而不是注解上。</b></p></div>
+
+<figure>
+<div class="fig-box">
+<svg viewBox="0 0 820 660" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Spring Data JDBC 的四种关系建模形态">
+  <defs><marker id="fk15" markerWidth="9" markerHeight="9" refX="8" refY="4.5" orient="auto"><path d="M0 0 L9 4.5 L0 9 z" fill="var(--sql)"/></marker></defs>
+
+  <!-- 1. one-to-one -->
+  <text x="20" y="24" font-size="13" font-weight="700" fill="var(--accent)">① 一对一　spring-data-jdbc3</text>
+  <rect x="20" y="36" width="180" height="96" rx="6" fill="var(--java-soft)" stroke="var(--java)"/>
+  <text x="110" y="56" text-anchor="middle" font-size="12" font-weight="700" fill="var(--ink)">User</text>
+  <text x="32" y="76" font-size="10.5" font-family="var(--mono)" fill="var(--ink-soft)">@Id Long id;</text>
+  <text x="32" y="94" font-size="10.5" font-family="var(--mono)" fill="var(--accent)">@MappedCollection(</text>
+  <text x="32" y="108" font-size="10.5" font-family="var(--mono)" fill="var(--accent)">  idColumn="USER_ID")</text>
+  <text x="32" y="124" font-size="10.5" font-family="var(--mono)" fill="var(--ink)">Address address;</text>
+
+  <path d="M204 84 L246 84" stroke="var(--ink-faint)" stroke-width="1.5" marker-end="url(#fk15)"/>
+  <text x="225" y="76" text-anchor="middle" font-size="10" fill="var(--ink-faint)">1</text>
+
+  <rect x="250" y="36" width="150" height="96" rx="6" fill="var(--java-soft)" stroke="var(--java)"/>
+  <text x="325" y="56" text-anchor="middle" font-size="12" font-weight="700" fill="var(--ink)">@Table("ADDRESSES")</text>
+  <text x="325" y="74" text-anchor="middle" font-size="12" font-weight="700" fill="var(--ink)">Address</text>
+  <text x="262" y="96" font-size="10.5" font-family="var(--mono)" fill="var(--ink-soft)">String street;</text>
+  <text x="262" y="114" font-size="10.5" font-family="var(--mono)" fill="var(--ink-soft)">String city;</text>
+
+  <rect x="440" y="36" width="150" height="96" rx="6" fill="var(--sql-soft)" stroke="var(--sql)"/>
+  <text x="515" y="56" text-anchor="middle" font-size="11.5" font-weight="700" fill="var(--ink)">USERS</text>
+  <text x="452" y="76" font-size="10.5" font-family="var(--mono)" fill="var(--ink)">ID (PK, AUTO_INC)</text>
+  <text x="452" y="94" font-size="10.5" font-family="var(--mono)" fill="var(--ink-soft)">USERNAME, EMAIL</text>
+  <text x="452" y="112" font-size="10.5" font-family="var(--mono)" fill="var(--ink-soft)">LEVEL, ACTIVE, ...</text>
+
+  <rect x="620" y="36" width="180" height="96" rx="6" fill="var(--sql-soft)" stroke="var(--sql)"/>
+  <text x="710" y="56" text-anchor="middle" font-size="11.5" font-weight="700" fill="var(--ink)">ADDRESSES</text>
+  <text x="632" y="76" font-size="10.5" font-family="var(--mono)" fill="var(--accent)">USER_ID (PK = FK)</text>
+  <text x="632" y="94" font-size="10.5" font-family="var(--mono)" fill="var(--ink-soft)">STREET NOT NULL</text>
+  <text x="632" y="112" font-size="10.5" font-family="var(--mono)" fill="var(--ink-soft)">CITY NOT NULL</text>
+  <path d="M594 84 L616 84" stroke="var(--sql)" stroke-width="1.5" marker-end="url(#fk15)"/>
+
+  <path d="M20 148 L800 148" stroke="var(--line)" stroke-width="1"/>
+
+  <!-- 2. embedded -->
+  <text x="20" y="176" font-size="13" font-weight="700" fill="var(--accent)">② 嵌入　spring-data-jdbc4</text>
+  <rect x="20" y="188" width="180" height="106" rx="6" fill="var(--java-soft)" stroke="var(--java)"/>
+  <text x="110" y="208" text-anchor="middle" font-size="12" font-weight="700" fill="var(--ink)">User</text>
+  <text x="32" y="228" font-size="10.5" font-family="var(--mono)" fill="var(--ink-soft)">@Id Long id;</text>
+  <text x="32" y="248" font-size="10.5" font-family="var(--mono)" fill="var(--accent)">@Embedded(onEmpty =</text>
+  <text x="32" y="262" font-size="10.5" font-family="var(--mono)" fill="var(--accent)"> Embedded.OnEmpty</text>
+  <text x="32" y="276" font-size="10.5" font-family="var(--mono)" fill="var(--accent)"> .USE_NULL)</text>
+  <text x="32" y="290" font-size="10.5" font-family="var(--mono)" fill="var(--ink)">Address address;</text>
+
+  <rect x="250" y="188" width="150" height="106" rx="6" fill="var(--panel)" stroke="var(--line-strong)" stroke-dasharray="4 3"/>
+  <text x="325" y="212" text-anchor="middle" font-size="12" font-weight="700" fill="var(--ink)">Address</text>
+  <text x="325" y="232" text-anchor="middle" font-size="10.5" fill="var(--danger)">没有 @Table</text>
+  <text x="262" y="256" font-size="10.5" font-family="var(--mono)" fill="var(--ink-soft)">String street;</text>
+  <text x="262" y="274" font-size="10.5" font-family="var(--mono)" fill="var(--ink-soft)">String city;</text>
+
+  <rect x="440" y="188" width="360" height="106" rx="6" fill="var(--sql-soft)" stroke="var(--sql)"/>
+  <text x="620" y="208" text-anchor="middle" font-size="11.5" font-weight="700" fill="var(--ink)">USERS（只有一张表）</text>
+  <text x="452" y="230" font-size="10.5" font-family="var(--mono)" fill="var(--ink)">ID (PK, AUTO_INC)　ACTIVE　USERNAME</text>
+  <text x="452" y="250" font-size="10.5" font-family="var(--mono)" fill="var(--ink)">EMAIL　LEVEL　REGISTRATION_DATE</text>
+  <text x="452" y="272" font-size="10.5" font-family="var(--mono)" fill="var(--accent)">STREET NOT NULL　CITY NOT NULL　← 被嵌进来</text>
+  <text x="452" y="288" font-size="10" fill="var(--ink-soft)">两列都空 ⇒ address 字段为 null（USE_NULL）</text>
+
+  <path d="M20 310 L800 310" stroke="var(--line)" stroke-width="1"/>
+
+  <!-- 3. one-to-many -->
+  <text x="20" y="338" font-size="13" font-weight="700" fill="var(--accent)">③ 一对多　spring-data-jdbc5</text>
+  <rect x="20" y="350" width="180" height="96" rx="6" fill="var(--java-soft)" stroke="var(--java)"/>
+  <text x="110" y="370" text-anchor="middle" font-size="12" font-weight="700" fill="var(--ink)">User</text>
+  <text x="32" y="390" font-size="10.5" font-family="var(--mono)" fill="var(--ink-soft)">@Id Long id;</text>
+  <text x="32" y="410" font-size="10.5" font-family="var(--mono)" fill="var(--accent)">@MappedCollection(</text>
+  <text x="32" y="424" font-size="10.5" font-family="var(--mono)" fill="var(--accent)">  idColumn="USER_ID")</text>
+  <text x="32" y="440" font-size="10.5" font-family="var(--mono)" fill="var(--ink)">Set&lt;Address&gt; addresses;</text>
+
+  <path d="M204 398 L246 398" stroke="var(--ink-faint)" stroke-width="1.5" marker-end="url(#fk15)"/>
+  <text x="225" y="390" text-anchor="middle" font-size="10" fill="var(--ink-faint)">*</text>
+
+  <rect x="250" y="350" width="150" height="96" rx="6" fill="var(--java-soft)" stroke="var(--java)"/>
+  <text x="325" y="370" text-anchor="middle" font-size="12" font-weight="700" fill="var(--ink)">@Table("ADDRESSES")</text>
+  <text x="325" y="388" text-anchor="middle" font-size="12" font-weight="700" fill="var(--ink)">Address</text>
+  <text x="262" y="410" font-size="10.5" font-family="var(--mono)" fill="var(--ink-soft)">String street;</text>
+  <text x="262" y="428" font-size="10.5" font-family="var(--mono)" fill="var(--ink-soft)">String city;</text>
+
+  <rect x="440" y="350" width="150" height="96" rx="6" fill="var(--sql-soft)" stroke="var(--sql)"/>
+  <text x="515" y="372" text-anchor="middle" font-size="11.5" font-weight="700" fill="var(--ink)">USERS</text>
+  <text x="452" y="394" font-size="10.5" font-family="var(--mono)" fill="var(--ink)">ID (PK)</text>
+  <text x="452" y="414" font-size="10.5" font-family="var(--mono)" fill="var(--ink-soft)">USERNAME, ...</text>
+
+  <rect x="620" y="350" width="180" height="96" rx="6" fill="var(--sql-soft)" stroke="var(--sql)"/>
+  <text x="710" y="372" text-anchor="middle" font-size="11.5" font-weight="700" fill="var(--ink)">ADDRESSES</text>
+  <text x="632" y="394" font-size="10.5" font-family="var(--mono)" fill="var(--ink)">ID (PK, AUTO_INC)</text>
+  <text x="632" y="412" font-size="10.5" font-family="var(--mono)" fill="var(--accent)">USER_ID (FK → USERS.ID)</text>
+  <text x="632" y="430" font-size="10" fill="var(--ink-soft)">ON DELETE CASCADE</text>
+  <path d="M594 398 L616 398" stroke="var(--sql)" stroke-width="1.5" marker-end="url(#fk15)"/>
+
+  <path d="M20 462 L800 462" stroke="var(--line)" stroke-width="1"/>
+
+  <!-- 4. many-to-many -->
+  <text x="20" y="490" font-size="13" font-weight="700" fill="var(--accent)">④ 多对多　spring-data-jdbc6（要手写中间类）</text>
+  <rect x="20" y="502" width="170" height="94" rx="6" fill="var(--java-soft)" stroke="var(--java)"/>
+  <text x="105" y="522" text-anchor="middle" font-size="12" font-weight="700" fill="var(--ink)">User</text>
+  <text x="30" y="544" font-size="10.5" font-family="var(--mono)" fill="var(--accent)">@MappedCollection(</text>
+  <text x="30" y="558" font-size="10.5" font-family="var(--mono)" fill="var(--accent)">  idColumn="USER_ID")</text>
+  <text x="30" y="576" font-size="10.5" font-family="var(--mono)" fill="var(--ink)">Set&lt;UserAddress&gt;</text>
+  <text x="30" y="590" font-size="10.5" font-family="var(--mono)" fill="var(--ink)">     addresses;</text>
+
+  <path d="M194 548 L232 548" stroke="var(--ink-faint)" stroke-width="1.5" marker-end="url(#fk15)"/>
+
+  <rect x="236" y="502" width="176" height="94" rx="6" fill="var(--warn-soft)" stroke="var(--warn)"/>
+  <text x="324" y="522" text-anchor="middle" font-size="11.5" font-weight="700" fill="var(--ink)">@Table("USERS_ADDRESSES")</text>
+  <text x="324" y="540" text-anchor="middle" font-size="12" font-weight="700" fill="var(--ink)">UserAddress</text>
+  <text x="248" y="562" font-size="10.5" font-family="var(--mono)" fill="var(--ink)">Long addressId;</text>
+  <text x="248" y="582" font-size="10" fill="var(--ink-soft)">只持有 Address 的 ID</text>
+
+  <text x="440" y="530" font-size="11" fill="var(--ink-soft)">→ 引用</text>
+  <path d="M416 548 L468 548" stroke="var(--ink-faint)" stroke-width="1.5" stroke-dasharray="3 3" marker-end="url(#fk15)"/>
+
+  <rect x="472" y="502" width="150" height="94" rx="6" fill="var(--java-soft)" stroke="var(--java)"/>
+  <text x="547" y="524" text-anchor="middle" font-size="11.5" font-weight="700" fill="var(--ink)">@Table("ADDRESSES")</text>
+  <text x="547" y="544" text-anchor="middle" font-size="12" font-weight="700" fill="var(--ink)">Address</text>
+  <text x="484" y="566" font-size="10.5" font-family="var(--mono)" fill="var(--ink-soft)">String street;</text>
+  <text x="484" y="584" font-size="10.5" font-family="var(--mono)" fill="var(--ink-soft)">String city;</text>
+
+  <rect x="646" y="502" width="154" height="94" rx="6" fill="var(--sql-soft)" stroke="var(--sql)"/>
+  <text x="723" y="522" text-anchor="middle" font-size="11.5" font-weight="700" fill="var(--ink)">USERS_ADDRESSES</text>
+  <text x="656" y="544" font-size="10.5" font-family="var(--mono)" fill="var(--accent)">USER_ID (FK)</text>
+  <text x="656" y="562" font-size="10.5" font-family="var(--mono)" fill="var(--accent)">ADDRESS_ID (FK)</text>
+  <text x="656" y="582" font-size="10" fill="var(--ink-soft)">双 FK，都 ON DELETE CASCADE</text>
+
+  <rect x="20" y="612" width="780" height="36" rx="6" fill="var(--danger-soft)" stroke="var(--danger)"/>
+  <text x="410" y="635" text-anchor="middle" font-size="12" fill="var(--ink)">JPA 里一个 @ManyToMany + @JoinTable 就搞定的事，这里要你亲手写出连接表对应的实体类。</text>
+</svg>
+</div>
+<figcaption>图 15-E　四种关系形态的类设计与表结构对照。注意「一对一」和「一对多」用的是<b>同一个注解</b>，区别只在字段是单值还是集合。</figcaption>
+</figure>
+
+<h3 id="s31">15.3.1 一对一</h3>
+
+<p>每个 <code>User</code> 只有一个 <code>Address</code>，每个 <code>Address</code> 属于一个 <code>User</code>。</p>
+
+<div class="filename">Ch15/spring-data-jdbc3/src/main/resources/schema.sql</div>
+<pre><code><span class="kw">DROP TABLE IF EXISTS</span> ADDRESSES;
+<span class="kw">DROP TABLE IF EXISTS</span> USERS;
+
+<span class="kw">CREATE TABLE</span> USERS (
+   ID INTEGER AUTO_INCREMENT PRIMARY KEY,
+   ACTIVE BOOLEAN, USERNAME VARCHAR(30), EMAIL VARCHAR(30),
+   LEVEL INTEGER, REGISTRATION_DATE DATE
+);
+
+<span class="kw">CREATE TABLE</span> ADDRESSES (
+   <span class="hl">USER_ID INTEGER AUTO_INCREMENT PRIMARY KEY,</span>   <span class="cmt">-- 主键同时充当外键</span>
+   STREET VARCHAR(30) NOT NULL,
+   CITY VARCHAR(20) NOT NULL
+);</code></pre>
+
+<div class="filename">Ch15/spring-data-jdbc3/.../model/User.java</div>
+<pre><code><span class="ann">@Table</span>(<span class="str">"USERS"</span>)
+<span class="kw">public class</span> User {
+    <span class="ann">@Id</span> <span class="kw">private</span> Long id;
+    <span class="cmt">// . . .</span>
+    <span class="hl">@MappedCollection(idColumn = "USER_ID")</span>
+    <span class="kw">private</span> Address address;          <span class="cmt">// 单值引用 ⇒ 一对一</span>
+}</code></pre>
+
+<p><code>Address</code> 因为对应数据库里另一张表，所以要加 <code>@Table("ADDRESSES")</code>。仓库照旧，两个都是空接口：</p>
+
+<pre><code><span class="kw">public interface</span> UserOneToOneRepository <span class="kw">extends</span> CrudRepository&lt;User, Long&gt; { }
+<span class="kw">public interface</span> AddressOneToOneRepository <span class="kw">extends</span> CrudRepository&lt;Address, Long&gt; { }</code></pre>
+
+<pre><code><span class="ann">@SpringBootTest</span>
+<span class="ann">@TestInstance</span>(TestInstance.Lifecycle.PER_CLASS)
+<span class="kw">public class</span> UserAddressOneToOneTest {
+    <span class="ann">@Autowired</span> <span class="kw">private</span> UserOneToOneRepository userOneToOneRepository;
+    <span class="ann">@Autowired</span> <span class="kw">private</span> AddressOneToOneRepository addressOneToOneRepository;
+
+    <span class="ann">@Test</span>
+    <span class="kw">void</span> oneToOneTest() {
+        assertAll(
+            () -&gt; assertEquals(<span class="str">10</span>, userOneToOneRepository.count()),
+            () -&gt; assertEquals(<span class="str">10</span>, addressOneToOneRepository.count()));
+    }
+}</code></pre>
+
+<h3 id="s32">15.3.2 嵌入式实体</h3>
+
+<p>把 <code>Address</code> 的内容<b>直接嵌进 USERS 表</b>——只有一张表。这对应第 6 章 JPA 的 <code>@Embeddable</code> / <code>@Embedded</code>。</p>
+
+<div class="cols">
+<div class="card"><h4>User 里的字段</h4>
+<pre><code><span class="hl">@Embedded(onEmpty = Embedded.OnEmpty.USE_NULL)</span>
+<span class="kw">private</span> Address address;</code></pre>
+<p><code>USE_NULL</code>：如果嵌入的 <code>STREET</code> 和 <code>CITY</code> 两列都为空，那么 <code>address</code> 字段就是 <code>null</code>（而不是一个所有属性都为 null 的 <code>Address</code> 对象）。</p></div>
+<div class="card"><h4>Address 类</h4>
+<pre><code><span class="cmt">// 注意：没有 @Table 注解！</span>
+<span class="kw">public class</span> Address {
+    <span class="kw">private</span> String street;
+    <span class="kw">private</span> String city;
+}</code></pre>
+<p>它不再对应数据库里的独立表，全部信息都嵌在 <code>USERS</code> 里，所以<b>不能</b>加 <code>@Table</code>。</p></div>
+</div>
+
+<div class="tip"><b>怎么判断该用嵌入还是一对一？</b><p>回到第 5 章的老问题：<b>这个东西有没有自己的独立身份？</b>地址如果只是「某个用户的地址」，离开用户就没有意义 → 嵌入。如果地址需要被独立查询、独立引用、独立共享 → 独立表。</p></div>
+
+<h3 id="s33">15.3.3 一对多</h3>
+
+<p>一个用户可以有多个地址。类设计上只改一个字（<code>Address</code> → <code>Set&lt;Address&gt;</code>），但表结构变了：<code>ADDRESSES</code> 现在有自己的 <code>ID</code> 主键，外加一个 <code>USER_ID</code> 外键。</p>
+
+<div class="filename">Ch15/spring-data-jdbc5/src/main/resources/schema.sql</div>
+<pre><code><span class="kw">CREATE TABLE</span> ADDRESSES (
+  ID INTEGER AUTO_INCREMENT PRIMARY KEY,
+  <span class="hl">USER_ID INTEGER,</span>
+  STREET VARCHAR(30) NOT NULL,
+  CITY VARCHAR(20) NOT NULL,
+  <span class="kw">FOREIGN KEY</span> (USER_ID) <span class="kw">REFERENCES</span> USERS(ID) <span class="kw">ON DELETE CASCADE</span>
+);</code></pre>
+
+<div class="filename">Ch15/spring-data-jdbc5/.../model/User.java</div>
+<pre><code><span class="ann">@MappedCollection</span>(idColumn = <span class="str">"USER_ID"</span>)
+<span class="kw">private</span> Set&lt;Address&gt; addresses = <span class="kw">new</span> HashSet&lt;&gt;();   <span class="cmt">// 集合 ⇒ 一对多</span></code></pre>
+
+<div class="filename">Ch15/spring-data-jdbc5/.../repositories/AddressOneToManyRepository.java</div>
+<pre><code><span class="kw">public interface</span> AddressOneToManyRepository <span class="kw">extends</span> CrudRepository&lt;Address, Long&gt; {
+
+    <span class="ann">@Query</span>(<span class="str">"SELECT COUNT(*) FROM ADDRESSES WHERE USER_ID = :USER_ID"</span>)
+    <span class="kw">int</span> countByUserId(<span class="ann">@Param</span>(<span class="str">"USER_ID"</span>) Long userId);
+}</code></pre>
+
+<div class="pit"><b>为什么 <code>countByUserId</code> 明明符合命名规范，却还要写 <code>@Query</code>？</b><p>因为查询派生看的是 <b>Java 类上的属性</b>，而 <code>Address</code> 类里<b>根本没有 <code>userId</code> 这个字段</b>——外键只存在于表里，不在对象里。这正是 Spring Data JDBC 与 JPA 的一个根本差异：<b>关联是单向的、从「聚合根」向下的</b>，子对象不持有回指父对象的引用。所以只能手写 SQL。</p></div>
+
+<pre><code><span class="ann">@Test</span>
+<span class="kw">void</span> oneToManyTest() {
+    assertAll(
+        () -&gt; assertEquals(<span class="str">10</span>, userOneToManyRepository.count()),
+        () -&gt; assertEquals(<span class="str">20</span>, addressOneToManyRepository.count()),
+        () -&gt; assertEquals(<span class="str">2</span>,
+              addressOneToManyRepository.countByUserId(users.get(<span class="str">0</span>).getId())));
+}</code></pre>
+
+<h3 id="s34">15.3.4 多对多</h3>
+
+<p>每个 <code>User</code> 可以有多个 <code>Address</code>，每个 <code>Address</code> 也可以属于多个 <code>User</code>。<b>Spring Data JDBC 没有 <code>@ManyToMany</code>，我们必须手动引入一个对应 <code>USERS_ADDRESSES</code> 中间表的类。</b></p>
+
+<div class="filename">Ch15/spring-data-jdbc6/src/main/resources/schema.sql</div>
+<pre><code><span class="kw">DROP TABLE IF EXISTS</span> USERS_ADDRESSES;
+<span class="kw">DROP TABLE IF EXISTS</span> USERS;
+<span class="kw">DROP TABLE IF EXISTS</span> ADDRESSES;
+
+<span class="kw">CREATE TABLE</span> USERS ( ID INTEGER AUTO_INCREMENT PRIMARY KEY, ACTIVE BOOLEAN,
+   USERNAME VARCHAR(30), EMAIL VARCHAR(30), LEVEL INTEGER, REGISTRATION_DATE DATE );
+
+<span class="kw">CREATE TABLE</span> ADDRESSES ( ID INTEGER AUTO_INCREMENT PRIMARY KEY,
+   STREET VARCHAR(30) NOT NULL, CITY VARCHAR(20) NOT NULL );
+
+<span class="kw">CREATE TABLE</span> USERS_ADDRESSES (
+  USER_ID INTEGER,
+  ADDRESS_ID INTEGER,
+  <span class="kw">FOREIGN KEY</span> (USER_ID)    <span class="kw">REFERENCES</span> USERS(ID)     <span class="kw">ON DELETE CASCADE</span>,
+  <span class="kw">FOREIGN KEY</span> (ADDRESS_ID) <span class="kw">REFERENCES</span> ADDRESSES(ID) <span class="kw">ON DELETE CASCADE</span>
+);</code></pre>
+
+<div class="filename">Ch15/spring-data-jdbc6/.../model/User.java 与 UserAddress.java</div>
+<pre><code><span class="ann">@Table</span>(<span class="str">"USERS"</span>)
+<span class="kw">public class</span> User {
+    <span class="ann">@Id</span> <span class="kw">private</span> Long id;
+    <span class="cmt">// . . .</span>
+    <span class="ann">@MappedCollection</span>(idColumn = <span class="str">"USER_ID"</span>)
+    <span class="kw">private</span> Set&lt;UserAddress&gt; addresses = <span class="kw">new</span> HashSet&lt;&gt;();   <span class="cmt">// 指向中间类，不是 Address</span>
+}
+
+<span class="ann">@Table</span>(<span class="str">"USERS_ADDRESSES"</span>)
+<span class="kw">public class</span> UserAddress {
+    <span class="kw">private</span> Long addressId;      <span class="cmt">// 只存 Address 的 ID</span>
+
+    <span class="kw">public</span> UserAddress(Long addressId) { <span class="kw">this</span>.addressId = addressId; }
+    <span class="kw">public</span> Long getAddressId() { <span class="kw">return</span> addressId; }
+}</code></pre>
+
+<div class="note"><b>为什么 <code>UserAddress</code> 里没有 <code>userId</code> 字段？</b><p>因为 <code>USER_ID</code> 列由 <code>User</code> 那边的 <code>@MappedCollection(idColumn = "USER_ID")</code> 负责写入。Spring Data JDBC 把 <code>User</code> 当作<b>聚合根</b>：保存 <code>User</code> 时，它会连带把这个用户的 <code>UserAddress</code> 集合写进 <code>USERS_ADDRESSES</code>，并自动填上 <code>USER_ID</code>。子对象自己不需要（也不应该）持有父 ID。</p><p>同理，<code>UserAddressManyToManyRepository.countByUserId</code> 也必须用 <code>@Query</code> 手写 SQL：</p>
+<pre><code><span class="kw">public interface</span> UserAddressManyToManyRepository
+        <span class="kw">extends</span> CrudRepository&lt;UserAddress, Long&gt; {
+
+    <span class="ann">@Query</span>(<span class="str">"SELECT COUNT(*) FROM USERS_ADDRESSES WHERE USER_ID = :USER_ID"</span>)
+    <span class="kw">int</span> countByUserId(<span class="ann">@Param</span>(<span class="str">"USER_ID"</span>) Long userId);
+}</code></pre></div>
+
+<div class="filename">Ch15/spring-data-jdbc6/src/test/.../UserAddressManyToManyTest.java</div>
+<pre><code><span class="ann">@SpringBootTest</span>
+<span class="ann">@TestInstance</span>(TestInstance.Lifecycle.PER_CLASS)
+<span class="kw">public class</span> UserAddressManyToManyTest {
+
+    <span class="ann">@Autowired</span> <span class="kw">private</span> UserAddressManyToManyRepository userAddressManyToManyRepository;
+    <span class="ann">@Autowired</span> <span class="kw">private</span> AddressManyToManyRepository       addressManyToManyRepository;
+    <span class="ann">@Autowired</span> <span class="kw">private</span> UserManyToManyRepository          userManyToManyRepository;
+
+    <span class="kw">private static</span> Address address1 = generateAddress(<span class="str">"11"</span>);
+    <span class="kw">private static</span> Address address2 = generateAddress(<span class="str">"22"</span>);
+    <span class="kw">private static</span> Address address3 = generateAddress(<span class="str">"33"</span>);
+
+    <span class="ann">@BeforeAll</span>
+    <span class="kw">void</span> beforeAll() {
+        addressManyToManyRepository.save(address1);       <span class="cmt">// 地址先独立存好</span>
+        addressManyToManyRepository.save(address2);
+        addressManyToManyRepository.save(address3);
+        userManyToManyRepository.saveAll(generateUsers());<span class="cmt">// 存用户时连带写中间表</span>
+    }
+
+    <span class="ann">@Test</span>
+    <span class="kw">void</span> manyToManyTest() {
+        assertAll(
+            () -&gt; assertEquals(<span class="str">10</span>, userManyToManyRepository.count()),
+            () -&gt; assertEquals(<span class="str">3</span>,  addressManyToManyRepository.count()),
+            () -&gt; assertEquals(<span class="str">20</span>, userAddressManyToManyRepository.count()),
+            () -&gt; assertEquals(<span class="str">2</span>,
+                  userAddressManyToManyRepository.countByUserId(users.get(<span class="str">0</span>).getId())));
+    }
+}</code></pre>
+
+<div class="tip"><b>读懂这些断言</b><p>10 个用户、3 个地址、20 条关联 —— 每个用户关联 2 个地址（10 × 2 = 20），而 3 个地址被反复共享。这正是多对多的意义：<b>地址实体只存 3 份，却被 10 个用户共同引用。</b>如果用一对多（15.3.3），同样的场景会产生 20 行 <code>ADDRESSES</code> 记录。</p></div>
+
+<h2 id="s4"><span class="num">15.4</span> 总表：Spring Data JPA vs Spring Data JDBC</h2>
+
+<div class="tablewrap">
+<table>
+<caption>表 15.2　两者能力对比</caption>
+<thead><tr><th>维度</th><th>Spring Data JPA</th><th>Spring Data JDBC</th></tr></thead>
+<tbody>
+<tr><td>可移植性</td><td>数据库无关、可移植</td><td>通常与具体数据库绑定</td></tr>
+<tr><td>复杂度</td><td>通过 ORM 引入复杂度</td><td>更简单，但仍遵循 Spring 框架原则</td></tr>
+<tr><td>Schema</td><td>可根据实体<b>自动生成</b></td><td>由程序员写 DDL 命令生成</td></tr>
+<tr><td>查询派生</td><td>从第一个版本就有</td><td>从 2.0 版本开始有</td></tr>
+<tr><td>查询语言</td><td>JPQL + 原生 SQL 都行</td><td><b>只有原生 SQL</b></td></tr>
+<tr><td>注解</td><td>可复用带 JPA 注解的类</td><td>使用 <code>org.springframework.data</code> 包下的注解</td></tr>
+<tr><td>关系建模</td><td>通过 <code>@OneToMany</code>、<code>@Embedded</code> 等注解</td><td>主要靠程序员的<b>类设计</b></td></tr>
+<tr><td>缓存 / 延迟加载</td><td>有</td><td><b>都没有</b></td></tr>
+<tr><td>会话 / 脏检查</td><td>有</td><td><b>都没有</b>，必须显式 <code>save()</code></td></tr>
+</tbody>
+</table>
+</div>
+
+<div class="warn"><b>时效提醒</b><p>Spring Data JDBC 是一个年轻且处于快速发展中的项目，预计近期会加入不少新特性。上表反映的是本书写作时（Spring Data JDBC 2.x 时代）的状态。</p></div>
+
+<div class="cols">
+<div class="card"><h4>什么时候选 Spring Data JDBC</h4>
+<ul>
+<li>数据模型简单，基本是「表 ↔ 类」一一对应</li>
+<li>已经确定了数据库厂商，短期不会换</li>
+<li>团队想要<b>可预测的 SQL</b>：每次操作发了哪些语句一眼可见</li>
+<li>不想被 <code>LazyInitializationException</code>、n+1、脏检查时机这些问题困扰</li>
+</ul></div>
+<div class="card"><h4>什么时候还是选 Spring Data JPA</h4>
+<ul>
+<li>需要数据库可移植性</li>
+<li>领域模型有丰富的双向关联、继承层次</li>
+<li>需要二级缓存、延迟加载来撑性能</li>
+<li>希望 schema 由实体驱动生成（开发期尤其省事）</li>
+</ul></div>
+</div>
+
+<div class="summary" id="s5">
+<h3>本章小结</h3>
+<ul>
+<li>可以用 Spring Boot <b>创建并配置一个 Spring Data JDBC 项目</b>，逐步添加查询数据库的方法，并建模不同类型的关系。注意 MySQL 这类非内嵌数据库必须设 <code>spring.sql.init.mode=always</code>，<code>schema.sql</code> 才会执行。</li>
+<li>可以按照 Spring Data JDBC 的<b>查询构建器机制</b>（2.0 版本引入）定义并使用一系列查询方法来访问仓库。注意它派生的是<b>原生 SQL</b>，且不支持连接。</li>
+<li>Spring Data JDBC 的能力包括<b>限制查询结果、排序、分页、流式结果和 <code>@Query</code> 注解</b>。<code>Sort.TypedSort</code> 提供类型安全的排序；流必须关闭；<code>@Query</code> 只支持 <code>@Param</code> 具名参数。</li>
+<li>可以创建并使用<b>修改型查询</b>（<code>@Modifying</code> + <code>@Query</code>）来更新和删除实体。<b>delete 方法没有查询派生。</b></li>
+<li>可以用 Spring Data JDBC 建模<b>一对一、一对多、多对多</b>关系以及<b>嵌入式实体</b>：<code>@MappedCollection</code> 的基数由字段是单值还是集合决定；嵌入用 <code>@Embedded(onEmpty = USE_NULL)</code>；<b>多对多必须手写中间类</b>。</li>
+<li>子实体不持有回指父实体的外键字段，因此凡是要按外键查询的方法（如 <code>countByUserId</code>）都必须用 <code>@Query</code> 手写 SQL。</li>
+</ul>
+</div>
+
+<div class="pager">
+  <a href="ch14.html">← 第 14 章　把 JPA 与 Hibernate 集成进 Spring</a>
+  <a href="ch16.html">第 16 章　使用 Spring Data REST →</a>
+</div>
+</main>
+</div>
+</body>
+</html>

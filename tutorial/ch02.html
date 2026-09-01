@@ -1,0 +1,619 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>第 2 章 · 启动一个项目</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="topbar"><div class="topbar-inner">
+  <a class="brand" href="index.html">Java Persistence 讲义</a>
+  <span class="spacer"></span>
+  <a href="ch01.html">← 上一章</a>
+  <a href="index.html">目录</a>
+  <a href="ch03.html">下一章 →</a>
+</div></div>
+
+<div class="wrap">
+<nav class="toc">
+  <h4>本章目录</h4>
+  <a href="#s1">2.1 Hibernate 全家桶</a>
+  <a href="#s2">2.2 Spring Data 全家桶</a>
+  <a href="#s3">2.3 JPA 版 Hello World</a>
+  <a class="sub" href="#s31">配置持久化单元</a>
+  <a class="sub" href="#s32">编写持久化类</a>
+  <a class="sub" href="#s33">存取消息</a>
+  <a href="#s4">2.4 原生 Hibernate 配置</a>
+  <a href="#s5">2.5 JPA ⇄ Hibernate 互转</a>
+  <a href="#s6">2.6 Spring Data JPA 版</a>
+  <a href="#s7">2.7 三种方式对比</a>
+  <a href="#s8">本章小结</a>
+</nav>
+
+<main>
+<div class="hero">
+  <div class="eyebrow">Part 1 · 入门 ORM</div>
+  <h1>第 2 章　启动一个项目</h1>
+  <p>同一个「存一条消息、再读出来」的需求，本章用 <b>三种</b> 方式各写一遍：标准 JPA、原生 Hibernate、Spring Data JPA。看完你会对「规范 / 实现 / 上层封装」三者的边界形成肌肉记忆。</p>
+</div>
+
+<h2 id="s1"><span class="num">2.1</span>Hibernate 全家桶</h2>
+<p>Hibernate 今天已经远不止是一个 ORM 服务，而是一整套数据管理工具集：</p>
+
+<figure><div class="fig-box">
+<svg viewBox="0 0 840 300" xmlns="http://www.w3.org/2000/svg" font-family="Inter,system-ui,sans-serif">
+  <rect x="20" y="205" width="800" height="72" rx="9" fill="var(--java-soft)" stroke="var(--java)" stroke-width="2"/>
+  <text x="420" y="234" text-anchor="middle" font-size="15" font-weight="700" fill="var(--java)">Hibernate ORM（核心 · 最老的项目）</text>
+  <text x="420" y="256" text-anchor="middle" font-size="12" fill="var(--ink-soft)">SQL 持久化基础服务 + 原生私有 API　·　不依赖任何框架/运行时，任何 JDK、只要能连上数据源即可</text>
+  <text x="420" y="272" text-anchor="middle" font-size="11.5" fill="var(--ink-faint)">是下面这些项目的地基</text>
+
+  <g font-size="12">
+    <rect x="20" y="40" width="152" height="140" rx="8" fill="var(--panel)" stroke="var(--accent)" stroke-width="1.8"/>
+    <text x="96" y="64" text-anchor="middle" font-size="13" font-weight="700" fill="var(--accent)">EntityManager</text>
+    <text x="96" y="86" text-anchor="middle" font-size="11.5" fill="var(--ink)">JPA 标准的 Hibernate</text>
+    <text x="96" y="104" text-anchor="middle" font-size="11.5" fill="var(--ink)">实现（可选模块）</text>
+    <text x="96" y="130" text-anchor="middle" font-size="11" fill="var(--ink-faint)">原生特性在每个方面</text>
+    <text x="96" y="146" text-anchor="middle" font-size="11" fill="var(--ink-faint)">都是 JPA 的<tspan font-weight="700" fill="var(--accent)">超集</tspan></text>
+    <text x="96" y="170" text-anchor="middle" font-size="11" fill="var(--ink-faint)">→ 本书主线</text>
+
+    <rect x="184" y="40" width="152" height="140" rx="8" fill="var(--panel)" stroke="var(--line-strong)"/>
+    <text x="260" y="64" text-anchor="middle" font-size="13" font-weight="700" fill="var(--ink)">Validator</text>
+    <text x="260" y="90" text-anchor="middle" font-size="11.5" fill="var(--ink-soft)">Bean Validation</text>
+    <text x="260" y="107" text-anchor="middle" font-size="11.5" fill="var(--ink-soft)">(JSR 303) 参考实现</text>
+    <text x="260" y="133" text-anchor="middle" font-size="11" fill="var(--ink-faint)">声明式校验，独立于</text>
+    <text x="260" y="149" text-anchor="middle" font-size="11" fill="var(--ink-faint)">其他 Hibernate 项目</text>
+    <text x="260" y="170" text-anchor="middle" font-size="11" fill="var(--accent)">→ 第 3 章</text>
+
+    <rect x="348" y="40" width="152" height="140" rx="8" fill="var(--panel)" stroke="var(--line-strong)"/>
+    <text x="424" y="64" text-anchor="middle" font-size="13" font-weight="700" fill="var(--ink)">Envers</text>
+    <text x="424" y="90" text-anchor="middle" font-size="11.5" fill="var(--ink-soft)">审计日志 +</text>
+    <text x="424" y="107" text-anchor="middle" font-size="11.5" fill="var(--ink-soft)">数据多版本保存</text>
+    <text x="424" y="133" text-anchor="middle" font-size="11" fill="var(--ink-faint)">类似 Git/SVN 的</text>
+    <text x="424" y="149" text-anchor="middle" font-size="11" fill="var(--ink-faint)">数据历史与审计轨迹</text>
+    <text x="424" y="170" text-anchor="middle" font-size="11" fill="var(--accent)">→ 第 13 章</text>
+
+    <rect x="512" y="40" width="152" height="140" rx="8" fill="var(--panel)" stroke="var(--line-strong)"/>
+    <text x="588" y="64" text-anchor="middle" font-size="13" font-weight="700" fill="var(--ink)">Search</text>
+    <text x="588" y="90" text-anchor="middle" font-size="11.5" fill="var(--ink-soft)">把领域模型数据的索引</text>
+    <text x="588" y="107" text-anchor="middle" font-size="11.5" fill="var(--ink-soft)">同步到 Apache Lucene</text>
+    <text x="588" y="133" text-anchor="middle" font-size="11" fill="var(--ink-faint)">给应用加全文检索</text>
+    <text x="588" y="163" text-anchor="middle" font-size="11" fill="var(--ink-faint)">（本书不覆盖）</text>
+
+    <rect x="676" y="40" width="144" height="140" rx="8" fill="var(--panel)" stroke="var(--line-strong)"/>
+    <text x="748" y="64" text-anchor="middle" font-size="13" font-weight="700" fill="var(--ink)">OGM</text>
+    <text x="748" y="88" text-anchor="middle" font-size="11.5" fill="var(--ink-soft)">object/grid mapper</text>
+    <text x="748" y="106" text-anchor="middle" font-size="11.5" fill="var(--ink-soft)">给 NoSQL 提供 JPA</text>
+    <text x="748" y="126" text-anchor="middle" font-size="11" fill="var(--ink-faint)">复用核心引擎，存入</text>
+    <text x="748" y="142" text-anchor="middle" font-size="11" fill="var(--ink-faint)">KV/文档/图数据库</text>
+    <text x="748" y="163" text-anchor="middle" font-size="11" fill="var(--accent)">→ 第 18 章</text>
+  </g>
+  <path d="M96 180 L96 205 M260 180 L260 205 M424 180 L424 205 M588 180 L588 205 M748 180 L748 205" stroke="var(--line-strong)" stroke-width="1.4" stroke-dasharray="3 3"/>
+  <text x="420" y="20" text-anchor="middle" font-size="11.5" fill="var(--ink-faint)">另有 Hibernate Reactive（非阻塞 API，本书不覆盖）　源码：github.com/hibernate</text>
+</svg>
+</div><figcaption>图 2-A　Hibernate 项目套件：核心 ORM 是地基，其余都是可选叠加</figcaption></figure>
+
+<h2 id="s2"><span class="num">2.2</span>Spring Data 全家桶</h2>
+<p>Spring Data 是 Spring 家族的<b>伞形项目（umbrella project）</b>，目标是统一并简化对关系型和 NoSQL 数据库的访问：</p>
+
+<div class="tablewrap"><table>
+<thead><tr><th>模块</th><th>职责</th><th>本书</th></tr></thead>
+<tbody>
+<tr><td><b>Spring Data Commons</b></td><td>提供持久化 Java 类的<b>元数据模型</b>和<b>技术中立的 Repository 接口</b>——所有子项目的公共地基</td><td>贯穿全书</td></tr>
+<tr><td><b>Spring Data JPA</b></td><td>实现基于 JPA 的 repository：减少样板代码，为 repository 接口生成实现</td><td>第 4 章</td></tr>
+<tr><td><b>Spring Data JDBC</b></td><td>实现基于 JDBC 的 repository。<b>不提供</b>缓存、懒加载等 JPA 能力 —— 更简单、也更受限的 ORM</td><td>第 15 章</td></tr>
+<tr><td><b>Spring Data REST</b></td><td>把 Spring Data repository <b>导出为 RESTful 资源</b></td><td>第 16 章</td></tr>
+<tr><td><b>Spring Data MongoDB</b></td><td>访问 MongoDB 文档数据库，依托 repository 风格与 POJO 编程模型</td><td>第 17 章</td></tr>
+<tr><td><b>Spring Data Redis</b></td><td>访问 Redis 键值数据库，提供高低两层抽象</td><td>不覆盖</td></tr>
+</tbody></table></div>
+
+<h2 id="s3"><span class="num">2.3</span>“Hello World” with JPA</h2>
+
+<div class="note"><b>动手前提</b>
+<p>示例假设本机装有 <b>MySQL 8.0</b>，用户名 <code>root</code>、<b>无密码</b>。运行前先执行 <code>Ch02/Ch02.sql</code> 建库：</p>
+<pre style="margin-top:8px;margin-bottom:0"><code><span class="kw">DROP DATABASE IF EXISTS</span> CH02;
+<span class="kw">CREATE DATABASE</span> CH02;</code></pre>
+<p style="margin-top:8px">请把各配置文件里的凭据改成你自己机器上的。</p></div>
+
+<div class="filename">Ch02/helloworld/pom.xml　—— 三个核心依赖</div>
+<pre><code>&lt;<span class="kw">dependency</span>&gt;
+    &lt;groupId&gt;org.hibernate&lt;/groupId&gt;
+    &lt;artifactId&gt;<span class="ann">hibernate-entitymanager</span>&lt;/artifactId&gt;   <span class="cmt">&lt;!-- 传递依赖 hibernate-core + JPA 接口桩 --&gt;</span>
+    &lt;version&gt;5.6.9.Final&lt;/version&gt;
+&lt;/<span class="kw">dependency</span>&gt;
+&lt;<span class="kw">dependency</span>&gt;
+    &lt;groupId&gt;org.junit.jupiter&lt;/groupId&gt;
+    &lt;artifactId&gt;<span class="ann">junit-jupiter-engine</span>&lt;/artifactId&gt;      <span class="cmt">&lt;!-- 用 JUnit 5 跑测试 --&gt;</span>
+    &lt;version&gt;5.8.2&lt;/version&gt; &lt;scope&gt;test&lt;/scope&gt;
+&lt;/<span class="kw">dependency</span>&gt;
+&lt;<span class="kw">dependency</span>&gt;
+    &lt;groupId&gt;mysql&lt;/groupId&gt;
+    &lt;artifactId&gt;<span class="ann">mysql-connector-java</span>&lt;/artifactId&gt;      <span class="cmt">&lt;!-- MySQL 官方 JDBC 驱动 --&gt;</span>
+    &lt;version&gt;8.0.29&lt;/version&gt;
+&lt;/<span class="kw">dependency</span>&gt;</code></pre>
+
+<h3 id="s31">2.3.1　配置持久化单元（persistence unit）</h3>
+
+<div class="tip"><b>什么是持久化单元</b><p><b>持久化单元 = 领域模型类映射 + 一个数据库连接 + 若干配置项</b>。每个应用<b>至少</b>有一个；如果要连多个（逻辑或物理）数据库，就会有多个。它是 JPA 的起点。</p></div>
+
+<div class="filename">Ch02/helloworld/src/main/resources/META-INF/persistence.xml　（位置是标准约定，必须在 classpath 的 META-INF 下）</div>
+<pre><code>&lt;persistence xmlns=<span class="str">"http://java.sun.com/xml/ns/persistence"</span> … version=<span class="str">"2.0"</span>&gt;
+
+    &lt;<span class="kw">persistence-unit</span> name=<span class="str">"ch02"</span>&gt;                    <span class="cmt">❶ 单元名必须唯一</span>
+        &lt;provider&gt;org.hibernate.jpa.HibernatePersistenceProvider&lt;/provider&gt;   <span class="cmt">❷</span>
+        &lt;properties&gt;
+            &lt;property name=<span class="str">"javax.persistence.jdbc.driver"</span>
+                      value=<span class="str">"com.mysql.cj.jdbc.Driver"</span>/&gt;                       <span class="cmt">❸ 驱动</span>
+            &lt;property name=<span class="str">"javax.persistence.jdbc.url"</span>
+                      value=<span class="str">"jdbc:mysql://localhost:3306/CH02?serverTimezone=UTC"</span>/&gt;  <span class="cmt">❹ URL</span>
+            &lt;property name=<span class="str">"javax.persistence.jdbc.user"</span> value=<span class="str">"root"</span>/&gt;         <span class="cmt">❺ 用户名</span>
+            &lt;property name=<span class="str">"javax.persistence.jdbc.password"</span> value=<span class="str">""</span>/&gt;         <span class="cmt">❻ 密码</span>
+
+            &lt;property name=<span class="str">"hibernate.dialect"</span>
+                      value=<span class="str">"org.hibernate.dialect.MySQL8Dialect"</span>/&gt;              <span class="cmt">❼ 方言</span>
+            &lt;property name=<span class="str">"hibernate.show_sql"</span>   value=<span class="str">"true"</span>/&gt;               <span class="cmt">❽ 打印 SQL</span>
+            &lt;property name=<span class="str">"hibernate.format_sql"</span> value=<span class="str">"true"</span>/&gt;               <span class="cmt">❾ 美化并加注释</span>
+            &lt;property name=<span class="str">"hibernate.hbm2ddl.auto"</span> value=<span class="str">"create"</span>/&gt;            <span class="cmt">❿ 每次重建库</span>
+        &lt;/properties&gt;
+    &lt;/<span class="kw">persistence-unit</span>&gt;
+&lt;/persistence&gt;</code></pre>
+
+<div class="keyhint"><span class="k">❷ provider</span><span>JPA 只是<b>规范</b>，必须指出用哪家厂商的 <code>PersistenceProvider</code> 实现。换成 EclipseLink 只改这一行。</span></div>
+<div class="keyhint"><span class="k">❼ hibernate.dialect</span><span>方言告诉 Hibernate 目标库的 SQL 变体（分页语法、序列支持、类型映射……），这是<b>数据库可移植性</b>的落点。</span></div>
+<div class="keyhint"><span class="k">❽❾ show_sql / format_sql</span><span>把 Hibernate 实际发出的 SQL 打出来并格式化、附带注释说明「为什么发这条」。<b>学习期务必开着</b>——第 1 章说过，你必须能看懂它发的 SQL。</span></div>
+<div class="keyhint"><span class="k">❿ hbm2ddl.auto=create</span><span>每次运行都<b>从头重建</b>数据库。适合自动化测试（每次跑测试都有干净的库），<b>绝不能用于生产</b>。</span></div>
+
+<h3 id="s32">2.3.2　编写持久化类</h3>
+
+<div class="filename">Ch02/helloworld/src/main/java/com/manning/javapersistence/ch02/Message.java</div>
+<pre><code><span class="ann">@Entity</span>                                              <span class="cmt">❶ 必须；映射到 MESSAGE 表</span>
+<span class="kw">public class</span> Message {
+
+    <span class="ann">@Id</span>                                              <span class="cmt">❷ 必须；标识符属性 → id 列</span>
+    <span class="ann">@GeneratedValue</span>(strategy = GenerationType.IDENTITY) <span class="cmt">❸ 由谁生成 id 值</span>
+    <span class="kw">private</span> Long id;
+
+    <span class="kw">private</span> String text;                              <span class="cmt">❹ 普通属性 → text 列</span>
+
+    <span class="kw">public</span> String getText() { <span class="kw">return</span> text; }
+    <span class="kw">public void</span> setText(String text) { <span class="kw">this</span>.text = text; }
+}</code></pre>
+
+<div class="note"><b>为什么这个类如此“普通”很重要</b>
+<p>它<b>没有实现任何接口、没有继承任何特殊超类</b>。所以你可以像用普通 Java 类一样用它：</p>
+<pre style="margin:8px 0 0"><code>Message msg = <span class="kw">new</span> Message();
+msg.setText(<span class="str">"Hello!"</span>);
+System.out.println(msg.getText());   <span class="cmt">// 完全不需要任何容器</span></code></pre>
+<p style="margin-top:8px">这正是 Hibernate 区别于某些持久化方案的关键特性：<b>持久化类可用于任何执行上下文</b>。第 3 章会把这一点提升为「透明持久化」原则。</p></div>
+
+<div class="tip"><b>标识符属性的作用</b><p>它让应用能访问持久化实例的<b>数据库标识</b>——主键值。<b>两个 <code>Message</code> 实例若标识符值相同，它们代表数据库中的同一行</b>（回顾第 1 章的“标识问题”）。这里用 <code>Long</code>，但这不是硬性要求，Hibernate 几乎允许任何类型作标识符。</p></div>
+
+<h3 id="s33">2.3.3　存储与加载消息：一个完整的工作单元</h3>
+
+<div class="filename">Ch02/helloworld/src/test/java/…/ch02/HelloWorldJPATest.java</div>
+<pre><code><span class="kw">public class</span> HelloWorldJPATest {
+    <span class="ann">@Test</span>
+    <span class="kw">public void</span> storeLoadMessage() {
+        EntityManagerFactory emf =
+            Persistence.createEntityManagerFactory(<span class="str">"ch02"</span>);   <span class="cmt">❶ 代表持久化单元；线程安全，全应用共享一个</span>
+        <span class="kw">try</span> {
+            EntityManager em = emf.createEntityManager();       <span class="cmt">❷ 开启一次会话 = 所有持久化操作的上下文</span>
+            em.getTransaction().begin();                        <span class="cmt">❸ 在本线程开启事务</span>
+
+            Message message = <span class="kw">new</span> Message();                  <span class="cmt">❹ 新建瞬时(transient)实例</span>
+            message.setText(<span class="str">"Hello World!"</span>);
+
+            em.persist(message);                               <span class="cmt">❺ 纳入持久化上下文（未必立刻发 SQL！）</span>
+
+            em.getTransaction().commit();                      <span class="cmt">❻ 提交 → Hibernate 自动执行 INSERT</span>
+            <span class="cmt">// INSERT into MESSAGE (ID, TEXT) values (1, 'Hello World!')</span>
+
+            em.getTransaction().begin();                       <span class="cmt">❼ 只读也要在事务里</span>
+
+            List&lt;Message&gt; messages = em
+                .createQuery(<span class="str">"select m from Message m"</span>, Message.class)  <span class="cmt">❽ 这是 JPQL 不是 SQL</span>
+                .getResultList();
+            <span class="cmt">// SELECT * from MESSAGE</span>
+
+            messages.get(messages.size() - 1)
+                    .setText(<span class="str">"Hello World from JPA!"</span>);         <span class="cmt">❾ 只是改了个 Java 字段…</span>
+
+            em.getTransaction().commit();                      <span class="cmt">❿ …提交时脏检查自动发 UPDATE</span>
+            <span class="cmt">// UPDATE MESSAGE set TEXT = 'Hello World from JPA!' where ID = 1</span>
+
+            assertAll(
+                () -&gt; assertEquals(1, messages.size()),
+                () -&gt; assertEquals(<span class="str">"Hello World from JPA!"</span>, messages.get(0).getText())
+            );
+            em.close();                                        <span class="cmt">⓫ 谁创建谁关闭</span>
+        } <span class="kw">finally</span> {
+            emf.close();                                       <span class="cmt">⓬</span>
+        }
+    }
+}</code></pre>
+
+<figure><div class="fig-box">
+<svg viewBox="0 0 840 470" xmlns="http://www.w3.org/2000/svg" font-family="Inter,system-ui,sans-serif">
+  <defs><marker id="s2a" markerWidth="9" markerHeight="9" refX="8" refY="4.5" orient="auto"><path d="M0 0 L9 4.5 L0 9 z" fill="var(--accent)"/></marker>
+  <marker id="s2b" markerWidth="9" markerHeight="9" refX="8" refY="4.5" orient="auto"><path d="M0 0 L9 4.5 L0 9 z" fill="var(--sql)"/></marker></defs>
+  <!-- lanes -->
+  <text x="105" y="24" text-anchor="middle" font-size="12.5" font-weight="700" fill="var(--java)">你的代码</text>
+  <text x="400" y="24" text-anchor="middle" font-size="12.5" font-weight="700" fill="var(--accent)">持久化上下文（Persistence Context）</text>
+  <text x="740" y="24" text-anchor="middle" font-size="12.5" font-weight="700" fill="var(--sql)">数据库</text>
+  <path d="M105 34 L105 460" stroke="var(--java)" stroke-width="1.2" stroke-dasharray="4 4"/>
+  <path d="M400 34 L400 460" stroke="var(--accent)" stroke-width="1.2" stroke-dasharray="4 4"/>
+  <path d="M740 34 L740 460" stroke="var(--sql)" stroke-width="1.2" stroke-dasharray="4 4"/>
+
+  <rect x="330" y="44" width="140" height="24" rx="5" fill="var(--accent-soft)" stroke="var(--accent)"/>
+  <text x="400" y="61" text-anchor="middle" font-size="11.5" fill="var(--ink)">createEntityManager()</text>
+
+  <!-- persist -->
+  <path d="M105 96 L392 96" stroke="var(--accent)" stroke-width="1.5" marker-end="url(#s2a)"/>
+  <text x="248" y="90" text-anchor="middle" font-size="11.5" fill="var(--ink)">em.persist(message)</text>
+  <rect x="330" y="106" width="220" height="42" rx="6" fill="var(--accent-soft)" stroke="var(--accent)"/>
+  <text x="440" y="123" text-anchor="middle" font-size="11" fill="var(--ink)">message 变为「持久态」，纳入上下文</text>
+  <text x="440" y="140" text-anchor="middle" font-size="11" font-weight="700" fill="var(--accent)">此刻还没有发任何 SQL！</text>
+
+  <!-- commit 1 -->
+  <path d="M105 176 L392 176" stroke="var(--accent)" stroke-width="1.5" marker-end="url(#s2a)"/>
+  <text x="248" y="170" text-anchor="middle" font-size="11.5" fill="var(--ink)">tx.commit()</text>
+  <path d="M408 190 L732 190" stroke="var(--sql)" stroke-width="1.5" marker-end="url(#s2b)"/>
+  <text x="570" y="184" text-anchor="middle" font-family="monospace" font-size="10.5" fill="var(--sql)">INSERT into MESSAGE(ID,TEXT) values(1,'Hello World!')</text>
+
+  <!-- query -->
+  <path d="M105 232 L392 232" stroke="var(--accent)" stroke-width="1.5" marker-end="url(#s2a)"/>
+  <text x="248" y="226" text-anchor="middle" font-size="11.5" fill="var(--ink)">createQuery("select m from Message m")</text>
+  <path d="M408 246 L732 246" stroke="var(--sql)" stroke-width="1.5" marker-end="url(#s2b)"/>
+  <text x="570" y="240" text-anchor="middle" font-family="monospace" font-size="10.5" fill="var(--sql)">SELECT * from MESSAGE</text>
+  <path d="M732 262 L408 262" stroke="var(--sql)" stroke-width="1.5" marker-end="url(#s2b)" stroke-dasharray="4 3"/>
+  <text x="570" y="277" text-anchor="middle" font-size="11" fill="var(--ink-soft)">结果被放进上下文，仍处于「受管」状态</text>
+
+  <!-- dirty -->
+  <path d="M105 306 L392 306" stroke="var(--accent)" stroke-width="1.5" marker-end="url(#s2a)"/>
+  <text x="248" y="300" text-anchor="middle" font-size="11.5" fill="var(--ink)">msg.setText("…from JPA!")</text>
+  <rect x="330" y="316" width="240" height="40" rx="6" fill="var(--warn-soft)" stroke="var(--warn)"/>
+  <text x="450" y="332" text-anchor="middle" font-size="11" fill="var(--ink)">上下文比对快照，发现该实例「变脏」</text>
+  <text x="450" y="349" text-anchor="middle" font-size="11" font-weight="700" fill="var(--warn)">自动脏检查（automatic dirty checking）</text>
+
+  <!-- commit 2 -->
+  <path d="M105 384 L392 384" stroke="var(--accent)" stroke-width="1.5" marker-end="url(#s2a)"/>
+  <text x="248" y="378" text-anchor="middle" font-size="11.5" fill="var(--ink)">tx.commit()</text>
+  <path d="M408 398 L732 398" stroke="var(--sql)" stroke-width="1.5" marker-end="url(#s2b)"/>
+  <text x="570" y="392" text-anchor="middle" font-family="monospace" font-size="10.5" fill="var(--sql)">UPDATE MESSAGE set TEXT=… where ID=1</text>
+
+  <rect x="20" y="424" width="800" height="34" rx="6" fill="var(--java-soft)" stroke="var(--java)"/>
+  <text x="420" y="446" text-anchor="middle" font-size="12" fill="var(--ink)">全程<tspan font-weight="700">没有一句 update 调用</tspan> —— 你只改了内存里的对象，同步交给持久化上下文</text>
+</svg>
+</div><figcaption>图 2-B　一个工作单元的时序：persist 不立刻发 SQL，commit 才刷；改字段靠脏检查自动 UPDATE</figcaption></figure>
+
+<div class="pit"><b>两个必须记住的点</b>
+<p><b>① 这不是 SQL，是 JPQL。</b>查询串里的 <code>Message</code> 指的<b>不是表名</b>，而是<b>持久化类名</b> —— 所以它<b>大小写敏感</b>。就算你把这个类映射到别的表名，查询依然照常工作。</p>
+<p style="margin-top:6px"><b>② 自动脏检查。</b>Hibernate 检测到 <code>text</code> 属性被改，提交时自动 UPDATE。你不必显式告诉持久化管理器“我改了、去更新数据库吧”。</p></div>
+
+<h2 id="s4"><span class="num">2.4</span>原生 Hibernate 的引导与配置</h2>
+
+<div class="note"><b>可以先跳过</b><p>JPA 的配置已经足够标准和丰富，<b>绝大多数应用（包括相当复杂的）都不需要</b>原生引导 API。等你要扩展 Hibernate 类型适配器、添加自定义 SQL 函数时再回来读本节。</p></div>
+
+<p>对应关系很直接：JPA 的 <code>EntityManagerFactory</code> ⇄ 原生的 <code>org.hibernate.SessionFactory</code>；JPA 的 <code>EntityManager</code> ⇄ 原生的 <code>Session</code>。配置文件可用 <code>hibernate.properties</code> 或 <code>hibernate.cfg.xml</code>（本例用后者，放在 <code>src/test/resources</code> 因为测试要用）。</p>
+
+<div class="filename">Ch02/helloworld/src/test/resources/hibernate.cfg.xml</div>
+<pre><code>&lt;<span class="kw">hibernate-configuration</span>&gt;
+    &lt;<span class="kw">session-factory</span>&gt;                                     <span class="cmt">配置的是 SessionFactory 对象</span>
+        &lt;property name=<span class="str">"hibernate.connection.driver_class"</span>&gt;com.mysql.cj.jdbc.Driver&lt;/property&gt;
+        &lt;property name=<span class="str">"hibernate.connection.url"</span>&gt;jdbc:mysql://localhost:3306/CH02?serverTimezone=UTC&lt;/property&gt;
+        &lt;property name=<span class="str">"hibernate.connection.username"</span>&gt;root&lt;/property&gt;
+        &lt;property name=<span class="str">"hibernate.connection.password"</span>&gt;&lt;/property&gt;
+        &lt;property name=<span class="str">"hibernate.connection.pool_size"</span>&gt;<span class="hl">50</span>&lt;/property&gt;   <span class="cmt">连接池上限</span>
+        &lt;property name=<span class="str">"show_sql"</span>&gt;true&lt;/property&gt;
+        &lt;property name=<span class="str">"hibernate.hbm2ddl.auto"</span>&gt;create&lt;/property&gt;
+    &lt;/<span class="kw">session-factory</span>&gt;
+&lt;/<span class="kw">hibernate-configuration</span>&gt;</code></pre>
+
+<div class="filename">Ch02/helloworld/src/test/java/…/ch02/HelloWorldHibernateTest.java</div>
+<pre><code><span class="kw">private static</span> SessionFactory createSessionFactory() {
+    Configuration configuration = <span class="kw">new</span> Configuration();                     <span class="cmt">❶</span>
+    configuration.configure().addAnnotatedClass(Message.class);            <span class="cmt">❷ configure() 加载 hibernate.cfg.xml</span>
+    ServiceRegistry serviceRegistry = <span class="kw">new</span> StandardServiceRegistryBuilder()  <span class="cmt">❸ 建造者模式</span>
+            .applySettings(configuration.getProperties()).build();
+    <span class="kw">return</span> configuration.buildSessionFactory(serviceRegistry);             <span class="cmt">❹</span>
+}
+
+<span class="ann">@Test</span>
+<span class="kw">public void</span> storeLoadMessage() {
+    <span class="kw">try</span> (SessionFactory sessionFactory = createSessionFactory();           <span class="cmt">❺ 二者都实现 AutoCloseable</span>
+         Session session = sessionFactory.openSession()) {                 <span class="cmt">❻</span>
+        session.beginTransaction();
+
+        Message message = <span class="kw">new</span> Message();
+        message.setText(<span class="str">"Hello World from Hibernate!"</span>);
+        session.persist(message);                    <span class="cmt">← 方法名和 JPA 一模一样</span>
+        session.getTransaction().commit();
+
+        session.beginTransaction();
+        CriteriaQuery&lt;Message&gt; criteriaQuery =
+            session.getCriteriaBuilder().createQuery(Message.class);       <span class="cmt">❼ 这次用 Criteria API</span>
+        criteriaQuery.from(Message.class);
+        List&lt;Message&gt; messages = session.createQuery(criteriaQuery).getResultList();
+        session.getTransaction().commit();
+        …
+    }
+}</code></pre>
+
+<div class="tip"><b>ServiceRegistry 是什么</b><p>它<b>托管并管理需要访问 SessionFactory 的各类「服务」</b>。服务是为 Hibernate 提供各种功能<b>可插拔实现</b>的类。用建造者模式链式调用来构造这个不可变的注册表。</p></div>
+
+<h2 id="s5"><span class="num">2.5</span>JPA ⇄ 原生 Hibernate 双向切换</h2>
+
+<figure><div class="fig-box">
+<svg viewBox="0 0 800 250" xmlns="http://www.w3.org/2000/svg" font-family="Inter,system-ui,sans-serif">
+  <defs><marker id="sw" markerWidth="10" markerHeight="10" refX="9" refY="5" orient="auto"><path d="M0 0 L10 5 L0 10 z" fill="var(--accent)"/></marker></defs>
+  <rect x="40" y="60" width="280" height="120" rx="10" fill="var(--java-soft)" stroke="var(--java)" stroke-width="1.8"/>
+  <text x="180" y="88" text-anchor="middle" font-size="14" font-weight="700" fill="var(--java)">JPA 标准 API</text>
+  <text x="180" y="116" text-anchor="middle" font-family="monospace" font-size="12.5" fill="var(--ink)">EntityManagerFactory</text>
+  <text x="180" y="138" text-anchor="middle" font-family="monospace" font-size="12.5" fill="var(--ink)">EntityManager</text>
+  <text x="180" y="162" text-anchor="middle" font-size="11" fill="var(--ink-faint)">可移植，可换实现</text>
+
+  <rect x="480" y="60" width="280" height="120" rx="10" fill="var(--sql-soft)" stroke="var(--sql)" stroke-width="1.8"/>
+  <text x="620" y="88" text-anchor="middle" font-size="14" font-weight="700" fill="var(--sql)">原生 Hibernate API</text>
+  <text x="620" y="116" text-anchor="middle" font-family="monospace" font-size="12.5" fill="var(--ink)">SessionFactory</text>
+  <text x="620" y="138" text-anchor="middle" font-family="monospace" font-size="12.5" fill="var(--ink)">Session</text>
+  <text x="620" y="162" text-anchor="middle" font-size="11" fill="var(--ink-faint)">锁定厂商，但功能是超集</text>
+
+  <path d="M325 100 L475 100" stroke="var(--accent)" stroke-width="2" marker-end="url(#sw)"/>
+  <text x="400" y="92" text-anchor="middle" font-size="11.5" font-weight="700" fill="var(--accent)">unwrap()</text>
+  <text x="400" y="46" text-anchor="middle" font-family="monospace" font-size="10.5" fill="var(--ink-soft)">emf.unwrap(SessionFactory.class)</text>
+
+  <path d="M475 150 L325 150" stroke="var(--accent)" stroke-width="2" marker-end="url(#sw)"/>
+  <text x="400" y="142" text-anchor="middle" font-size="11.5" font-weight="700" fill="var(--accent)">拷属性 + createEntityManagerFactory()</text>
+  <text x="400" y="200" text-anchor="middle" font-family="monospace" font-size="10.5" fill="var(--ink-soft)">Persistence.createEntityManagerFactory("ch02", props)</text>
+
+  <rect x="40" y="212" width="720" height="30" rx="6" fill="var(--accent-soft)" stroke="var(--accent)"/>
+  <text x="400" y="232" text-anchor="middle" font-size="12" fill="var(--ink)">JPA 2.0 起，<tspan font-family="monospace">EntityManagerFactory</tspan> 与 <tspan font-family="monospace">EntityManager</tspan> 都声明了 <tspan font-family="monospace" font-weight="700">unwrap</tspan>，用来拿到底层实现对象</text>
+</svg>
+</div><figcaption>图 2-C　两套 API 之间的双向逃生门</figcaption></figure>
+
+<div class="cols">
+<div>
+<div class="filename">JPA → Hibernate（HelloWorldJPAToHibernateTest）</div>
+<pre><code><span class="kw">private static</span> SessionFactory getSessionFactory(
+        EntityManagerFactory emf) {
+    <span class="kw">return</span> emf.unwrap(SessionFactory.class);
+}</code></pre>
+</div>
+<div>
+<div class="filename">Hibernate → JPA（HelloWorldHibernateToJPATest）</div>
+<pre><code>Configuration cfg = <span class="kw">new</span> Configuration();
+cfg.configure().addAnnotatedClass(Message.class);
+
+Map&lt;String,String&gt; props = <span class="kw">new</span> HashMap&lt;&gt;();
+Enumeration&lt;?&gt; names =
+    cfg.getProperties().propertyNames();
+<span class="kw">while</span> (names.hasMoreElements()) {
+    String e = (String) names.nextElement();
+    props.put(e, cfg.getProperties().getProperty(e));
+}
+<span class="kw">return</span> Persistence
+    .createEntityManagerFactory(<span class="str">"ch02"</span>, props);</code></pre>
+</div>
+</div>
+
+<div class="tip"><b>全书的使用原则</b><p>本书大部分例子<b>不</b>用 <code>SessionFactory</code> / <code>Session</code>。只有当某个特性<b>仅 Hibernate 有</b>（JPA 标准没覆盖）时，才用 <code>unwrap()</code> 切到原生接口 —— 后面章节遇到时会明确指出。</p></div>
+
+<h2 id="s6"><span class="num">2.6</span>“Hello World” with Spring Data JPA</h2>
+
+<div class="filename">Ch02/helloworld/pom.xml　—— 追加 Spring 依赖</div>
+<pre><code>&lt;dependency&gt;&lt;groupId&gt;org.springframework.data&lt;/groupId&gt;
+  &lt;artifactId&gt;<span class="ann">spring-data-jpa</span>&lt;/artifactId&gt;&lt;version&gt;2.7.0&lt;/version&gt;&lt;/dependency&gt;   <span class="cmt">传递带来 spring-core / spring-context</span>
+&lt;dependency&gt;&lt;groupId&gt;org.springframework&lt;/groupId&gt;
+  &lt;artifactId&gt;<span class="ann">spring-test</span>&lt;/artifactId&gt;&lt;version&gt;5.3.20&lt;/version&gt;&lt;/dependency&gt;</code></pre>
+
+<h3>配置类：把负担从代码搬到配置</h3>
+
+<div class="filename">Ch02/helloworld/src/test/java/…/ch02/configuration/SpringDataConfiguration.java</div>
+<pre><code><span class="ann">@EnableJpaRepositories</span>(<span class="str">"com.manning.javapersistence.ch02.repositories"</span>)  <span class="cmt">❶ 扫描该包下的 repository</span>
+<span class="kw">public class</span> SpringDataConfiguration {
+
+    <span class="ann">@Bean</span>
+    <span class="kw">public</span> DataSource dataSource() {                                    <span class="cmt">❷ 数据源 bean</span>
+        DriverManagerDataSource ds = <span class="kw">new</span> DriverManagerDataSource();
+        ds.setDriverClassName(<span class="str">"com.mysql.cj.jdbc.Driver"</span>);
+        ds.setUrl(<span class="str">"jdbc:mysql://localhost:3306/CH02?serverTimezone=UTC"</span>);
+        ds.setUsername(<span class="str">"root"</span>);  ds.setPassword(<span class="str">""</span>);
+        <span class="kw">return</span> ds;
+    }
+
+    <span class="ann">@Bean</span>
+    <span class="kw">public</span> JpaTransactionManager transactionManager(EntityManagerFactory emf) {
+        <span class="kw">return new</span> JpaTransactionManager(emf);                          <span class="cmt">❸ 事务管理器 bean，Spring Data 必需</span>
+    }
+
+    <span class="ann">@Bean</span>
+    <span class="kw">public</span> JpaVendorAdapter jpaVendorAdapter() {                        <span class="cmt">❹ 厂商适配器：告诉 JPA 怎么跟 Hibernate 打交道</span>
+        HibernateJpaVendorAdapter a = <span class="kw">new</span> HibernateJpaVendorAdapter();
+        a.setDatabase(Database.MYSQL);
+        a.setShowSql(<span class="kw">true</span>);
+        <span class="kw">return</span> a;
+    }
+
+    <span class="ann">@Bean</span>
+    <span class="kw">public</span> LocalContainerEntityManagerFactoryBean entityManagerFactory() { <span class="cmt">❺ 按 JPA 容器引导契约产出 EMF 的工厂 bean</span>
+        LocalContainerEntityManagerFactoryBean b =
+                <span class="kw">new</span> LocalContainerEntityManagerFactoryBean();
+        b.setDataSource(dataSource());
+        Properties p = <span class="kw">new</span> Properties();
+        p.put(<span class="str">"hibernate.hbm2ddl.auto"</span>, <span class="str">"create"</span>);
+        b.setJpaProperties(p);
+        b.setJpaVendorAdapter(jpaVendorAdapter());
+        b.setPackagesToScan(<span class="str">"com.manning.javapersistence.ch02"</span>);        <span class="cmt">❻ 扫描实体类所在包</span>
+        <span class="kw">return</span> b;
+    }
+}</code></pre>
+
+<h3>Repository：只声明接口，实现由代理生成</h3>
+
+<div class="filename">Ch02/helloworld/src/main/java/…/ch02/repositories/MessageRepository.java　（整个文件就这么长）</div>
+<pre><code><span class="kw">public interface</span> MessageRepository <span class="kw">extends</span> CrudRepository&lt;Message, Long&gt; { }</code></pre>
+
+<figure><div class="fig-box">
+<svg viewBox="0 0 760 330" xmlns="http://www.w3.org/2000/svg" font-family="Inter,system-ui,sans-serif">
+  <defs><marker id="impl" markerWidth="13" markerHeight="13" refX="12" refY="6.5" orient="auto">
+    <path d="M0 0 L13 6.5 L0 13 z" fill="var(--bg)" stroke="var(--accent)" stroke-width="1.2"/></marker></defs>
+
+  <rect x="230" y="20" width="300" height="66" rx="8" fill="var(--bg-soft)" stroke="var(--line-strong)"/>
+  <text x="380" y="42" text-anchor="middle" font-size="13" font-weight="700" fill="var(--ink)">CrudRepository&lt;T, ID&gt;</text>
+  <text x="380" y="62" text-anchor="middle" font-family="monospace" font-size="11" fill="var(--ink-soft)">save · findAll · findById · delete · count …</text>
+  <text x="380" y="78" text-anchor="middle" font-size="11" fill="var(--ink-faint)">Spring Data Commons 提供的技术中立接口</text>
+
+  <path d="M380 130 L380 90" stroke="var(--accent)" stroke-width="1.6" marker-end="url(#impl)"/>
+  <text x="400" y="112" font-size="11" fill="var(--ink-faint)">extends</text>
+
+  <rect x="230" y="132" width="300" height="56" rx="8" fill="var(--java-soft)" stroke="var(--java)" stroke-width="1.8"/>
+  <text x="380" y="155" text-anchor="middle" font-size="13" font-weight="700" fill="var(--java)">MessageRepository</text>
+  <text x="380" y="176" text-anchor="middle" font-size="11.5" fill="var(--ink-soft)">= CrudRepository&lt;Message, Long&gt;　<tspan font-weight="700">你只写这一行</tspan></text>
+
+  <path d="M380 232 L380 192" stroke="var(--accent)" stroke-width="1.6" marker-end="url(#impl)"/>
+  <text x="400" y="214" font-size="11" fill="var(--ink-faint)">implements（运行期生成）</text>
+
+  <rect x="200" y="234" width="360" height="66" rx="8" fill="var(--accent-soft)" stroke="var(--accent)" stroke-width="2"/>
+  <text x="380" y="257" text-anchor="middle" font-size="13" font-weight="700" fill="var(--accent)">Proxy　<tspan font-family="monospace" font-size="11.5" font-weight="400">com.sun.proxy.$Proxy41</tspan></text>
+  <text x="380" y="277" text-anchor="middle" font-size="11.5" fill="var(--ink)">Spring Data JPA 自动生成的代理类</text>
+  <text x="380" y="294" text-anchor="middle" font-size="11.5" fill="var(--ink)">所有方法体由框架实现，注入到你的 <tspan font-family="monospace">@Autowired</tspan> 字段</text>
+
+  <text x="60" y="160" font-size="11.5" fill="var(--ink-faint)">Message 的 id</text>
+  <text x="60" y="178" font-size="11.5" fill="var(--ink-faint)">是 @Id Long</text>
+  <text x="60" y="196" font-size="11.5" fill="var(--ink-faint)">→ 泛型第二参</text>
+  <path d="M150 168 L225 160" stroke="var(--line-strong)" stroke-width="1" stroke-dasharray="3 3"/>
+</svg>
+</div><figcaption>图 2-4　Spring Data JPA 用代理类实现你声明的 repository 接口</figcaption></figure>
+
+<div class="filename">Ch02/helloworld/src/test/java/…/ch02/HelloWorldSpringDataJPATest.java</div>
+<pre><code><span class="ann">@ExtendWith</span>(SpringExtension.class)                            <span class="cmt">❶ 把 Spring 测试上下文接进 JUnit 5</span>
+<span class="ann">@ContextConfiguration</span>(classes = {SpringDataConfiguration.class})  <span class="cmt">❷ 用上面那个配置类</span>
+<span class="kw">public class</span> HelloWorldSpringDataJPATest {
+
+    <span class="ann">@Autowired</span>
+    <span class="kw">private</span> MessageRepository messageRepository;               <span class="cmt">❸ 注入的其实是代理实例</span>
+
+    <span class="ann">@Test</span>
+    <span class="kw">public void</span> storeLoadMessage() {
+        Message message = <span class="kw">new</span> Message();
+        message.setText(<span class="str">"Hello World from Spring Data JPA!"</span>);
+
+        messageRepository.save(message);                       <span class="cmt">❹ 继承自 CrudRepository，方法体由框架生成</span>
+
+        List&lt;Message&gt; messages =
+            (List&lt;Message&gt;) messageRepository.findAll();       <span class="cmt">❺ 同上</span>
+
+        assertAll(
+            () -&gt; assertEquals(1, messages.size()),
+            () -&gt; assertEquals(<span class="str">"Hello World from Spring Data JPA!"</span>, messages.get(0).getText())
+        );
+    }
+}</code></pre>
+
+<div class="tip"><b>短在哪里</b><p>没有显式创建工厂对象，没有显式控制事务，没有 <code>close()</code>。样板代码被彻底移除，repository 被注入进来即可使用。<b>负担转移到了配置侧 —— 而配置每个应用只做一次。</b></p></div>
+
+<h2 id="s7"><span class="num">2.7</span>三种方式的横向对比</h2>
+
+<div class="tablewrap"><table>
+<thead><tr><th style="width:130px">框架</th><th>特点</th></tr></thead>
+<tbody>
+<tr><td><b>JPA</b></td><td>
+<ul style="margin:0;padding-left:18px">
+<li>使用通用 JPA API，需要一个持久化提供者</li>
+<li><b>可以从配置里切换提供者</b></li>
+<li>需要显式管理 <code>EntityManagerFactory</code>、<code>EntityManager</code> 和事务</li>
+<li>配置量与代码量和原生 Hibernate 相当</li>
+<li>可由原生 Hibernate 配置构造出 <code>EntityManagerFactory</code> 来切过来</li>
+</ul></td></tr>
+<tr><td><b>原生<br>Hibernate</b></td><td>
+<ul style="margin:0;padding-left:18px">
+<li>使用原生 Hibernate API，<b>被锁定在这个框架上</b></li>
+<li>配置起于默认文件 <code>hibernate.cfg.xml</code> / <code>hibernate.properties</code></li>
+<li>需要显式管理 <code>SessionFactory</code>、<code>Session</code> 和事务</li>
+<li>配置量与代码量和 JPA 相当</li>
+<li>可用 <code>unwrap()</code> 从 EMF/EM 得到 SessionFactory/Session 来切过来</li>
+</ul></td></tr>
+<tr><td><b>Spring<br>Data JPA</b></td><td>
+<ul style="margin:0;padding-left:18px">
+<li>项目里需要额外的 Spring Data 依赖</li>
+<li>配置<b>顺带负责创建各种 bean</b>，包括事务管理器</li>
+<li>repository <b>只需声明接口</b>，Spring Data 以代理类形式生成实现</li>
+<li>repository 是<b>注入</b>的，不由程序员显式创建</li>
+<li><b>写的代码最少</b>，因为大部分负担被配置吸收</li>
+</ul></td></tr>
+</tbody></table></div>
+
+<h3>性能：便利是有代价的</h3>
+<p>作者在同一台机器（Windows 10、4 核 i7-5500U @2.40GHz、8GB RAM）上，用三种方式跑了 1,000 → 50,000 条记录的 insert / update / select / delete 批量操作：</p>
+
+<figure><div class="fig-box">
+<svg viewBox="0 0 820 360" xmlns="http://www.w3.org/2000/svg" font-family="Inter,system-ui,sans-serif">
+  <!-- axes -->
+  <line x1="70" y1="300" x2="790" y2="300" stroke="var(--line-strong)" stroke-width="1.4"/>
+  <line x1="70" y1="300" x2="70" y2="40" stroke="var(--line-strong)" stroke-width="1.4"/>
+  <g font-size="10.5" fill="var(--ink-faint)">
+    <line x1="70" y1="40" x2="790" y2="40" stroke="var(--line)" stroke-dasharray="3 4"/><text x="62" y="44" text-anchor="end">60000</text>
+    <line x1="70" y1="127" x2="790" y2="127" stroke="var(--line)" stroke-dasharray="3 4"/><text x="62" y="131" text-anchor="end">40000</text>
+    <line x1="70" y1="213" x2="790" y2="213" stroke="var(--line)" stroke-dasharray="3 4"/><text x="62" y="217" text-anchor="end">20000</text>
+    <text x="62" y="304" text-anchor="end">0</text>
+    <text x="84" y="318">1k</text><text x="139" y="318" text-anchor="middle">5k</text><text x="208" y="318" text-anchor="middle">10k</text>
+    <text x="346" y="318" text-anchor="middle">20k</text><text x="484" y="318" text-anchor="middle">30k</text>
+    <text x="622" y="318" text-anchor="middle">40k</text><text x="760" y="318" text-anchor="middle">50k</text>
+  </g>
+  <text x="30" y="170" font-size="11" fill="var(--ink-soft)" transform="rotate(-90 30 170)" text-anchor="middle">耗时 (ms)</text>
+  <text x="430" y="340" text-anchor="middle" font-size="11.5" fill="var(--ink-soft)">记录数</text>
+
+  <!-- Spring Data -->
+  <polyline points="83.8,290.1 139,263.6 208,236.9 346,186 484,137.2 622,88 760,41.6"
+            fill="none" stroke="var(--accent)" stroke-width="2.4"/>
+  <g fill="var(--accent)"><circle cx="83.8" cy="290.1" r="3.4"/><circle cx="139" cy="263.6" r="3.4"/><circle cx="208" cy="236.9" r="3.4"/><circle cx="346" cy="186" r="3.4"/><circle cx="484" cy="137.2" r="3.4"/><circle cx="622" cy="88" r="3.4"/><circle cx="760" cy="41.6" r="3.4"/></g>
+  <!-- Hibernate -->
+  <polyline points="83.8,295.1 139,286.2 208,277.7 346,262.8 484,251.7 622,243.6 760,228.4"
+            fill="none" stroke="var(--sql)" stroke-width="2.4"/>
+  <g fill="var(--sql)"><circle cx="83.8" cy="295.1" r="3.4"/><circle cx="208" cy="277.7" r="3.4"/><circle cx="484" cy="251.7" r="3.4"/><circle cx="760" cy="228.4" r="3.4"/></g>
+  <!-- JPA -->
+  <polyline points="83.8,295.1 139,285.7 208,276.9 346,263.2 484,248.6 622,242.4 760,228.7"
+            fill="none" stroke="var(--java)" stroke-width="2.4" stroke-dasharray="6 4"/>
+
+  <g font-size="12">
+    <rect x="440" y="52" width="14" height="3.5" fill="var(--accent)"/><text x="462" y="58" fill="var(--ink)">Spring Data JPA</text>
+    <rect x="440" y="74" width="14" height="3.5" fill="var(--sql)"/><text x="462" y="80" fill="var(--ink)">Hibernate</text>
+    <rect x="440" y="96" width="14" height="3.5" fill="var(--java)"/><text x="462" y="102" fill="var(--ink)">JPA（几乎与 Hibernate 重合）</text>
+  </g>
+  <text x="700" y="215" font-size="11" fill="var(--ink-faint)">JPA 与 Hibernate 曲线</text>
+  <text x="700" y="230" font-size="11" fill="var(--ink-faint)">几乎完全重叠 →</text>
+  <path d="M755 236 L760 250" stroke="var(--ink-faint)" stroke-width="1"/>
+</svg>
+</div><figcaption>图 2-6　insert 耗时对比（数据来自书中表 2.2）。update / select / delete 呈现完全一致的形态</figcaption></figure>
+
+<div class="keyhint"><span class="k">JPA vs Hibernate</span><span>四种操作的曲线<b>几乎完全重叠</b>。JPA 虽然在 Hibernate 之上多了一层自己的 API，但<b>这层没有引入任何开销</b>。</span></div>
+<div class="keyhint"><span class="k">Spring Data JPA 的开销</span><span>insert 从 1,000 条时的<b>约 2 倍</b>涨到 50,000 条时的<b>约 3.5 倍</b>。开销相当可观。</span></div>
+<div class="keyhint"><span class="k">形态差异</span><span>Hibernate/JPA 的 update、delete <b>快于</b> insert；Spring Data JPA 反而<b>慢于</b> insert。Hibernate/JPA 的 select 随行数增长非常缓慢，Spring Data JPA 的 select 增长很陡。</span></div>
+
+<div class="warn"><b>那什么时候该用 Spring Data JPA？</b>
+<p>书中给出两个正当理由：</p>
+<ol style="margin-bottom:0">
+<li>项目<b>已经在用 Spring 框架</b>，需要依托它既有的范式（控制反转、自动事务管理等）。</li>
+<li>有<b>强烈的减少代码量、缩短开发时间</b>的诉求——用作者的原话：<i>如今买算力比买程序员便宜</i>。</li>
+</ol></div>
+
+<div class="summary" id="s8">
+<h3>本章小结</h3>
+<ul>
+<li>Java 持久化项目有三条路：<b>JPA</b>、<b>原生 Hibernate</b>、<b>Spring Data JPA</b>。</li>
+<li>JPA 路线：<code>persistence.xml</code> 配置持久化单元 → <code>Persistence.createEntityManagerFactory()</code> 拿入口 → <code>EntityManager</code> 做增删改查；靠<b>脏检查</b>自动同步。查询语言是 <b>JPQL</b>（引用类名而非表名）。</li>
+<li>原生 Hibernate 路线：<code>hibernate.cfg.xml</code> + <code>Configuration</code> + <code>ServiceRegistry</code> → <code>SessionFactory</code> / <code>Session</code>，API 与 JPA 高度相似。</li>
+<li>两条路可<b>双向切换</b>：<code>emf.unwrap(SessionFactory.class)</code>，或把 Hibernate 配置属性传给 <code>Persistence.createEntityManagerFactory(unit, props)</code>。</li>
+<li>Spring Data JPA 路线：一个 <code>@Configuration</code> 类装配 bean + 一个<b>空的</b> repository 接口，其余交给自动生成的代理类。</li>
+<li>三者的取舍在于<b>可移植性、依赖数量、代码量、执行效率</b>之间的平衡：JPA≈Hibernate 无额外开销；Spring Data JPA 代码最少但运行开销明显。</li>
+</ul>
+</div>
+
+<div class="pager">
+  <a href="ch01.html">← 第 1 章　理解对象/关系持久化</a>
+  <a href="ch03.html">第 3 章　领域模型与元数据 →</a>
+</div>
+</main>
+</div>
+</body>
+</html>

@@ -1,0 +1,744 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>第 9 章 · 高级实体关联映射</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="topbar"><div class="topbar-inner">
+  <a class="brand" href="index.html">Java Persistence 讲义</a>
+  <span class="spacer"></span>
+  <a href="ch08.html">← 上一章</a>
+  <a href="index.html">目录</a>
+  <a href="ch10.html">下一章 →</a>
+</div></div>
+
+<div class="wrap">
+<nav class="toc">
+  <h4>本章目录</h4>
+  <a href="#s1">9.1 一对一关联</a>
+  <a class="sub" href="#s11">共享主键</a>
+  <a class="sub" href="#s12">foreign 主键生成器</a>
+  <a class="sub" href="#s13">外键连接列</a>
+  <a class="sub" href="#s14">使用连接表</a>
+  <a href="#s2">9.2 一对多关联</a>
+  <a class="sub" href="#s21">一对多 bag</a>
+  <a class="sub" href="#s22">List 映射</a>
+  <a class="sub" href="#s23">可选一对多 + 连接表</a>
+  <a class="sub" href="#s24">可嵌入类中的一对多</a>
+  <a href="#s3">9.3 多对多与三元关联</a>
+  <a class="sub" href="#s31">常规多对多</a>
+  <a class="sub" href="#s32">中间实体</a>
+  <a class="sub" href="#s33">组件三元关联</a>
+  <a href="#s4">9.4 用 Map 的实体关联</a>
+  <a href="#s5">本章小结</a>
+</nav>
+
+<main>
+<div class="hero">
+  <div class="eyebrow">Part 2 · 映射策略</div>
+  <h1>第 9 章　高级实体关联映射</h1>
+  <p>本章之所以单独成章，是因为<b>其中不少映射相当罕见、至少是可选的</b>。作者的原话：只用组件映射和多对一（偶尔一对一）关联，<b>你完全可以写出一个精巧的应用而从不映射任何集合</b>。上一章讲的「什么时候才该映射集合」的规则，同样适用于本章的<b>每一个</b>例子。</p>
+</div>
+
+<div class="note"><b>JPA 2 的重要新特性</b><p>① 多对一和一对一关联现在也可以用<b>中间连接/链接表</b>来映射。<br>② <b>可嵌入组件类可以拥有指向实体的单向关联</b>，甚至是带集合的多值关联。</p>
+<p style="margin-top:6px">运行示例前先执行 <code>Ch09/Ch09.sql</code>。</p></div>
+
+<h2 id="s1"><span class="num">9.1</span>一对一关联</h2>
+
+<p>第 6 章我们说过：<code>User</code> 与 <code>Address</code> 的关系最好用 <code>@Embeddable</code> 组件映射 —— 因为这种情况下生命周期通常是依赖的（UML 里的聚合或组合）。<b>那什么时候需要真正的一对一实体关联？</b>当需要<b>共享引用</b>时：另一个实体类（比如 <code>Shipment</code>）也要引用某个特定的 <code>Address</code> 实例。这时 <code>Address</code> 必须支持共享引用，因而<b>需要自己的标识</b>。</p>
+
+<figure><div class="fig-box">
+<svg viewBox="0 0 860 470" xmlns="http://www.w3.org/2000/svg" font-family="Inter,system-ui,sans-serif">
+  <defs><marker id="a9" markerWidth="9" markerHeight="9" refX="8" refY="4.5" orient="auto"><path d="M0 0 L9 4.5 L0 9 z" fill="var(--accent)"/></marker></defs>
+
+  <!-- 1 -->
+  <rect x="16" y="14" width="410" height="212" rx="8" fill="var(--panel)" stroke="var(--line-strong)" stroke-width="1.4"/>
+  <text x="32" y="36" font-size="13" font-weight="700" fill="var(--java)">① 共享主键 <tspan font-family="monospace" font-size="11" fill="var(--accent)">@PrimaryKeyJoinColumn</tspan></text>
+  <rect x="40" y="46" width="150" height="66" rx="6" fill="var(--sql-soft)" stroke="var(--sql)"/>
+  <text x="115" y="66" text-anchor="middle" font-size="11.5" font-weight="700" fill="var(--ink)">USERS</text>
+  <text x="52" y="84" font-family="monospace" font-size="10.5" fill="var(--accent)">ID «PK» «FK»</text>
+  <text x="52" y="100" font-family="monospace" font-size="10.5" fill="var(--ink-soft)">USERNAME …</text>
+  <path d="M196 78 L246 78" stroke="var(--accent)" stroke-width="1.5" marker-end="url(#a9)"/>
+  <rect x="250" y="46" width="150" height="66" rx="6" fill="var(--sql-soft)" stroke="var(--sql)"/>
+  <text x="325" y="66" text-anchor="middle" font-size="11.5" font-weight="700" fill="var(--ink)">ADDRESS</text>
+  <text x="262" y="84" font-family="monospace" font-size="10.5" fill="var(--accent)">ID «PK»</text>
+  <text x="262" y="100" font-family="monospace" font-size="10.5" fill="var(--ink-soft)">STREET / ZIPCODE / CITY</text>
+  <text x="34" y="134" font-size="11.5" fill="var(--ink)">两行<tspan font-weight="700">共享同一个主键值</tspan>；USERS 的主键上带外键约束</text>
+  <text x="34" y="154" font-size="11.5" fill="var(--danger)">✗ 必须<tspan font-weight="700">先存 Address、取到 id、再手工设给 User</tspan></text>
+  <text x="34" y="172" font-size="11.5" fill="var(--danger)">✗ optional=true 时<tspan font-weight="700">拿不到代理懒加载</tspan></text>
+  <text x="34" y="190" font-size="11.5" fill="var(--danger)">✗ 单向；需要双向时得换 ② 的写法</text>
+  <text x="34" y="212" font-size="11" fill="var(--ink-faint)">适用：两个实体中总有一个<tspan font-weight="700">先被存储</tspan>、可充当主键来源</text>
+
+  <!-- 2 -->
+  <rect x="440" y="14" width="410" height="212" rx="8" fill="var(--panel)" stroke="var(--line-strong)" stroke-width="1.4"/>
+  <text x="456" y="36" font-size="13" font-weight="700" fill="var(--java)">② 共享主键 + <tspan font-family="monospace" font-size="11" fill="var(--accent)">foreign</tspan> 生成器（双向）</text>
+  <rect x="464" y="46" width="150" height="66" rx="6" fill="var(--sql-soft)" stroke="var(--sql)"/>
+  <text x="539" y="66" text-anchor="middle" font-size="11.5" font-weight="700" fill="var(--ink)">USERS</text>
+  <text x="476" y="84" font-family="monospace" font-size="10.5" fill="var(--accent)">ID «PK»</text>
+  <path d="M670 78 L620 78" stroke="var(--accent)" stroke-width="1.5" marker-end="url(#a9)"/>
+  <rect x="674" y="46" width="150" height="66" rx="6" fill="var(--sql-soft)" stroke="var(--sql)"/>
+  <text x="749" y="66" text-anchor="middle" font-size="11.5" font-weight="700" fill="var(--ink)">ADDRESS</text>
+  <text x="686" y="84" font-family="monospace" font-size="10.5" fill="var(--accent)">ID «PK» «FK»</text>
+  <text x="458" y="134" font-size="11.5" fill="var(--ink)">外键约束换到 <tspan font-weight="700">ADDRESS 的主键列</tspan>上</text>
+  <text x="458" y="154" font-size="11.5" fill="var(--sql)">✓ <tspan font-weight="700">不再需要手工调 getId()</tspan>：Hibernate 私有的</text>
+  <text x="470" y="170" font-size="11.5" fill="var(--sql)">  <tspan font-family="monospace">strategy="foreign"</tspan> 生成器抓取 user 属性的 id</text>
+  <text x="458" y="192" font-size="11.5" fill="var(--warn)">△ User#shippingAddress <tspan font-weight="700">仍拿不到懒加载</tspan>（可选），</text>
+  <text x="470" y="208" font-size="11.5" fill="var(--sql)">  但 Address#user <tspan font-weight="700">可以</tspan>用代理按需加载（非可选）</text>
+
+  <!-- 3 -->
+  <rect x="16" y="238" width="410" height="212" rx="8" fill="var(--sql-soft)" stroke="var(--sql)" stroke-width="1.8"/>
+  <text x="32" y="260" font-size="13" font-weight="700" fill="var(--sql)">③ 外键连接列 + UNIQUE　<span class="badge">最常用</span></text>
+  <rect x="34" y="270" width="220" height="76" rx="6" fill="var(--panel)" stroke="var(--sql)"/>
+  <text x="144" y="290" text-anchor="middle" font-size="11.5" font-weight="700" fill="var(--ink)">USERS</text>
+  <text x="46" y="308" font-family="monospace" font-size="10.5" fill="var(--accent)">ID «PK»</text>
+  <text x="46" y="326" font-family="monospace" font-size="10" fill="var(--accent)">SHIPPINGADDRESS_ID «FK» «UNIQUE»</text>
+  <text x="46" y="342" font-family="monospace" font-size="10.5" fill="var(--ink-soft)">USERNAME …</text>
+  <path d="M260 306 L296 306" stroke="var(--accent)" stroke-width="1.5" marker-end="url(#a9)"/>
+  <rect x="300" y="270" width="106" height="76" rx="6" fill="var(--panel)" stroke="var(--sql)"/>
+  <text x="353" y="290" text-anchor="middle" font-size="11.5" font-weight="700" fill="var(--ink)">ADDRESS</text>
+  <text x="312" y="308" font-family="monospace" font-size="10.5" fill="var(--accent)">ID «PK»</text>
+  <text x="34" y="368" font-size="11.5" fill="var(--sql)">✓ <tspan font-weight="700">懒加载没问题</tspan>：USERS 行里已带 SHIPPINGADDRESS_ID，</text>
+  <text x="46" y="384" font-size="11.5" fill="var(--sql)">  Hibernate 知道有没有 ADDRESS 行，可以用代理</text>
+  <text x="34" y="406" font-size="11.5" fill="var(--ink)">✓ 无需特殊标识符生成器或主键赋值</text>
+  <text x="34" y="428" font-size="11" fill="var(--ink-faint)">SQL 老手记忆法：<tspan font-weight="700">看到 @JoinColumn 就想「外键列」</tspan></text>
+
+  <!-- 4 -->
+  <rect x="440" y="238" width="410" height="212" rx="8" fill="var(--accent-soft)" stroke="var(--accent)" stroke-width="1.8"/>
+  <text x="456" y="260" font-size="13" font-weight="700" fill="var(--accent)">④ 中间连接表　<span class="badge new">关联可选时的最佳解</span></text>
+  <rect x="452" y="270" width="106" height="60" rx="6" fill="var(--panel)" stroke="var(--accent)"/>
+  <text x="505" y="290" text-anchor="middle" font-size="11" font-weight="700" fill="var(--ink)">ITEM</text>
+  <text x="462" y="308" font-family="monospace" font-size="10" fill="var(--accent)">ID «PK»</text>
+  <rect x="576" y="270" width="150" height="60" rx="6" fill="var(--panel)" stroke="var(--accent)"/>
+  <text x="651" y="288" text-anchor="middle" font-size="11" font-weight="700" fill="var(--ink)">ITEM_SHIPMENT</text>
+  <text x="586" y="304" font-family="monospace" font-size="9.5" fill="var(--accent)">SHIPMENT_ID «PK» «FK»</text>
+  <text x="586" y="320" font-family="monospace" font-size="9.5" fill="var(--accent)">ITEM_ID «FK» «UNIQUE»</text>
+  <rect x="744" y="270" width="96" height="60" rx="6" fill="var(--panel)" stroke="var(--accent)"/>
+  <text x="792" y="290" text-anchor="middle" font-size="11" font-weight="700" fill="var(--ink)">SHIPMENT</text>
+  <text x="754" y="308" font-family="monospace" font-size="10" fill="var(--accent)">ID «PK»</text>
+  <path d="M572 300 L562 300" stroke="var(--accent)" stroke-width="1.4"/>
+  <path d="M730 300 L740 300" stroke="var(--accent)" stroke-width="1.4"/>
+  <text x="458" y="354" font-size="11.5" fill="var(--ink)"><tspan font-weight="700">可空列往往是问题</tspan>；更好的办法是用中间表：</text>
+  <text x="470" y="370" font-size="11.5" fill="var(--ink)">有链接就有一行，没有就没有</text>
+  <text x="458" y="392" font-size="11.5" fill="var(--ink)">schema 如何保证一对一：<tspan font-weight="700">主键是 SHIPMENT_ID</tspan>，</text>
+  <text x="470" y="408" font-size="11.5" fill="var(--ink)"><tspan font-weight="700">ITEM_ID 唯一</tspan> → 一个 item 只能在一次 shipment 里，</text>
+  <text x="470" y="424" font-size="11.5" fill="var(--ink)">一次 shipment 也只能含一个 item</text>
+  <text x="458" y="444" font-size="11" fill="var(--sql)">✓ 懒加载可用：一条<tspan font-weight="700">外连接</tspan>查询同时查 SHIPMENT 和连接表</text>
+</svg>
+</div><figcaption>图 9-A　一对一关联的四种映射策略总览（图 9.2/9.3/9.4/9.6）</figcaption></figure>
+
+<h3 id="s11">9.1.1　共享主键</h3>
+<p><span class="badge">源码目录 onetoone-sharedprimarykey</span></p>
+
+<div class="cols">
+<div>
+<div class="filename">…/onetoone/sharedprimarykey/Address.java</div>
+<pre><code><span class="ann">@Entity</span>
+<span class="kw">public class</span> Address {
+    <span class="ann">@Id</span>
+    <span class="ann">@GeneratedValue</span>(generator = Constants.ID_GENERATOR)
+    <span class="kw">private</span> Long id;
+    <span class="ann">@NotNull</span> <span class="kw">private</span> String street;
+    <span class="ann">@NotNull</span> <span class="kw">private</span> String zipcode;
+    <span class="ann">@NotNull</span> <span class="kw">private</span> String city;
+}</code></pre>
+</div>
+<div>
+<div class="filename">…/onetoone/sharedprimarykey/User.java</div>
+<pre><code><span class="ann">@Entity</span> <span class="ann">@Table</span>(name = <span class="str">"USERS"</span>)
+<span class="kw">public class</span> User {
+    <span class="ann">@Id</span>
+    <span class="kw">private</span> Long id;              <span class="cmt">❶ <b>没有</b>标识符生成器 —— 罕见的「应用赋值标识符」场景</span>
+
+    <span class="ann">@OneToOne</span>(
+        fetch = FetchType.LAZY,   <span class="cmt">❷ 覆盖默认的 EAGER</span>
+        optional = <span class="kw">false</span>,        <span class="cmt">❸ User 必须有 shippingAddress</span>
+        cascade = CascadeType.ALL <span class="cmt">❹ 变更强制级联到 Address</span>
+    )
+    <span class="ann">@PrimaryKeyJoinColumn</span>          <span class="cmt">❺ 选定「共享主键」策略</span>
+    <span class="kw">private</span> Address shippingAddress;
+
+    <span class="kw">public</span> User(Long id, String username) { … }  <span class="cmt">❻ 公有 API 要求提供 id</span>
+}</code></pre>
+</div>
+</div>
+
+<div class="pit"><b>JPA 规范<u>没有</u>标准化共享主键的生成方式 —— 只能手工做</b>
+<pre style="margin:8px 0"><code>Address address = <span class="kw">new</span> Address(<span class="str">"Flowers Street"</span>, <span class="str">"01246"</span>, <span class="str">"Boston"</span>);
+addressRepository.save(address);                       <span class="cmt">❶ 先存 Address</span>
+User john = <span class="kw">new</span> User(<span class="hl">address.getId()</span>, <span class="str">"John Smith"</span>);   <span class="cmt">❷ 取它生成的 id 设给 User</span>
+john.setShippingAddress(address);
+userRepository.save(john);                             <span class="cmt">❸ 再存 User</span></code></pre>
+<p><b>这个方案有三个问题：</b></p>
+<ol style="margin-bottom:0">
+<li>必须记得<b>先存 Address 再取 id</b>。而这<b>只有在 Address 的标识符生成器能在 INSERT <u>之前</u>产生值</b>时才可行（§5.2.5）；否则 <code>getId()</code> 返回 null，你无法手工给 User 设标识符。<b>这正是应当优先选择「预插入」生成器的原因之一。</b></li>
+<li><b>代理懒加载只在关联「非可选」时才有效</b>——这常让 JPA 新手意外。<code>@OneToOne</code> 默认 <code>EAGER</code>：加载 User 时立刻加载 shippingAddress。<b>概念上</b>，只有当 Hibernate 知道确实存在一个关联的 shippingAddress 时，代理懒加载才有意义；若属性可空，Hibernate 就得去查 ADDRESS 表看值是不是 NULL —— <b>既然都要查库了，不如直接加载，用代理没有任何好处</b>。（<code>FetchType.LAZY</code> 对提供者只是<b>提示</b>而非要求；可用字节码增强实现可空 <code>@OneToOne</code> 的懒加载，见 §12.1.3。）</li>
+<li>这个一对一关联是<b>单向的</b>，有时需要双向导航。</li>
+</ol></div>
+
+<div class="note"><b>本章测试代码的结构变化</b>
+<p>本章有些例子需要<b>事务性</b>执行，配置类要多加几个注解：</p>
+<pre style="margin:8px 0"><code><span class="ann">@Configuration</span>                 <span class="cmt">// 声明这是 bean 定义类</span>
+<span class="ann">@EnableTransactionManagement</span>   <span class="cmt">// 通过注解启用 Spring 的事务管理能力</span>
+<span class="ann">@ComponentScan</span>(basePackages = <span class="str">"com.manning.javapersistence.ch09.*"</span>)   <span class="cmt">// 扫描组件</span>
+<span class="ann">@EnableJpaRepositories</span>(<span class="str">"com.manning.javapersistence.ch09.repositories.onetoone.sharedprimarykey"</span>)
+<span class="kw">public class</span> SpringDataConfiguration { … }</code></pre>
+<p>数据库操作被隔离到一个专门的 <code>@Service</code> 类里，方法标 <code>@Transactional</code>；测试类注入这个 service 并调用它 —— <b>这样事务性操作被隔离在自己的方法里</b>。</p></div>
+
+<h3 id="s12">9.1.2　foreign 主键生成器（把双向和自动赋值一起解决）</h3>
+<p><span class="badge">源码目录 onetoone-foreigngenerator</span></p>
+
+<div class="cols">
+<div>
+<div class="filename">User.java —— 选它作 mappedBy 的一侧</div>
+<pre><code><span class="ann">@Entity</span> <span class="ann">@Table</span>(name = <span class="str">"USERS"</span>)
+<span class="kw">public class</span> User {
+    <span class="ann">@Id</span> <span class="ann">@GeneratedValue</span>(generator = Constants.ID_GENERATOR)
+    <span class="kw">private</span> Long id;
+
+    <span class="ann">@OneToOne</span>(
+        <span class="hl">mappedBy = "user"</span>,             <span class="cmt">// 底层细节由「另一侧」映射</span>
+        cascade = CascadeType.PERSIST  <span class="cmt">// 传递性持久化，方便按正确顺序保存</span>
+    )
+    <span class="kw">private</span> Address shippingAddress;
+}</code></pre>
+<p style="font-size:14px"><b>双向映射总是需要一个 mappedBy 侧</b>；选哪边是品味问题，也可能取决于次要需求。持久化 User 时，Hibernate 会顺带持久化 shippingAddress <b>并自动生成主键</b>。</p>
+</div>
+<div>
+<div class="filename">Address.java —— 特殊的 <code>foreign</code> 生成器</div>
+<pre><code><span class="ann">@Entity</span>
+<span class="kw">public class</span> Address {
+    <span class="ann">@Id</span>
+    <span class="ann">@GeneratedValue</span>(generator = <span class="str">"addressKeyGenerator"</span>)
+    <span class="ann">@org.hibernate.annotations.GenericGenerator</span>(
+        name = <span class="str">"addressKeyGenerator"</span>,
+        strategy = <span class="hl">"foreign"</span>,          <span class="cmt">// Hibernate 私有</span>
+        parameters = <span class="ann">@Parameter</span>(name = <span class="str">"property"</span>, value = <span class="str">"user"</span>))
+    <span class="kw">private</span> Long id;
+
+    <span class="ann">@OneToOne</span>(optional = <span class="kw">false</span>)     <span class="cmt">// Address 必须引用一个 User</span>
+    <span class="ann">@PrimaryKeyJoinColumn</span>
+    <span class="kw">private</span> User user;
+
+    <span class="kw">public</span> Address(User user, String street, String zipcode, String city) { … }
+}</code></pre>
+</div>
+</div>
+
+<div class="tip"><b><code>foreign</code> 生成器做了什么</b><p>持久化 <code>Address</code> 实例时，这个特殊生成器会<b>抓取 <code>user</code> 属性的值，取被引用实体实例（User）的标识符值</b>作为自己的主键。<b>§5.2.5 的生成器总览里没提它，因为「共享主键一对一关联」是它唯一的用例。</b></p></div>
+
+<pre><code><span class="cmt">// 现在存数据简单多了 —— 不再需要调 address.getId() 或 user.getId()</span>
+User john = <span class="kw">new</span> User(<span class="str">"John Smith"</span>);
+Address address = <span class="kw">new</span> Address(john, <span class="str">"Flowers Street"</span>, <span class="str">"01246"</span>, <span class="str">"Boston"</span>);
+john.setShippingAddress(address);   <span class="cmt">// 双向关联必须<b>两侧都链上</b></span>
+userRepository.save(john);          <span class="cmt">// 传递性持久化 shippingAddress</span></code></pre>
+
+<h3 id="s13">9.1.3　使用外键连接列</h3>
+<p><span class="badge">源码目录 onetoone-foreignkey</span></p>
+
+<pre><code><span class="ann">@Entity</span> <span class="ann">@Table</span>(name = <span class="str">"USERS"</span>)
+<span class="kw">public class</span> User {
+    <span class="ann">@Id</span> <span class="ann">@GeneratedValue</span>(generator = Constants.ID_GENERATOR)
+    <span class="kw">private</span> Long id;
+
+    <span class="ann">@OneToOne</span>(fetch = FetchType.LAZY, optional = <span class="kw">false</span>, cascade = CascadeType.PERSIST)
+    <span class="ann">@JoinColumn</span>(<span class="hl">unique = true</span>)          <span class="cmt">// 默认列名 SHIPPINGADDRESS_ID</span>
+    <span class="kw">private</span> Address shippingAddress;
+}
+
+<span class="cmt">// 创建、链接、存储都很直接</span>
+User john = <span class="kw">new</span> User(<span class="str">"John Smith"</span>);
+Address address = <span class="kw">new</span> Address(<span class="str">"Flowers Street"</span>, <span class="str">"01246"</span>, <span class="str">"Boston"</span>);
+john.setShippingAddress(address);
+userRepository.save(john);      <span class="cmt">// 传递性保存 address</span></code></pre>
+
+<div class="keyhint"><span class="k">为什么 optional=false</span><span>它<b>不影响加载行为</b>，而是 <code>unique=true</code> 的<b>逻辑后果</b>：如果 <code>SHIPPINGADDRESS_ID</code> 的值对所有用户都必须唯一，那么<b>只能有一个用户「没有收货地址」</b>。因此<b>可空的唯一列通常没有意义</b>。</span></div>
+<div class="keyhint"><span class="k">自引用</span><span>这个外键约束的源和目标<b>甚至可以是同一张表</b> —— 称为<b>自引用关系（self-referencing relationship）</b>。</span></div>
+
+<h3 id="s14">9.1.4　使用连接表（可选一对一）</h3>
+<p><span class="badge">源码目录 onetoone-jointable</span></p>
+
+<div class="note"><b>业务场景：托管服务（escrow）</b><p>拍卖结束后买卖双方线下约定收货与付款方式，本可不在系统内。但 CaveatEmptor 想提供<b>托管服务</b>：卖家在拍卖结束后创建可追踪的 shipment，买家把钱付给受托方（我们），我们通知卖家钱已到位；货到且买家接受后，我们把钱转给卖家。<b>更进一步</b>：我们还允许用户为<b>任何在拍卖之外、甚至 CaveatEmptor 之外</b>达成的交易创建可追踪的托管 shipment。<b>这就要求 <code>Shipment</code> 与 <code>Item</code> 之间是一个「可选的」一对一关联。</b></p>
+<p style="margin-top:6px">作者的坦白：「我们一度考虑在这一节放弃 CaveatEmptor 例子，因为找不到一个自然的、需要可选一对一关联的场景。<b>如果这个托管例子显得牵强，可以考虑等价的问题：给员工分配工位</b> —— 那也是一个可选的一对一关系。」</p></div>
+
+<div class="filename">…/onetoone/jointable/Shipment.java</div>
+<pre><code><span class="ann">@Entity</span>
+<span class="kw">public class</span> Shipment {
+    <span class="ann">@OneToOne</span>(fetch = FetchType.LAZY)          <span class="cmt">❶ 懒加载可用，但有个转折，见下</span>
+    <span class="ann">@JoinTable</span>(                                <span class="cmt">❷ 必须指定中间表名</span>
+        name = <span class="str">"ITEM_SHIPMENT"</span>,
+        joinColumns = <span class="ann">@JoinColumn</span>(name = <span class="str">"SHIPMENT_ID"</span>),          <span class="cmt">❸ 默认 ID</span>
+        inverseJoinColumns = <span class="ann">@JoinColumn</span>(name = <span class="str">"ITEM_ID"</span>,          <span class="cmt">❹ 默认 AUCTION_ID</span>
+                    nullable = <span class="kw">false</span>, unique = <span class="kw">true</span>)                <span class="cmt">❺ 生成 UNIQUE 约束</span>
+    )
+    <span class="kw">private</span> Item auction;
+}</code></pre>
+
+<div class="keyhint"><span class="k">❶ 懒加载的转折</span><span>加载 <code>Shipment</code> 时，Hibernate <b>同时查询 SHIPMENT 表和 ITEM_SHIPMENT 连接表</b> —— 它必须先知道到 Item 的链接是否存在，才能决定用不用代理。<b>这是在一条外连接 SQL 查询里完成的，你不会看到额外的 SQL 语句。</b>如果 <code>ITEM_SHIPMENT</code> 里有对应行，Hibernate 就放一个 <code>Item</code> 占位符。</span></div>
+<div class="keyhint"><span class="k">@JoinTable 隐藏了连接表</span><span><b>没有对应的 Java 类</b>，这个注解定义了 <code>ITEM_SHIPMENT</code> 表的列名。Hibernate 还会为连接表的列生成恰当的外键约束。</span></div>
+
+<div class="tip"><b>一对一映射的选择总结</b>
+<p>① 如果两个实体中<b>总有一个先被存储、可以充当主键来源</b> → 用<b>共享主键</b>关联。<br>
+② <b>其他所有情况</b> → 用<b>外键关联</b>。<br>
+③ 当一对一关联是<b>可选</b>的 → 用<b>隐藏的中间连接表</b>。</p></div>
+
+<h2 id="s2"><span class="num">9.2</span>一对多关联</h2>
+
+<div class="pit"><b>先记住这条总纲</b><p>一对多关联是<b>涉及集合的实体关联中最重要的一种</b>。作者甚至说：<b>当一个简单的双向多对一/一对多就能解决问题时，我们不鼓励使用更复杂的关联样式</b>。而且别忘了：<b>你完全可以不映射任何实体集合</b> —— 总是可以写显式查询来代替通过迭代的直接访问。</p></div>
+
+<h3 id="s21">9.2.1　考虑一对多 bag</h3>
+<p><span class="badge">源码目录 onetomany-bag</span></p>
+
+<figure><div class="fig-box">
+<svg viewBox="0 0 840 250" xmlns="http://www.w3.org/2000/svg" font-family="Inter,system-ui,sans-serif">
+  <rect x="20" y="20" width="400" height="210" rx="8" fill="var(--sql-soft)" stroke="var(--sql)" stroke-width="1.8"/>
+  <text x="220" y="44" text-anchor="middle" font-size="13.5" font-weight="700" fill="var(--sql)">bag 的性能优势</text>
+  <text x="38" y="70" font-size="11.5" fill="var(--ink)">默认情况下 Hibernate 的集合在<tspan font-weight="700">首次被访问时</tspan>加载。</text>
+  <text x="38" y="94" font-size="11.5" fill="var(--ink)">bag <tspan font-weight="700">不需要维护元素索引</tspan>（不像 list），</text>
+  <text x="38" y="110" font-size="11.5" fill="var(--ink)">也<tspan font-weight="700">不需要检查重复元素</tspan>（不像 set），</text>
+  <text x="38" y="134" font-size="11.5" fill="var(--sql)" font-weight="700">→ 因此可以往 bag 里加新元素而<u>不触发加载</u></text>
+  <text x="38" y="158" font-size="11.5" fill="var(--ink)">当你要映射一个<tspan font-weight="700">可能很大</tspan>的实体引用集合时，这一点很重要。</text>
+  <text x="38" y="188" font-size="11.5" fill="var(--sql)" font-weight="700">总体结论：如果映射成 @OneToMany(mappedBy=…)，</text>
+  <text x="38" y="206" font-size="11.5" fill="var(--sql)" font-weight="700">bag 是一对多关联<u>最好的反向集合</u>。</text>
+
+  <rect x="440" y="20" width="380" height="210" rx="8" fill="var(--warn-soft)" stroke="var(--warn)" stroke-width="1.6"/>
+  <text x="630" y="44" text-anchor="middle" font-size="13.5" font-weight="700" fill="var(--warn)">代价与澄清</text>
+  <text x="458" y="70" font-size="11.5" fill="var(--ink)">✗ <tspan font-weight="700">不能同时急抓取两个 bag 类型的集合</tspan>（生成的</text>
+  <text x="470" y="86" font-size="11.5" fill="var(--ink)">SELECT 互不相关、必须分开保存）</text>
+  <text x="458" y="110" font-size="11.5" fill="var(--sql)">但这<tspan font-weight="700">算不上损失</tspan>：同时抓取两个集合总会产生</text>
+  <text x="470" y="126" font-size="11.5" fill="var(--sql)"><tspan font-weight="700">笛卡儿积</tspan>，无论 bag、set 还是 list 都该避免（第 12 章）</text>
+  <text x="458" y="154" font-size="11.5" fill="var(--ink)">bag 允许重复元素，但这里<tspan font-weight="700">不相关</tspan>：所谓重复是指把</text>
+  <text x="470" y="170" font-size="11.5" fill="var(--ink)"><tspan font-weight="700">同一个 Bid 实例</tspan>的引用加了多次 —— 我们不会这么写。</text>
+  <text x="458" y="194" font-size="11.5" fill="var(--ink)">即使真加了，Hibernate 也会<tspan font-weight="700">忽略</tspan>，没有持久化效果：</text>
+  <text x="470" y="210" font-size="11.5" fill="var(--ink)">对数据库更新有意义的是 <tspan font-family="monospace">@ManyToOne</tspan> 那一侧，</text>
+  <text x="470" y="224" font-size="11.5" fill="var(--ink)">而关系已经被那一侧「mapped by」了</text>
+</svg>
+</div><figcaption>图 9-B　为什么 bag 是双向一对多的最佳反向集合</figcaption></figure>
+
+<div class="cols">
+<div>
+<pre><code><span class="ann">@Entity</span>
+<span class="kw">public class</span> Item {
+    <span class="ann">@OneToMany</span>(mappedBy = <span class="str">"item"</span>)
+    <span class="kw">private</span> Collection&lt;Bid&gt; bids = <span class="kw">new</span> ArrayList&lt;&gt;();
+}
+<span class="cmt">// Bid 侧的 @ManyToOne 与表结构都和 §8.3.1 完全一样</span></code></pre>
+</div>
+<div>
+<pre><code><span class="cmt">// 内存里允许「重复」…</span>
+item.addBid(someBid);  item.addBid(someBid);
+assertEquals(<span class="hl">2</span>, someItem.getBids().size());
+
+<span class="cmt">// …但重新加载后没有重复</span>
+Item item2 = itemRepository.findItemWithBids(item.getId());
+assertEquals(<span class="hl">1</span>, item2.getBids().size());
+
+<span class="cmt">// 关键优势：加新元素<b>不必初始化集合</b></span>
+Bid bid = <span class="kw">new</span> Bid(<span class="kw">new</span> BigDecimal(<span class="str">"456.00"</span>), item);
+item.addBid(bid);
+bidRepository.save(bid);
+<span class="cmt">// 只要不迭代 Collection，就不需要更多查询，
+// 新 Bid 的 INSERT 会在<b>不加载全部 bids</b> 的情况下完成。
+// 若集合是 Set 或 List，加一个元素就会加载全部元素。</span></code></pre>
+</div>
+</div>
+
+<h3 id="s22">9.2.2　单向与双向 List 映射</h3>
+<p><span class="badge">源码目录 onetomany-list</span></p>
+
+<div class="cols">
+<div>
+<div class="filename">Item.java —— 单向 List</div>
+<pre><code><span class="ann">@Entity</span>
+<span class="kw">public class</span> Item {
+    <span class="ann">@OneToMany</span>                                <span class="cmt">// 单向：<b>没有</b> mappedBy 侧</span>
+    <span class="ann">@JoinColumn</span>(name = <span class="str">"ITEM_ID"</span>, nullable = <span class="kw">false</span>)
+    <span class="ann">@OrderColumn</span>(name = <span class="str">"BID_POSITION"</span>,       <span class="cmt">// 默认 BIDS_ORDER</span>
+                  nullable = <span class="kw">false</span>)
+    <span class="kw">private</span> List&lt;Bid&gt; bids = <span class="kw">new</span> ArrayList&lt;&gt;();
+}</code></pre>
+<p style="font-size:14px">BID 表里同时有连接列 <code>ITEM_ID</code> 和顺序列 <code>BID_POSITION</code>；索引<b>从 0 开始且连续</b>。增删移元素时可能执行<b>大量 SQL</b>（§8.1.6）。</p>
+</div>
+<div>
+<div class="filename">Bid.java —— 改成双向</div>
+<pre><code><span class="ann">@Entity</span>
+<span class="kw">public class</span> Bid {
+    <span class="ann">@ManyToOne</span>
+    <span class="ann">@JoinColumn</span>(name = <span class="str">"ITEM_ID"</span>,
+        <span class="hl">updatable = false, insertable = false</span>)   <span class="cmt">← 关键</span>
+    <span class="ann">@NotNull</span>
+    <span class="kw">private</span> Item item;
+}</code></pre>
+<div class="pit" style="margin-top:12px"><b>为什么不是 <code>@ManyToOne(mappedBy="bids")</code>？</b>
+<p><b><code>@ManyToOne</code> 根本没有 <code>mappedBy</code> 属性 —— 它<u>永远</u>是关系的「拥有」侧。</b>如果 <code>Bid#item</code> 是拥有侧，Hibernate 存数据时会<b>忽略集合</b>、不写元素索引。所以要<b>把 <code>@JoinColumn</code> 映射两次</b>，并在 <code>@ManyToOne</code> 侧用 <code>updatable=false, insertable=false</code> <b>禁写</b>。这样 Hibernate 存数据时才会考虑集合侧（含每个元素的索引），而 <code>@ManyToOne</code> 实际上变成只读的，效果等同于有 <code>mappedBy</code>。</p></div>
+</div>
+</div>
+
+<div class="warn"><b>两条配套规则</b>
+<p>① <b>Hibernate 的 schema 生成器<u>总是</u>依赖 <code>@ManyToOne</code> 侧的 <code>@JoinColumn</code></b>。所以想要正确的 schema，要在<b>这一侧</b>加 <code>@NotNull</code> 或声明 <code>@JoinColumn(nullable=false)</code>。<b>只要有 <code>@ManyToOne</code>，生成器就会忽略 <code>@OneToMany</code> 侧及其连接列。</b></p>
+<p style="margin-top:6px">② <b>真实应用里不要用 List 映射这个关联。</b>「在数据库里保序」看着像常见需求，其实用处不大：有时要最高价在前、有时最新出价在前、有时只看某用户的出价、有时只看某时间段 —— <b>这些操作都不需要持久化的列表索引</b>。而且维护索引可能很昂贵、触发大量 SQL。<b>用 <code>@ManyToOne</code> 映射外键连接列，然后把集合丢掉。</b></p></div>
+
+<h3 id="s23">9.2.3　可选的一对多 + 连接表</h3>
+<p><span class="badge">源码目录 onetomany-jointable</span></p>
+
+<figure><div class="fig-box">
+<svg viewBox="0 0 840 250" xmlns="http://www.w3.org/2000/svg" font-family="Inter,system-ui,sans-serif">
+  <defs><marker id="jt9" markerWidth="9" markerHeight="9" refX="8" refY="4.5" orient="auto"><path d="M0 0 L9 4.5 L0 9 z" fill="var(--accent)"/></marker></defs>
+  <rect x="20" y="20" width="400" height="98" rx="8" fill="var(--danger-soft)" stroke="var(--danger)"/>
+  <text x="220" y="42" text-anchor="middle" font-size="13" font-weight="700" fill="var(--danger)">如果用可空外键列…</text>
+  <text x="38" y="64" font-size="11.5" fill="var(--ink)">期望 ITEM 表有 BUYER_ID 外键列，但它<tspan font-weight="700">必须可空</tspan> —— 拍卖</text>
+  <text x="38" y="80" font-size="11.5" fill="var(--ink)">还在进行时用户还没买下它。可以额外加约束：「只有未到</text>
+  <text x="38" y="96" font-size="11.5" fill="var(--ink)">结束时间或无人出价时才允许为 NULL」——</text>
+  <text x="38" y="112" font-size="11.5" fill="var(--danger)"><tspan font-weight="700">但我们总是尽量避免关系 schema 中的可空列</tspan></text>
+
+  <rect x="440" y="20" width="380" height="98" rx="8" fill="var(--warn-soft)" stroke="var(--warn)"/>
+  <text x="630" y="42" text-anchor="middle" font-size="13" font-weight="700" fill="var(--warn)">为什么</text>
+  <text x="458" y="64" font-size="11.5" fill="var(--ink)">未知信息会<tspan font-weight="700">降低所存数据的质量</tspan>。元组代表为真的命题，</text>
+  <text x="458" y="80" font-size="11.5" fill="var(--ink)">而<tspan font-weight="700">我们无法断言自己不知道的事</tspan>。</text>
+  <text x="458" y="102" font-size="11.5" fill="var(--ink)">而且实践中，许多开发者和 DBA <tspan font-weight="700">并不会建出正确的约束</tspan>，</text>
+  <text x="458" y="116" font-size="11.5" fill="var(--ink)">转而依赖常常有 bug 的应用代码去保证数据完整性。</text>
+
+  <text x="420" y="146" text-anchor="middle" font-size="13" font-weight="700" fill="var(--sql)">结论：可选实体关联（无论一对一还是一对多）在 SQL 数据库里最好用<tspan font-weight="700">连接表</tspan>表示</text>
+
+  <rect x="140" y="164" width="120" height="66" rx="6" fill="var(--sql-soft)" stroke="var(--sql)"/>
+  <text x="200" y="186" text-anchor="middle" font-size="11.5" font-weight="700" fill="var(--ink)">ITEM</text>
+  <text x="152" y="204" font-family="monospace" font-size="10.5" fill="var(--accent)">ID «PK»</text>
+  <path d="M266 196 L300 196" stroke="var(--accent)" stroke-width="1.5" marker-end="url(#jt9)"/>
+  <rect x="304" y="164" width="200" height="66" rx="6" fill="var(--accent-soft)" stroke="var(--accent)" stroke-width="1.8"/>
+  <text x="404" y="186" text-anchor="middle" font-size="11.5" font-weight="700" fill="var(--ink)">ITEM_BUYER</text>
+  <text x="316" y="204" font-family="monospace" font-size="10.5" fill="var(--accent)">ITEM_ID «PK» «FK»</text>
+  <text x="316" y="220" font-family="monospace" font-size="10.5" fill="var(--ink-soft)">BUYER_ID «FK»　<tspan fill="var(--ink-faint)">（不唯一）</tspan></text>
+  <path d="M544 196 L578 196" stroke="var(--accent)" stroke-width="1.5" marker-end="url(#jt9)"/>
+  <rect x="582" y="164" width="120" height="66" rx="6" fill="var(--sql-soft)" stroke="var(--sql)"/>
+  <text x="642" y="186" text-anchor="middle" font-size="11.5" font-weight="700" fill="var(--ink)">USERS</text>
+  <text x="594" y="204" font-family="monospace" font-size="10.5" fill="var(--accent)">ID «PK»</text>
+  <text x="404" y="246" text-anchor="middle" font-size="11" fill="var(--ink-soft)">一对一时给外键列加 UNIQUE；<tspan font-weight="700">这里是一对多，只有 ITEM_ID 主键唯一</tspan> —— 一个 Item 只能被买一次，一个 User 可以买多个 Item</text>
+</svg>
+</div><figcaption>图 9-9　用中间表表达「可选的一对多」，避免可空外键列</figcaption></figure>
+
+<div class="cols">
+<div>
+<div class="filename">User.java —— 常规的只读反向侧</div>
+<pre><code><span class="ann">@Entity</span> <span class="ann">@Table</span>(name = <span class="str">"USERS"</span>)
+<span class="kw">public class</span> User {
+    <span class="ann">@OneToMany</span>(mappedBy = <span class="str">"buyer"</span>)
+    <span class="kw">private</span> Set&lt;Item&gt; boughtItems = <span class="kw">new</span> HashSet&lt;&gt;();
+}</code></pre>
+</div>
+<div>
+<div class="filename">Item.java —— 实际映射在 mappedBy 那一侧</div>
+<pre><code><span class="ann">@Entity</span>
+<span class="kw">public class</span> Item {
+    <span class="ann">@ManyToOne</span>(fetch = FetchType.LAZY)
+    <span class="ann">@JoinTable</span>(name = <span class="str">"ITEM_BUYER"</span>,
+        joinColumns = <span class="ann">@JoinColumn</span>(name = <span class="str">"ITEM_ID"</span>),
+        inverseJoinColumns = <span class="ann">@JoinColumn</span>(nullable = <span class="kw">false</span>))  <span class="cmt">// 默认 BUYER_ID</span>
+    <span class="kw">private</span> User buyer;
+}</code></pre>
+</div>
+</div>
+<p><b>Item 未被买下时，<code>ITEM_BUYER</code> 里就没有对应行 —— 关系因此是可选的。</b>schema 里没有任何棘手的可空列。不过仍应写一个过程式约束和 <code>INSERT</code> 触发器：「只有当该 item 的拍卖结束时间已到、且该用户是最高出价者时，才允许插入 buyer。」</p>
+
+<h3 id="s24">9.2.4　可嵌入类中的一对多关联</h3>
+<p><span class="badge">源码目录 onetomany-embeddable / onetomany-embeddable-jointable</span></p>
+
+<div class="cols">
+<div>
+<div class="filename">方案 A：@JoinColumn</div>
+<pre><code><span class="ann">@Embeddable</span>
+<span class="kw">public class</span> Address {
+    <span class="cmt">// street / zipcode / city …</span>
+    <span class="ann">@OneToMany</span>
+    <span class="ann">@JoinColumn</span>(name = <span class="str">"DELIVERY_ADDRESS_USER_ID"</span>,   <span class="cmt">// 默认 DELIVERIES_ID</span>
+                nullable = <span class="kw">false</span>)
+    <span class="kw">private</span> Set&lt;Shipment&gt; deliveries = <span class="kw">new</span> HashSet&lt;&gt;();
+}</code></pre>
+<p style="font-size:14px">这个外键列在 <code>SHIPMENT</code> 表里。<b>可嵌入组件没有自己的标识符</b>，所以外键列里的值是<b>嵌入了这个 Address 的 User 的标识符</b>。这里声明 <code>nullable=false</code>，所以 Shipment 必须有关联的收货地址。<b>无法双向导航</b>：Shipment 不能引用 Address，因为嵌入组件不能有共享引用。</p>
+</div>
+<div>
+<div class="filename">方案 B：@JoinTable（关联可选且不想要可空列）</div>
+<pre><code><span class="ann">@Embeddable</span>
+<span class="kw">public class</span> Address {
+    <span class="ann">@OneToMany</span>
+    <span class="ann">@JoinTable</span>(
+        name = <span class="str">"DELIVERIES"</span>,                       <span class="cmt">// 默认 USERS_SHIPMENT</span>
+        joinColumns = <span class="ann">@JoinColumn</span>(name = <span class="str">"USER_ID"</span>),  <span class="cmt">// 默认 USERS_ID</span>
+        inverseJoinColumns = <span class="ann">@JoinColumn</span>(name = <span class="str">"SHIPMENT_ID"</span>))  <span class="cmt">// 默认 SHIPMENTS_ID</span>
+    <span class="kw">private</span> Set&lt;Shipment&gt; deliveries = <span class="kw">new</span> HashSet&lt;&gt;();
+}</code></pre>
+<div class="tip" style="margin-top:12px"><b>两个默认与一条限制</b>
+<p>① <b>既不声明 <code>@JoinTable</code> 也不声明 <code>@JoinColumn</code> 时，可嵌入类里的 <code>@OneToMany</code> <u>默认走连接表策略</u>。</b></p>
+<p style="margin-top:6px">② 在拥有者实体类里，用 <code>@AttributeOverride</code> 覆盖嵌入类的<b>属性映射</b>（§6.2.3）；想覆盖嵌入类中<b>实体关联</b>的连接表或连接列，用 <code>@AssociationOverride</code>。<b>但不能切换映射策略</b> —— 用连接表还是连接列，由可嵌入组件类里的映射决定。</p></div>
+</div>
+</div>
+
+<h2 id="s3"><span class="num">9.3</span>多对多与三元关联</h2>
+
+<div class="pit"><b>作者的经验之谈（非常重要）</b><p>「<b>真实系统里我们可能根本不会有多对多关联</b> —— 我们的经验是，<b>几乎总有其他信息必须附着在关联实例之间的每条链接上</b>。」例如：某个 <code>Item</code> 被加入某个 <code>Category</code> 的<b>时间戳</b>，以及创建该链接的 <code>User</code>。</p></div>
+
+<h3 id="s31">9.3.1　常规的单向/双向多对多</h3>
+<p><span class="badge">源码目录 manytomany-bidirectional</span></p>
+
+<div class="cols">
+<div>
+<pre><code><span class="ann">@Entity</span>
+<span class="kw">public class</span> Category {
+    <span class="ann">@ManyToMany</span>(cascade = CascadeType.PERSIST)
+    <span class="ann">@JoinTable</span>(
+        name = <span class="str">"CATEGORY_ITEM"</span>,
+        joinColumns = <span class="ann">@JoinColumn</span>(name = <span class="str">"CATEGORY_ID"</span>),
+        inverseJoinColumns = <span class="ann">@JoinColumn</span>(name = <span class="str">"ITEM_ID"</span>))
+    <span class="kw">private</span> Set&lt;Item&gt; items = <span class="kw">new</span> HashSet&lt;&gt;();
+}
+
+<span class="ann">@Entity</span>
+<span class="kw">public class</span> Item {
+    <span class="ann">@ManyToMany</span>(mappedBy = <span class="str">"items"</span>)   <span class="cmt">// 实际上只读</span>
+    <span class="kw">private</span> Set&lt;Category&gt; categories = <span class="kw">new</span> HashSet&lt;&gt;();
+}</code></pre>
+<p style="font-size:14px">链接表 <code>CATEGORY_ITEM</code> 有两列，各带外键约束；<b>主键是两列的复合键</b> —— 同一对 Category/Item 只能链接一次，但同一个 item 可以链到多个类别。</p>
+</div>
+<div>
+<div class="warn"><b>为什么 ALL / REMOVE / orphan removal 对多对多没有意义？</b>
+<p>书里把这留作一道<b>自测题</b>，用来检验你是否真的理解了实体与值类型。提示：<b>想想「删一条记录会自动删掉一条相关记录」会发生什么</b> —— 删掉一个 <code>Category</code> 就会删掉里面的 <code>Item</code>，而那些 <code>Item</code> 还被<b>其他 Category 共享引用</b>着。</p></div>
+<div class="keyhint"><span class="k">能用 List 或 bag 吗</span><span><code>Set</code> 与 schema <b>完美匹配</b>（不可能有重复链接）。bag 意味着重复元素，需要连接表有<b>不同的主键</b>（可用 Hibernate 私有的 <code>@CollectionId</code>，§8.1.5）—— <b>但如果真要支持重复链接，后面几种策略是更好的选择</b>。</span></div>
+<div class="keyhint"><span class="k">索引集合的限制</span><span>可以用常规 <code>@ManyToMany</code> 映射 <code>List</code>，<b>但只能在一侧</b>。双向关系里必有一侧被「mapped by」，其值在同步到数据库时被忽略；<b>两侧都是 list 时，只能持久化其中一侧的索引</b>。</span></div>
+</div>
+</div>
+
+<h3 id="s32">9.3.2　多对多 + 中间实体　<span class="badge new">作者推荐的默认做法</span></h3>
+<p><span class="badge">源码目录 manytomany-linkentity</span></p>
+
+<div class="tip"><b>为什么把这作为默认</b><p>「我们总是可以把多对多关联表示成<b>指向一个中间类的两个多对一关联</b>。这个模型通常<b>更容易扩展</b>，所以我们倾向于<b>不在应用中使用常规多对多关联</b>。等到链接表不可避免地要加列时再改代码是件很费劲的事 —— <b>因此在照上一节那样映射 <code>@ManyToMany</code> 之前，请先考虑这个替代方案。</b>」</p></div>
+
+<div class="filename">…/manytomany/linkentity/CategorizedItem.java</div>
+<pre><code><span class="ann">@Entity</span>
+<span class="ann">@Table</span>(name = <span class="str">"CATEGORY_ITEM"</span>)
+<span class="ann">@org.hibernate.annotations.Immutable</span>          <span class="cmt">❶ 不可变实体：Hibernate 可优化，如刷新时跳过脏检查</span>
+<span class="kw">public class</span> CategorizedItem {
+
+    <span class="ann">@Embeddable</span>                                <span class="cmt">❷ 复合主键封装成静态嵌套可嵌入类（也可外置成独立文件）</span>
+    <span class="kw">public static class</span> Id <span class="kw">implements</span> Serializable {
+        <span class="ann">@Column</span>(name = <span class="str">"CATEGORY_ID"</span>) <span class="kw">private</span> Long categoryId;
+        <span class="ann">@Column</span>(name = <span class="str">"ITEM_ID"</span>)     <span class="kw">private</span> Long itemId;
+        <span class="cmt">// 无参构造器、有参构造器、equals / hashCode</span>
+    }
+
+    <span class="ann">@EmbeddedId</span>                                <span class="cmt">❸ 把标识符属性及其复合键列映射到实体表</span>
+    <span class="kw">private</span> Id id = <span class="kw">new</span> Id();
+
+    <span class="ann">@Column</span>(updatable = <span class="kw">false</span>) <span class="ann">@NotNull</span>
+    <span class="kw">private</span> String addedBy;                    <span class="cmt">❹ 关于链接的「额外信息」</span>
+
+    <span class="ann">@Column</span>(updatable = <span class="kw">false</span>) <span class="ann">@NotNull</span> <span class="ann">@CreationTimestamp</span>
+    <span class="kw">private</span> LocalDateTime addedOn;             <span class="cmt">❺</span>
+
+    <span class="ann">@ManyToOne</span>
+    <span class="ann">@JoinColumn</span>(name = <span class="str">"CATEGORY_ID"</span>, <span class="hl">insertable = false, updatable = false</span>)   <span class="cmt">❻</span>
+    <span class="kw">private</span> Category category;
+
+    <span class="ann">@ManyToOne</span>
+    <span class="ann">@JoinColumn</span>(name = <span class="str">"ITEM_ID"</span>, <span class="hl">insertable = false, updatable = false</span>)       <span class="cmt">❼</span>
+    <span class="kw">private</span> Item item;
+
+    <span class="kw">public</span> CategorizedItem(String addedByUsername, Category category, Item item) {
+        <span class="kw">this</span>.addedBy = addedByUsername;
+        <span class="kw">this</span>.category = category;   <span class="kw">this</span>.item = item;
+        <span class="kw">this</span>.id.categoryId = category.getId();     <span class="cmt">❽ 复合键值<b>永远由应用赋值</b>，Hibernate 不生成</span>
+        <span class="kw">this</span>.id.itemId = item.getId();
+        category.addCategorizedItem(<span class="kw">this</span>);        <span class="cmt">❾ 管理两侧集合，保证引用完整性</span>
+        item.addCategorizedItem(<span class="kw">this</span>);
+    }
+}</code></pre>
+
+<div class="pit"><b>❻❼ 这个技巧必须理解</b><p><code>category</code> / <code>item</code> 这两个 <code>@ManyToOne</code> 属性<b>已经在标识符里被映射过了</b>。技巧在于把它们设为<b>只读</b>（<code>updatable=false, insertable=false</code>）：Hibernate 写这两列的值时<b>取自 <code>CategorizedItem</code> 的标识符值</b>；与此同时你仍能通过 <code>getItem()</code> / <code>getCategory()</code> 读取和浏览关联实例。<b>如果同一列被映射两次却没有一个设为只读，Hibernate 启动时会报「重复列映射」错误。</b></p></div>
+
+<div class="cols">
+<div>
+<pre><code><span class="cmt">// 需要双向导航时，在两侧各映射一个 @OneToMany</span>
+<span class="ann">@Entity</span> <span class="kw">public class</span> Category {
+    <span class="ann">@OneToMany</span>(mappedBy = <span class="str">"category"</span>)
+    <span class="kw">private</span> Set&lt;CategorizedItem&gt; categorizedItems = <span class="kw">new</span> HashSet&lt;&gt;();
+}
+<span class="ann">@Entity</span> <span class="kw">public class</span> Item {
+    <span class="ann">@OneToMany</span>(mappedBy = <span class="str">"item"</span>)
+    <span class="kw">private</span> Set&lt;CategorizedItem&gt; categorizedItems = <span class="kw">new</span> HashSet&lt;&gt;();
+}</code></pre>
+</div>
+<div>
+<pre><code><span class="cmt">// 创建链接：先各自持久化，再 new 一个 CategorizedItem</span>
+categoryRepository.save(someCategory);
+categoryRepository.save(otherCategory);
+itemRepository.save(someItem);
+itemRepository.save(otherItem);
+
+CategorizedItem linkOne = <span class="kw">new</span> CategorizedItem(<span class="str">"John Smith"</span>, someCategory, someItem);
+CategorizedItem linkTwo = <span class="kw">new</span> CategorizedItem(<span class="str">"John Smith"</span>, someCategory, otherItem);
+categorizedItemRepository.save(linkOne);
+categorizedItemRepository.save(linkTwo);
+<span class="cmt">// 断开链接 = 删掉那个 CategorizedItem</span></code></pre>
+</div>
+</div>
+
+<div class="tablewrap"><table>
+<thead><tr><th style="width:120px"></th><th>优点</th><th>缺点</th></tr></thead>
+<tbody>
+<tr><td><b>中间实体</b></td><td><b>可以双向导航</b>：<code>someCategory.getCategorizedItems()</code> 和 <code>someItem.getCategorizedItems()</code> 都行</td><td>管理 <code>CategorizedItem</code> 实例（独立保存与删除）的代码更复杂；还需要复合标识符之类的基础设施。<b>小改进</b>：在部分关联上开启 <code>CascadeType.PERSIST</code> 以减少 <code>save()</code> 调用</td></tr>
+</tbody></table></div>
+
+<div class="note"><b>顺便：什么是三元关联</b><p>本例把创建链接的用户存成了一个简单的名字字符串。<b>如果连接表改成有一个 <code>USER_ID</code> 外键列，就变成了三元关系</b> —— <code>CategorizedItem</code> 会对 <code>Category</code>、<code>Item</code>、<code>User</code> 各有一个 <code>@ManyToOne</code>。</p></div>
+
+<h3 id="s33">9.3.3　用组件实现三元关联</h3>
+<p><span class="badge">源码目录 manytomany-ternary</span>　把链接映射成<b>可嵌入组件类</b>，是比中间实体<b>可能更简单</b>的替代方案。</p>
+
+<div class="cols">
+<div>
+<div class="filename">CategorizedItem.java —— 这次是 @Embeddable</div>
+<pre><code><span class="ann">@Embeddable</span>
+<span class="kw">public class</span> CategorizedItem {
+    <span class="ann">@ManyToOne</span>
+    <span class="ann">@JoinColumn</span>(name = <span class="str">"ITEM_ID"</span>,
+        nullable = <span class="kw">false</span>, updatable = <span class="kw">false</span>)
+    <span class="kw">private</span> Item item;
+
+    <span class="ann">@ManyToOne</span>
+    <span class="ann">@JoinColumn</span>(name = <span class="str">"USER_ID"</span>, updatable = <span class="kw">false</span>)
+    <span class="ann">@NotNull</span>                          <span class="cmt">← 关键技巧，见右</span>
+    <span class="kw">private</span> User addedBy;
+
+    <span class="ann">@Column</span>(updatable = <span class="kw">false</span>)
+    <span class="ann">@NotNull</span>
+    <span class="kw">private</span> LocalDateTime addedOn = LocalDateTime.now();
+}
+
+<span class="ann">@Entity</span>
+<span class="kw">public class</span> Category {
+    <span class="ann">@ElementCollection</span>
+    <span class="ann">@CollectionTable</span>(name = <span class="str">"CATEGORY_ITEM"</span>,
+        joinColumns = <span class="ann">@JoinColumn</span>(name = <span class="str">"CATEGORY_ID"</span>))
+    <span class="kw">private</span> Set&lt;CategorizedItem&gt; categorizedItems = <span class="kw">new</span> HashSet&lt;&gt;();
+}</code></pre>
+</div>
+<div>
+<div class="pit"><b>这个映射并不完美</b>
+<p>映射可嵌入类型的 <code>@ElementCollection</code> 时，目标类型中<b>所有 <code>nullable=false</code> 的属性都会成为（复合）主键的一部分</b>。我们希望 <code>CATEGORY_ITEM</code> 的<b>所有列都 NOT NULL</b>，但<b>只有 <code>CATEGORY_ID</code> 和 <code>ITEM_ID</code> 应该进主键</b>。</p>
+<p style="margin-top:6px"><b>技巧</b>：对不该进主键的属性用 Bean Validation 的 <code>@NotNull</code> —— 因为是可嵌入类，<b>Hibernate 在实现主键和生成 SQL schema 时会忽略 Bean Validation 注解</b>。</p>
+<p style="margin-top:6px"><b>代价</b>：生成的 schema 在 <code>USER_ID</code> 和 <code>ADDEDON</code> 列上<b>不会有恰当的 NOT NULL 约束，需要手工修正</b>。</p></div>
+<div class="tip"><b>优点：链接组件的隐式生命周期</b>
+<p>创建关联 = <b>往集合里加一个新的 <code>CategorizedItem</code></b>；断开链接 = <b>从集合里移除元素</b>。<b>不需要任何额外的级联设置</b>，Java 代码更简单（虽然行数多一些）。</p></div>
+<div class="warn"><b>限制：无法双向导航</b><p>可嵌入组件<b>按定义不能有共享引用</b>，所以不能从 <code>Item</code> 导航到 <code>CategorizedItem</code>，<code>Item</code> 里也没有这个链接的映射。改用查询：</p>
+<pre style="margin:8px 0 0"><code><span class="ann">@Query</span>(<span class="str">"select c from Category c join c.categorizedItems ci "</span> +
+       <span class="str">"where ci.item = :itemParameter"</span>)
+List&lt;Category&gt; findCategoryWithCategorizedItems(
+      <span class="ann">@Param</span>(<span class="str">"itemParameter"</span>) Item itemParameter);</code></pre></div>
+</div>
+</div>
+
+<h2 id="s4"><span class="num">9.4</span>使用 Map 的实体关联</h2>
+
+<p>Map 的<b>键和值都可以是指向其他实体的引用</b>，这提供了映射多对多与三元关系的又一种策略。</p>
+
+<div class="cols">
+<div>
+<h4>9.4.1　一对多 + 属性作键</h4>
+<p><span class="badge">源码目录 maps-mapkey</span></p>
+<pre><code><span class="ann">@Entity</span>
+<span class="kw">public class</span> Item {
+    <span class="ann">@MapKey</span>(name = <span class="str">"id"</span>)              <span class="cmt">// 用目标实体的某个属性作 map 的键</span>
+    <span class="ann">@OneToMany</span>(mappedBy = <span class="str">"item"</span>)
+    <span class="kw">private</span> Map&lt;Long, Bid&gt; bids = <span class="kw">new</span> HashMap&lt;&gt;();
+}
+
+<span class="cmt">// 遍历时得到 (1, &lt;PK=1 的 Bid 引用&gt;), (2, &lt;PK=2 的 Bid 引用&gt;)…</span>
+<span class="kw">for</span> (Map.Entry&lt;Long, Bid&gt; entry : item.getBids().entrySet()) {
+    assertEquals(entry.getKey(), entry.getValue().getId());
+}</code></pre>
+<div class="keyhint"><span class="k">底层表毫无特别</span><span>就是 <code>ITEM</code> 和 <code>BID</code> 表，<code>BID</code> 里有 <code>ITEM_ID</code> 外键列 —— 与 §8.3.1 用普通集合的一对多/多对一<b>完全相同的 schema</b>。<b>动机只是在应用里换一种数据表示方式。</b></span></div>
+<div class="keyhint"><span class="k">@MapKey 的默认值</span><span>省略 <code>name</code> 时默认用<b>目标实体的标识符属性</b>，所以上面的 <code>name="id"</code> 是<b>冗余的</b>。</span></div>
+<div class="keyhint"><span class="k">唯一性由你保证</span><span>map 的键构成一个 set，所以值必须唯一。<b>Bid 主键满足，但 Bid 的其他属性多半不满足 —— Hibernate 不会检查，得你自己确保。</b></span></div>
+<div class="keyhint"><span class="k">用例</span><span><b>主要且罕见</b>的用例是：用条目实体值的某个属性作为 map 的键来遍历，也许只是因为这样渲染数据更方便。</span></div>
+</div>
+<div>
+<h4>9.4.2　键/值三元关系</h4>
+<p><span class="badge">源码目录 maps-ternary</span>　键是 <code>Item</code>，值是把该 Item 加入该 Category 的 <code>User</code>。</p>
+<pre><code><span class="ann">@Entity</span>
+<span class="kw">public class</span> Category {
+    <span class="ann">@ManyToMany</span>(cascade = CascadeType.PERSIST)
+    <span class="ann">@MapKeyJoinColumn</span>(name = <span class="str">"ITEM_ID"</span>)   <span class="cmt">// 可选；默认列名 ITEMADDEDBY_KEY</span>
+    <span class="ann">@JoinTable</span>(
+        name = <span class="str">"CATEGORY_ITEM"</span>,
+        joinColumns = <span class="ann">@JoinColumn</span>(name = <span class="str">"CATEGORY_ID"</span>),
+        inverseJoinColumns = <span class="ann">@JoinColumn</span>(name = <span class="str">"USER_ID"</span>))
+    <span class="kw">private</span> Map&lt;Item, User&gt; itemAddedBy = <span class="kw">new</span> HashMap&lt;&gt;();
+}
+
+<span class="cmt">// 三个实体都必须已是持久态，然后放进 map</span>
+someCategory.putItemAddedBy(someItem, someUser);
+someCategory.putItemAddedBy(otherItem, someUser);
+otherCategory.putItemAddedBy(someItem, someUser);
+<span class="cmt">// 断开链接 = 从 map 中移除条目</span></code></pre>
+<div class="pit"><b>但要记住</b><p>它管理了一个复杂关系、隐藏了一张三列的链接表。<b>但实践中链接表往往会长出新列</b>，如果你的代码依赖 Map API，<b>之后修改全部 Java 代码的代价很高</b>。前面我们有个记录链接创建时间的 <code>ADDEDON</code> 列，<b>为了这个映射不得不把它去掉</b>。</p></div>
+</div>
+</div>
+
+<figure><div class="fig-box">
+<svg viewBox="0 0 840 210" xmlns="http://www.w3.org/2000/svg" font-family="Inter,system-ui,sans-serif">
+  <text x="420" y="24" text-anchor="middle" font-size="13.5" font-weight="700" fill="var(--accent)">同一个 Category ↔ Item 多对多，本章给出了四种映射方式</text>
+  <rect x="16" y="40" width="196" height="150" rx="8" fill="var(--panel)" stroke="var(--line-strong)"/>
+  <text x="114" y="62" text-anchor="middle" font-size="12" font-weight="700" fill="var(--ink)">① @ManyToMany</text>
+  <text x="114" y="82" text-anchor="middle" font-size="10.5" fill="var(--ink-soft)">§9.3.1　链接表被隐藏</text>
+  <text x="30" y="106" font-size="10.5" fill="var(--sql)">✓ 最简单，代码最少</text>
+  <text x="30" y="126" font-size="10.5" fill="var(--sql)">✓ 可双向</text>
+  <text x="30" y="150" font-size="10.5" fill="var(--danger)">✗ 链接上<tspan font-weight="700">放不了额外信息</tspan></text>
+  <text x="30" y="172" font-size="10.5" fill="var(--danger)">✗ 后期加列改动代价大</text>
+
+  <rect x="222" y="40" width="196" height="150" rx="8" fill="var(--sql-soft)" stroke="var(--sql)" stroke-width="1.8"/>
+  <text x="320" y="62" text-anchor="middle" font-size="12" font-weight="700" fill="var(--sql)">② 中间<tspan font-weight="700">实体</tspan></text>
+  <text x="320" y="82" text-anchor="middle" font-size="10.5" fill="var(--ink-soft)">§9.3.2　两个 @ManyToOne</text>
+  <text x="236" y="106" font-size="10.5" fill="var(--sql)">✓ <tspan font-weight="700">最容易扩展</tspan>（作者推荐）</text>
+  <text x="236" y="126" font-size="10.5" fill="var(--sql)">✓ <tspan font-weight="700">可双向导航</tspan></text>
+  <text x="236" y="150" font-size="10.5" fill="var(--danger)">✗ 需复合主键等基础设施</text>
+  <text x="236" y="172" font-size="10.5" fill="var(--danger)">✗ 链接要独立 save/delete</text>
+
+  <rect x="428" y="40" width="196" height="150" rx="8" fill="var(--panel)" stroke="var(--line-strong)"/>
+  <text x="526" y="62" text-anchor="middle" font-size="12" font-weight="700" fill="var(--ink)">③ 组件三元关联</text>
+  <text x="526" y="82" text-anchor="middle" font-size="10.5" fill="var(--ink-soft)">§9.3.3　@ElementCollection</text>
+  <text x="442" y="106" font-size="10.5" fill="var(--sql)">✓ <tspan font-weight="700">隐式生命周期</tspan>，无需级联</text>
+  <text x="442" y="126" font-size="10.5" fill="var(--sql)">✓ Java 代码更简单</text>
+  <text x="442" y="150" font-size="10.5" fill="var(--danger)">✗ <tspan font-weight="700">无法双向导航</tspan></text>
+  <text x="442" y="172" font-size="10.5" fill="var(--danger)">✗ NOT NULL 约束要手工补</text>
+
+  <rect x="634" y="40" width="196" height="150" rx="8" fill="var(--panel)" stroke="var(--line-strong)"/>
+  <text x="732" y="62" text-anchor="middle" font-size="12" font-weight="700" fill="var(--ink)">④ Map 键值三元</text>
+  <text x="732" y="82" text-anchor="middle" font-size="10.5" fill="var(--ink-soft)">§9.4.2　Map&lt;Item, User&gt;</text>
+  <text x="648" y="106" font-size="10.5" fill="var(--sql)">✓ 无额外 Java 类</text>
+  <text x="648" y="126" font-size="10.5" fill="var(--sql)">✓ put / remove 即链接</text>
+  <text x="648" y="150" font-size="10.5" fill="var(--danger)">✗ <tspan font-weight="700">存不下 ADDEDON 这类列</tspan></text>
+  <text x="648" y="172" font-size="10.5" fill="var(--danger)">✗ 依赖 Map API，后期难改</text>
+</svg>
+</div><figcaption>图 9-C　同一个多对多关系的四种映射方式及其取舍</figcaption></figure>
+
+<div class="summary" id="s5">
+<h3>本章小结</h3>
+<ul>
+<li>复杂实体关联可用<b>一对一、一对多、多对多、三元关联</b>以及<b>基于 Map 的实体关联</b>来映射。</li>
+<li><b>一对一</b>可通过：共享主键、<code>foreign</code> 主键生成器、外键连接列、连接表来实现。<b>选择依据</b>：总有一方先存 → 共享主键；其他情况 → 外键；关联可选 → 连接表。</li>
+<li><b>一对多</b>可考虑：一对多 bag（最佳反向集合）、单向与双向 list 映射（谨慎）、可选一对多 + 连接表、可嵌入类中的一对多。</li>
+<li>可以创建<b>单向与双向多对多</b>，以及带<b>中间实体</b>的多对多。</li>
+<li>可以用<b>组件</b>构建三元关联，以及用 <b>Map</b> 实现实体关联。</li>
+<li><b>多对多实体关联通常最好表示成：来自一个中间实体类的两个多对一关联，或一个组件集合。</b></li>
+<li><b>尝试复杂集合映射之前，务必确认你真的需要一个集合。问问自己：会频繁遍历它的元素吗？</b></li>
+<li>本章用到的 Java 结构有时<b>让数据访问更容易，但通常让数据的存储、更新与删除变得复杂</b>。</li>
+</ul>
+</div>
+
+<div class="pager">
+  <a href="ch08.html">← 第 8 章　映射集合与实体关联</a>
+  <a href="ch10.html">第 10 章　管理数据 →</a>
+</div>
+</main>
+</div>
+</body>
+</html>

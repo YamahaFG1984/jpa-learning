@@ -1,0 +1,594 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>第 10 章 · 管理数据</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="topbar"><div class="topbar-inner">
+  <a class="brand" href="index.html">Java Persistence 讲义</a>
+  <span class="spacer"></span>
+  <a href="ch09.html">← 上一章</a>
+  <a href="index.html">目录</a>
+  <a href="ch11.html">下一章 →</a>
+</div></div>
+
+<div class="wrap">
+<nav class="toc">
+  <h4>本章目录</h4>
+  <a href="#s1">10.1 持久化生命周期</a>
+  <a class="sub" href="#s11">四种实体状态</a>
+  <a class="sub" href="#s12">持久化上下文</a>
+  <a href="#s2">10.2 EntityManager 接口</a>
+  <a class="sub" href="#s21">典型工作单元</a>
+  <a class="sub" href="#s22">persist 持久化</a>
+  <a class="sub" href="#s23">find 与修改</a>
+  <a class="sub" href="#s24">getReference 代理</a>
+  <a class="sub" href="#s25">remove 删除</a>
+  <a class="sub" href="#s26">refresh 刷新</a>
+  <a class="sub" href="#s27">replicate 复制</a>
+  <a class="sub" href="#s28">上下文中的缓存</a>
+  <a class="sub" href="#s29">flush 刷新时机</a>
+  <a href="#s3">10.3 处理游离状态</a>
+  <a class="sub" href="#s31">游离实例的标识</a>
+  <a class="sub" href="#s32">实现相等性方法</a>
+  <a class="sub" href="#s34">merge 合并</a>
+  <a href="#s4">本章小结</a>
+</nav>
+
+<main>
+<div class="hero">
+  <div class="eyebrow">Part 3 · 事务性数据处理</div>
+  <h1>第 10 章　管理数据</h1>
+  <p>前面九章解决的是<b>静态的</b>失配问题（结构映射）。但高效的应用还需要更多：<b>运行期的数据管理策略</b>。本章剖析实体实例的生命周期 —— 一个实例如何变成持久的、又如何不再被视为持久的，以及触发这些转换的方法调用。</p>
+</div>
+
+<div class="note"><b>JPA 2 的重要新特性</b>
+<p>① <code>EntityManager#unwrap()</code> 可拿到厂商特有的持久化管理器 API（如 <code>org.hibernate.Session</code>）；用前面演示过的 <code>EntityManagerFactory#unwrap()</code> 取 <code>SessionFactory</code>（§2.5）。<br>
+② 新的 <code>detach()</code> 操作提供对持久化上下文的<b>细粒度管理</b>，可逐出单个实体实例。<br>
+③ 可从已有 <code>EntityManager</code> 用 <code>getEntityManagerFactory()</code> 拿到创建它的工厂。<br>
+④ 新的静态帮助方法 <code>PersistenceUtil</code> 与 <code>PersistenceUnitUtil</code> 可判断某实体实例（或其某个属性）是<b>已完全加载</b>还是<b>未初始化的引用</b>（Hibernate 代理或未加载的集合包装器）。</p></div>
+
+<div class="warn"><b>本章不用 Spring Data JPA，甚至不用 Spring 框架</b><p>后续示例用 JPA、有时用 Hibernate API，<b>不做任何 Spring 集成</b> —— 因为它们<b>粒度更细</b>，更适合演示与分析。运行前先执行 <code>Ch10/Ch10.sql</code>；源码在 <code>managing-data</code> 和 <code>managing-data2</code> 目录。</p></div>
+
+<h2 id="s1"><span class="num">10.1</span>持久化生命周期</h2>
+
+<p>JPA 是<b>透明的</b>持久化机制：类不知道自己有持久化能力，因此可以写出<b>不关心数据是持久状态还是仅存于内存的临时状态</b>的应用逻辑。例如调用 <code>Item#calculateTotalPrice()</code> 业务方法时，完全不必考虑持久化（比如在单元测试里）。</p>
+
+<div class="tip"><b>三个必须掌握的术语</b>
+<div class="keyhint"><span class="k">持久化生命周期</span><span>实体实例一生中经历的各种<b>状态</b>。</span></div>
+<div class="keyhint"><span class="k">工作单元 unit of work</span><span>一组（可能）改变状态的操作，被视作<b>一个（通常是原子的）组</b>。</span></div>
+<div class="keyhint"><span class="k">持久化上下文</span><span>持久化服务提供的一项服务，<b>记住某个工作单元中对数据所做的一切修改与状态变更</b>（这个说法有点简化，但是个好起点）。</span></div>
+</div>
+
+<h3 id="s11">10.1.1　四种实体实例状态</h3>
+
+<figure><div class="fig-box">
+<svg viewBox="0 0 860 460" xmlns="http://www.w3.org/2000/svg" font-family="Inter,system-ui,sans-serif">
+  <defs>
+    <marker id="s10" markerWidth="9" markerHeight="9" refX="8" refY="4.5" orient="auto"><path d="M0 0 L9 4.5 L0 9 z" fill="var(--accent)"/></marker>
+    <marker id="s10g" markerWidth="9" markerHeight="9" refX="8" refY="4.5" orient="auto"><path d="M0 0 L9 4.5 L0 9 z" fill="var(--ink-faint)"/></marker>
+  </defs>
+
+  <!-- Transient -->
+  <rect x="310" y="20" width="230" height="52" rx="10" fill="var(--java-soft)" stroke="var(--java)" stroke-width="2"/>
+  <text x="425" y="44" text-anchor="middle" font-size="15" font-weight="700" fill="var(--java)">Transient 瞬时</text>
+  <text x="425" y="63" text-anchor="middle" font-size="11" fill="var(--ink-soft)">new 出来的，无引用即被 GC</text>
+  <path d="M180 46 L302 46" stroke="var(--accent)" stroke-width="1.6" marker-end="url(#s10)"/>
+  <text x="240" y="38" text-anchor="middle" font-family="monospace" font-size="12" fill="var(--accent)">new</text>
+  <path d="M548 46 L680 46" stroke="var(--ink-faint)" stroke-width="1.4" stroke-dasharray="5 4" marker-end="url(#s10g)"/>
+  <text x="614" y="38" text-anchor="middle" font-size="11.5" fill="var(--ink-faint)">garbage</text>
+
+  <!-- Persistent -->
+  <rect x="310" y="180" width="230" height="52" rx="10" fill="var(--accent-soft)" stroke="var(--accent)" stroke-width="2.4"/>
+  <text x="425" y="204" text-anchor="middle" font-size="15" font-weight="700" fill="var(--accent)">Persistent 持久</text>
+  <text x="425" y="223" text-anchor="middle" font-size="11" fill="var(--ink-soft)">有数据库标识，<tspan font-weight="700">总是关联着一个持久化上下文</tspan></text>
+
+  <path d="M400 76 L400 176" stroke="var(--accent)" stroke-width="1.8" marker-end="url(#s10)"/>
+  <text x="352" y="112" text-anchor="middle" font-family="monospace" font-size="12" font-weight="700" fill="var(--accent)">persist()</text>
+  <path d="M470 176 L470 76" stroke="var(--sql)" stroke-width="1.5" marker-end="url(#s10)"/>
+  <text x="516" y="130" text-anchor="middle" font-family="monospace" font-size="11.5" fill="var(--sql)">refresh()</text>
+
+  <!-- self loop merge -->
+  <path d="M540 200 C596 200 596 130 540 130 C520 130 512 140 512 156" fill="none" stroke="var(--java)" stroke-width="1.4" marker-end="url(#s10)"/>
+  <text x="614" y="166" text-anchor="middle" font-family="monospace" font-size="11.5" fill="var(--java)">merge() **</text>
+
+  <!-- Removed -->
+  <rect x="640" y="256" width="200" height="52" rx="10" fill="var(--danger-soft)" stroke="var(--danger)" stroke-width="2"/>
+  <text x="740" y="280" text-anchor="middle" font-size="15" font-weight="700" fill="var(--danger)">Removed 已删除</text>
+  <text x="740" y="298" text-anchor="middle" font-size="11" fill="var(--ink-soft)">工作单元结束时被 DELETE</text>
+  <path d="M546 218 L634 262" stroke="var(--danger)" stroke-width="1.6" marker-end="url(#s10)"/>
+  <text x="612" y="230" text-anchor="middle" font-family="monospace" font-size="12" fill="var(--danger)">remove()</text>
+  <path d="M646 250 L548 208" stroke="var(--sql)" stroke-width="1.4" marker-end="url(#s10)"/>
+  <text x="560" y="252" text-anchor="middle" font-family="monospace" font-size="11" fill="var(--sql)">persist()</text>
+  <path d="M740 314 L740 356" stroke="var(--ink-faint)" stroke-width="1.4" stroke-dasharray="5 4" marker-end="url(#s10g)"/>
+  <text x="740" y="374" text-anchor="middle" font-size="11.5" fill="var(--ink-faint)">garbage</text>
+
+  <!-- Detached -->
+  <rect x="310" y="342" width="230" height="52" rx="10" fill="var(--sql-soft)" stroke="var(--sql)" stroke-width="2"/>
+  <text x="425" y="366" text-anchor="middle" font-size="15" font-weight="700" fill="var(--sql)">Detached 游离</text>
+  <text x="425" y="385" text-anchor="middle" font-size="11" fill="var(--ink-soft)">脱离上下文，数据逐渐变陈旧</text>
+  <path d="M400 238 L400 338" stroke="var(--sql)" stroke-width="1.8" marker-end="url(#s10)"/>
+  <text x="318" y="272" text-anchor="middle" font-family="monospace" font-size="11.5" fill="var(--sql)">detach()</text>
+  <text x="312" y="290" text-anchor="middle" font-family="monospace" font-size="11.5" fill="var(--sql)">close() *</text>
+  <text x="312" y="308" text-anchor="middle" font-family="monospace" font-size="11.5" fill="var(--sql)">clear() *</text>
+  <path d="M478 338 L478 238" stroke="var(--java)" stroke-width="1.6" marker-end="url(#s10)"/>
+  <text x="540" y="300" text-anchor="middle" font-family="monospace" font-size="11.5" fill="var(--java)">merge() **</text>
+  <path d="M548 368 L680 368" stroke="var(--ink-faint)" stroke-width="1.4" stroke-dasharray="5 4" marker-end="url(#s10g)"/>
+  <text x="614" y="360" text-anchor="middle" font-size="11.5" fill="var(--ink-faint)">garbage</text>
+
+  <!-- entry points -->
+  <rect x="20" y="176" width="270" height="118" rx="8" fill="var(--panel)" stroke="var(--line-strong)"/>
+  <text x="155" y="197" text-anchor="middle" font-size="12" font-weight="700" fill="var(--ink-soft)">从数据库进入持久态的四条路</text>
+  <g font-family="monospace" font-size="11.5" fill="var(--ink)">
+    <text x="36" y="220">find()</text>
+    <text x="36" y="240">getReference()</text>
+    <text x="36" y="260">Query#getResultList()</text>
+    <text x="36" y="280">Query#getSingleResult()</text>
+  </g>
+  <path d="M296 220 L304 210" stroke="var(--accent)" stroke-width="1.5" marker-end="url(#s10)"/>
+
+  <rect x="20" y="404" width="820" height="46" rx="7" fill="var(--warn-soft)" stroke="var(--warn)"/>
+  <text x="36" y="424" font-size="11.5" fill="var(--ink)"><tspan font-weight="700">*</tspan>　<tspan font-family="monospace">close()</tspan> / <tspan font-family="monospace">clear()</tspan> 影响<tspan font-weight="700">持久化上下文中的所有实例</tspan>；<tspan font-family="monospace">detach()</tspan> 只逐出单个实例</text>
+  <text x="36" y="442" font-size="11.5" fill="var(--ink)"><tspan font-weight="700">**</tspan>　<tspan font-family="monospace">merge()</tspan> <tspan font-weight="700">返回一个持久实例，原实例的状态不变</tspan> —— 这是它最容易被误解的地方</text>
+</svg>
+</div><figcaption>图 10-1　实体实例的四种状态与状态转换（本章的地图，随时回来查）</figcaption></figure>
+
+<div class="tablewrap"><table>
+<thead><tr><th style="width:120px">状态</th><th>含义与要点</th></tr></thead>
+<tbody>
+<tr><td><b>Transient</b><br>瞬时</td><td>用 <code>new</code> 创建，<b>不再被引用就丢失并被 GC</b>。<b>Hibernate 不为瞬时实例提供任何回滚能力</b> —— 改了瞬时 Item 的价格，无法自动撤销。转为持久态需要：调 <code>persist()</code>，或<b>被一个已持久实例引用且该关联开启了级联</b></td></tr>
+<tr><td><b>Persistent</b><br>持久</td><td>在数据库中<b>有对应表示</b>（或工作单元结束时将被存入）。有数据库标识，其标识符被设为数据库表示的主键值。<b>持久实例总是关联着一个持久化上下文</b></td></tr>
+<tr><td><b>Removed</b><br>已删除</td><td>调 <code>remove()</code>，或从开启了 orphan removal 的映射集合中移除引用。提供者会在<b>工作单元结束时</b>删除它。<b>用完之后应丢弃应用中持有的任何引用</b>（例如渲染完给用户看的删除确认页之后）</td></tr>
+<tr><td><b>Detached</b><br>游离</td><td>加载一个实例、结束工作单元、关闭持久化上下文之后，应用仍持有对它的引用 —— 它现在处于游离态，<b>数据正在变陈旧</b>。可以丢弃让 GC 回收，也可以继续在游离态操作数据，之后在新工作单元里调 <code>merge()</code> 保存修改</td></tr>
+</tbody></table></div>
+
+<h3 id="s12">10.1.2　持久化上下文：JPA 提供者的核心服务</h3>
+
+<figure><div class="fig-box">
+<svg viewBox="0 0 860 400" xmlns="http://www.w3.org/2000/svg" font-family="Inter,system-ui,sans-serif">
+  <rect x="20" y="16" width="820" height="46" rx="8" fill="var(--accent-soft)" stroke="var(--accent)" stroke-width="1.8"/>
+  <text x="430" y="38" text-anchor="middle" font-size="13" fill="var(--ink)"><tspan font-family="monospace">emf.createEntityManager()</tspan> 创建持久化上下文　→　<tspan font-family="monospace">em.close()</tspan> 关闭它</text>
+  <text x="430" y="56" text-anchor="middle" font-size="11.5" fill="var(--ink-soft)">JPA 术语：这是<tspan font-weight="700">应用管理的（application-managed）持久化上下文</tspan> —— 由你的应用定义其作用域，划定工作单元边界</text>
+
+  <rect x="20" y="76" width="266" height="150" rx="8" fill="var(--java-soft)" stroke="var(--java)" stroke-width="1.6"/>
+  <text x="153" y="98" text-anchor="middle" font-size="13" font-weight="700" fill="var(--java)">① 自动脏检查</text>
+  <text x="36" y="120" font-size="11.5" fill="var(--ink)">检测应用修改了哪些实体实例；</text>
+  <text x="36" y="138" font-size="11.5" fill="var(--ink)">自动或按需把状态<tspan font-weight="700">同步</tspan>到数据库</text>
+  <text x="36" y="162" font-size="11.5" fill="var(--ink)">通常在工作单元结束时，通过执行</text>
+  <text x="36" y="178" font-size="11.5" fill="var(--ink)">INSERT / UPDATE / DELETE（DML）完成</text>
+  <text x="36" y="202" font-size="11.5" fill="var(--ink-soft)">刷新也可能在<tspan font-weight="700">其他时刻</tspan>发生：例如</text>
+  <text x="36" y="218" font-size="11.5" fill="var(--ink-soft)">查询执行前 —— 保证查询能看到本单元早先的改动</text>
+
+  <rect x="297" y="76" width="266" height="150" rx="8" fill="var(--sql-soft)" stroke="var(--sql)" stroke-width="1.6"/>
+  <text x="430" y="98" text-anchor="middle" font-size="13" font-weight="700" fill="var(--sql)">② 一级缓存（<tspan font-weight="700">永远开着，无法关闭</tspan>）</text>
+  <text x="313" y="120" font-size="11.5" fill="var(--ink)">按主键查找时先查上下文；<tspan font-weight="700">命中则不打库</tspan></text>
+  <text x="313" y="138" font-size="11.5" fill="var(--ink)">→ 对应用而言这就是<tspan font-weight="700">可重复读</tspan></text>
+  <text x="313" y="162" font-size="11.5" fill="var(--ink)">也影响任意查询：Hibernate 读 SQL 结果集时，</text>
+  <text x="313" y="178" font-size="11.5" fill="var(--ink)">先<tspan font-weight="700">按标识符在上下文中解析每个实体</tspan>，</text>
+  <text x="313" y="194" font-size="11.5" fill="var(--ink)">找不到才去读结果集行的其余数据</text>
+  <text x="313" y="216" font-size="11.5" fill="var(--danger)">⚠ 实体已在上下文中时，<tspan font-weight="700">结果集里更新的数据会被忽略</tspan></text>
+
+  <rect x="574" y="76" width="266" height="150" rx="8" fill="var(--panel)" stroke="var(--line-strong)" stroke-width="1.6"/>
+  <text x="707" y="98" text-anchor="middle" font-size="13" font-weight="700" fill="var(--ink)">③ 保证的对象标识作用域</text>
+  <text x="590" y="122" font-size="11.5" fill="var(--ink)"><tspan font-weight="700">在单个持久化上下文范围内，</tspan></text>
+  <text x="590" y="140" font-size="11.5" fill="var(--ink)"><tspan font-weight="700">只有一个实例代表某个数据库行</tspan></text>
+  <text x="590" y="166" font-family="monospace" font-size="11" fill="var(--ink-soft)">entityA == entityB</text>
+  <text x="590" y="184" font-family="monospace" font-size="11" fill="var(--ink-soft)">entityA.getId().equals(entityB.getId())</text>
+  <text x="590" y="206" font-size="11.5" fill="var(--sql)">在一个上下文内，Hibernate 保证<tspan font-weight="700">两者结果相同</tspan></text>
+  <text x="590" y="222" font-size="11.5" fill="var(--sql)">→ 解决了 §1.2.3 的「标识问题」</text>
+
+  <rect x="20" y="240" width="820" height="76" rx="8" fill="var(--panel)" stroke="var(--line-strong)"/>
+  <text x="430" y="262" text-anchor="middle" font-size="12.5" font-weight="700" fill="var(--ink)">一级缓存「永远开着」保证了三件事</text>
+  <text x="36" y="284" font-size="11.5" fill="var(--ink)">• 对象图中存在<tspan font-weight="700">循环引用</tspan>时，持久化层不会栈溢出</text>
+  <text x="36" y="302" font-size="11.5" fill="var(--ink)">• 工作单元结束时，<tspan font-weight="700">同一数据库行绝不会有互相冲突的表示</tspan> —— 提供者可以安全地把对某实体的全部改动写库</text>
+  <text x="470" y="284" font-size="11.5" fill="var(--ink)">• 某个上下文中的改动，<tspan font-weight="700">对该工作单元内执行的所有其他代码立即可见</tspan></text>
+  <text x="482" y="302" font-size="11.5" fill="var(--ink)">—— <tspan font-weight="700">JPA 保证实体实例的可重复读</tspan></text>
+
+  <rect x="20" y="330" width="820" height="62" rx="8" fill="var(--warn-soft)" stroke="var(--warn)" stroke-width="1.6"/>
+  <text x="430" y="352" text-anchor="middle" font-size="12.5" font-weight="700" fill="var(--warn)">为什么不用「进程级标识」？</text>
+  <text x="36" y="372" font-size="11.5" fill="var(--ink)">进程级标识（整个 JVM 内一行只有一个内存实例）在<tspan font-weight="700">缓存利用率</tspan>上有潜在优势。<tspan font-weight="700">但在高度多线程的应用里，</tspan></text>
+  <text x="36" y="388" font-size="11.5" fill="var(--ink)"><tspan font-weight="700">始终同步对全局标识映射中共享持久实例的访问，代价太高</tspan>。让每个线程在各自的持久化上下文中处理数据副本，<tspan font-weight="700">更简单也更可扩展</tspan>。</text>
+</svg>
+</div><figcaption>图 10-A　持久化上下文的三大职责</figcaption></figure>
+
+<h2 id="s2"><span class="num">10.2</span><code>EntityManager</code> 接口</h2>
+
+<h3 id="s21">10.2.1　典型的工作单元</h3>
+
+<div class="filename">managing-data/src/test/java/…/ch10/SimpleTransitionsTest.java</div>
+<pre><code>EntityManagerFactory emf = Persistence.createEntityManagerFactory(<span class="str">"ch10"</span>);
+<span class="cmt">// EntityManagerFactory 代表一个持久化单元（一个逻辑数据库），<b>全应用共享</b>；
+// EntityManager 用于<b>单线程中的单个工作单元</b>，创建成本很低</span>
+EntityManager em = emf.createEntityManager();
+<span class="kw">try</span> {
+    em.getTransaction().begin();
+    <span class="cmt">// …</span>
+    em.getTransaction().commit();
+} <span class="kw">catch</span> (Exception ex) {
+    <span class="cmt">// 事务回滚、异常处理（<b>不要写空的 catch 块</b>！第 11 章细讲）</span>
+} <span class="kw">finally</span> {
+    <span class="kw">if</span> (em != <span class="kw">null</span> &amp;&amp; em.isOpen())
+        em.close();          <span class="cmt">// <b>必须</b>放在 finally 块里</span>
+}</code></pre>
+
+<div class="tip"><b>Hibernate 什么时候才真正碰数据库？</b>
+<ul style="margin-bottom:0">
+<li>创建 <code>EntityManager</code> 就<b>开启了持久化上下文</b>，但 Hibernate <b>不到必要时不访问数据库</b> —— 要执行 SQL 时才从池里取 JDBC <code>Connection</code>。<b>可以创建并关闭一个 EntityManager 而完全不碰数据库。</b></li>
+<li>它在<b>查找/查询数据时</b>、以及<b>把上下文检测到的变更刷新到数据库时</b>执行 SQL。</li>
+<li>创建 <code>EntityManager</code> 时它<b>加入正在进行的系统事务</b>并等待提交；收到提交通知后对上下文做<b>脏检查</b>并同步数据库。也可以随时调 <code>flush()</code> <b>手动强制同步</b>。</li>
+<li><b>你通过决定何时 <code>close()</code> 来决定持久化上下文的作用域。</b>下文示例假设：这是一个服务端，多线程环境下<b>每个客户端请求用一个持久化上下文 + 一个系统事务</b>处理（想象把这段代码嵌进 servlet 的 <code>service()</code> 方法）。</li>
+</ul></div>
+
+<h3 id="s22">10.2.2　让数据变持久：<code>persist()</code></h3>
+
+<figure><div class="fig-box">
+<svg viewBox="0 0 780 180" xmlns="http://www.w3.org/2000/svg" font-family="Inter,system-ui,sans-serif">
+  <defs><marker id="p10" markerWidth="9" markerHeight="9" refX="8" refY="4.5" orient="auto"><path d="M0 0 L9 4.5 L0 9 z" fill="var(--accent)"/></marker></defs>
+  <rect x="150" y="20" width="480" height="90" rx="10" fill="none" stroke="var(--accent)" stroke-width="1.6" stroke-dasharray="6 4"/>
+  <text x="390" y="14" text-anchor="middle" font-size="11.5" fill="var(--accent)">持久化上下文</text>
+
+  <circle cx="80" cy="70" r="20" fill="var(--java-soft)" stroke="var(--java)" stroke-width="1.8"/>
+  <text x="80" y="76" text-anchor="middle" font-size="14" font-weight="700" fill="var(--java)">T</text>
+  <text x="80" y="112" text-anchor="middle" font-family="monospace" font-size="11" fill="var(--ink-soft)">1. new O()</text>
+
+  <path d="M104 70 L316 70" stroke="var(--accent)" stroke-width="1.8" marker-end="url(#p10)"/>
+  <text x="210" y="60" text-anchor="middle" font-family="monospace" font-size="12" font-weight="700" fill="var(--accent)">3. persist(o)</text>
+  <text x="210" y="130" text-anchor="middle" font-family="monospace" font-size="11" fill="var(--ink-soft)">2. createEM()</text>
+
+  <circle cx="340" cy="70" r="20" fill="var(--accent-soft)" stroke="var(--accent)" stroke-width="2"/>
+  <text x="340" y="76" text-anchor="middle" font-size="14" font-weight="700" fill="var(--accent)">P</text>
+
+  <path d="M364 70 L636 70" stroke="var(--sql)" stroke-width="1.8" marker-end="url(#p10)"/>
+  <text x="500" y="60" text-anchor="middle" font-family="monospace" font-size="12" fill="var(--sql)">4. flush() / close()</text>
+  <text x="500" y="94" text-anchor="middle" font-size="11" fill="var(--ink-soft)">提交时刷新上下文，此刻执行 INSERT</text>
+
+  <circle cx="660" cy="70" r="20" fill="var(--sql-soft)" stroke="var(--sql)" stroke-width="1.8"/>
+  <text x="660" y="76" text-anchor="middle" font-size="14" font-weight="700" fill="var(--sql)">D</text>
+
+  <text x="390" y="160" text-anchor="middle" font-size="11.5" fill="var(--ink)">调 <tspan font-family="monospace">persist()</tspan> 时<tspan font-weight="700">只赋上标识符值</tspan>；除非标识符生成器不是「预插入」型 —— 那样 INSERT 会<tspan font-weight="700">立刻</tspan>执行（§5.2.5）</text>
+</svg>
+</div><figcaption>图 10-2　在一个工作单元中让实例变持久</figcaption></figure>
+
+<pre><code>Item item = <span class="kw">new</span> Item();
+item.setName(<span class="str">"Some Item"</span>);
+em.persist(item);                <span class="cmt">// 现在由当前持久化上下文管理并关联</span>
+Long ITEM_ID = item.getId();</code></pre>
+
+<div class="warn"><b>三个实践要点</b>
+<p>① <b>最好（但非必需）在纳入上下文管理之前把 Item 完全初始化好。</b>SQL INSERT 里的值是<b>调 <code>persist()</code> 那一刻</b>实例持有的值。若在变持久前没设 <code>name</code>，可能违反 NOT NULL 约束。<code>persist()</code> 之后再改也可以，改动会通过一条额外的 UPDATE 传播到数据库。</p>
+<p style="margin-top:6px">② <b>刷新时若 INSERT/UPDATE 失败，Hibernate 会在数据库层回滚本事务对持久实例所做的更改，但<u>不会回滚内存中的修改</u>。</b>如果你在 <code>persist()</code> 之后改了 <code>Item#name</code>，提交失败<b>不会</b>把名字回滚成旧值。这是合理的：事务失败通常<b>不可恢复</b>，你必须<b>立刻丢弃</b>失败的持久化上下文和 EntityManager。</p></div>
+
+<div class="tip"><b>用标识符判断实体状态</b>
+<div class="keyhint"><span class="k">Persistent</span><span><code>EntityManager#contains(e)</code> 返回 <code>true</code></span></div>
+<div class="keyhint"><span class="k">Transient</span><span><code>PersistenceUnitUtil#getIdentifier(e)</code> 返回 <code>null</code></span></div>
+<div class="keyhint"><span class="k">Detached</span><span>不是持久态，且 <code>getIdentifier(e)</code> 返回实体标识符属性的值</span></div>
+<p style="margin-top:8px"><b>两个坑</b>：① 标识符值<b>可能要到上下文被刷新后才可用</b>；② 如果标识符属性是<b>基本类型</b>（<code>long</code> 而非 <code>Long</code>），Hibernate（与某些其他 JPA 提供者不同）<b>永远不会</b>从 <code>getIdentifier()</code> 返回 <code>null</code>。<code>PersistenceUnitUtil</code> 从 <code>EntityManagerFactory</code> 获取。</p></div>
+
+<h3 id="s23">10.2.3　检索并修改持久数据：<code>find()</code></h3>
+
+<pre><code>Item item = em.find(Item.class, ITEM_ID);   <span class="cmt">// 若不在上下文中就打库；<b>泛型方法，无需强制转换</b></span>
+<span class="kw">if</span> (item != <span class="kw">null</span>)
+    item.setName(<span class="str">"New Name"</span>);              <span class="cmt">// 上下文自动检测改动并记录到数据库</span>
+
+<span class="cmt">// 可重复读 + 对象标识保证</span>
+Item itemA = em.find(Item.class, ITEM_ID);  <span class="cmt">// ❶ 打库，用 SELECT 取回</span>
+Item itemB = em.find(Item.class, ITEM_ID);  <span class="cmt">// ❷ <b>在持久化上下文中解析</b>，返回同一个缓存实例</span>
+assertTrue(itemA == itemB);
+assertTrue(itemA.equals(itemB));
+assertTrue(itemA.getId().equals(itemB.getId()));</code></pre>
+
+<div class="tablewrap"><table>
+<thead><tr><th style="width:200px">行为</th><th>说明</th></tr></thead>
+<tbody>
+<tr><td>找不到时</td><td>返回 <code>null</code></td></tr>
+<tr><td>是否打库</td><td><b>上下文缓存里没有对应类型+标识符的命中，<code>find()</code> 就一定打库</b>（除非开启了可选的二级缓存）</td></tr>
+<tr><td>是否完全初始化</td><td><b>加载期间实体实例总是被完全初始化</b>。因此可以放心地在<b>游离态</b>使用它的全部值（例如关闭上下文后渲染页面）</td></tr>
+<tr><td>UPDATE 包含哪些列</td><td>默认 Hibernate 把映射表的<b>所有列</b>都写进 UPDATE，未变的列更新为旧值 —— 因此这些基础 SQL 可以在<b>启动时</b>生成而非运行时。想只含变更列，开启动态 SQL（§5.3.2）</td></tr>
+<tr><td>脏检查怎么做</td><td>把 Item 与<b>加载时拍下的快照副本</b>比较。<b>快照消耗内存</b>；刷新时要把上下文中所有实例与快照逐一比较，<b>也可能耗时</b></td></tr>
+<tr><td>写库时机</td><td>Hibernate <b>尽可能晚</b>地把状态变更传播到数据库（靠近事务末尾）—— DML 语句通常会在数据库产生持有到事务结束的锁，<b>这样能把锁持有时间压到最短</b></td></tr>
+</tbody></table></div>
+
+<h3 id="s24">10.2.4　获取引用：<code>getReference()</code></h3>
+
+<div class="cols">
+<div>
+<pre><code>Item item = em.getReference(Item.class, ITEM_ID);
+PersistenceUnitUtil persistenceUtil = emf.getPersistenceUnitUtil();
+assertFalse(persistenceUtil.isLoaded(item));   <span class="cmt">// 检测是否是未初始化代理</span>
+
+<span class="cmt">// assertEquals("Some Item", item.getName());   ← 这会触发 SELECT
+// Hibernate.initialize(item);                  ← 或者显式加载代理数据</span>
+
+em.getTransaction().commit();
+em.close();                                    <span class="cmt">// item 现在是游离态</span>
+assertThrows(<span class="hl">LazyInitializationException</span>.class,
+             () -&gt; item.getName());            <span class="cmt">// 上下文关了就没法按需加载了</span></code></pre>
+</div>
+<div>
+<div class="card">
+<h4>代理（proxy）的语义</h4>
+<p>① 上下文里<b>已有</b>该标识符的 Item → 直接返回它，<b>不打库</b>。</p>
+<p>② 当前没有被管理的该实例 → Hibernate 造一个<b>空壳占位符：代理</b>。所以 <code>getReference()</code> <b>不访问数据库，也不会像 <code>find()</code> 那样返回 <code>null</code></b>。</p>
+<p>③ 一旦调用代理上的任何方法（如 <code>getName()</code>），就执行 SELECT 完全初始化它。<b>例外是被映射的数据库标识符 getter（如 <code>getId()</code>）</b> —— 代理看着像真货，其实只是个<b>携带标识符值</b>的占位符。</p>
+<p style="margin-bottom:0">④ 代理初始化时若数据库记录已不存在 → 抛 <code>EntityNotFoundException</code>。<b>注意这个异常可能在调 <code>getName()</code> 时才抛出。</b></p>
+</div>
+<div class="pit" style="margin-top:12px"><b>解法很简单</b><p><b>在关闭持久化上下文<u>之前</u>把数据加载好。</b>更多关于代理、懒加载和按需抓取的内容在第 12 章。</p></div>
+</div>
+</div>
+
+<h3 id="s25">10.2.5　让数据变瞬时：<code>remove()</code></h3>
+
+<pre><code>Item item = em.find(Item.class, ITEM_ID);   <span class="cmt">❶ 执行 SELECT 加载 Item</span>
+em.remove(item);                            <span class="cmt">❷ 排队等待工作单元结束时删除 → removed 态</span>
+assertFalse(em.contains(item));             <span class="cmt">❸ removed 态不再「在持久化上下文中」</span>
+<span class="cmt">// em.persist(item);                        ❹ <b>可以撤销删除</b>，让它重新变持久</span>
+assertNull(item.getId());                   <span class="cmt">❺ 仅当开启 use_identifier_rollback 时才为 null</span>
+em.getTransaction().commit();               <span class="cmt">❻ 同步状态转换，执行 SQL DELETE</span>
+em.close();</code></pre>
+
+<div class="keyhint"><span class="k">对代理调 remove()</span><span>Hibernate 会<b>执行 SELECT 加载数据</b> —— <b>实体实例在生命周期转换期间必须被完全初始化</b>：可能启用了生命周期回调方法或实体监听器（§13.2），实例必须经过这些拦截器才能走完完整生命周期。</span></div>
+<div class="keyhint"><span class="k">标识符值不会被清空</span><span>默认情况下 Hibernate <b>不会改动已删除实例的标识符值</b>，所以 <code>item.getId()</code> 仍返回那个已过时的值。有时这有用（比如用户点「撤销」时想把删掉的 Item 重新存回去）。<b>在 <code>persistence.xml</code> 里设 <code>hibernate.use_identifier_rollback=true</code></b>，Hibernate 就会在删除后重置标识符值（本例会重置为 <code>Long</code> 的默认值 <code>null</code>），此时 Item 就和瞬时态一样，可以在新的上下文中重新保存。</span></div>
+
+<h3 id="s26">10.2.6　刷新数据：<code>refresh()</code></h3>
+
+<pre><code>Item item = em.find(Item.class, ITEM_ID);
+item.setName(<span class="str">"Some Name"</span>);
+<span class="cmt">// 此时别人在数据库里把这行改成了 "Concurrent UpdateName"</span>
+em.refresh(item);           <span class="cmt">// 执行 SELECT 读取并组装整个结果集，<b>覆盖内存里已做的修改</b></span>
+em.close();
+assertEquals(<span class="str">"Concurrent UpdateName"</span>, item.getName());</code></pre>
+
+<div class="tip"><b>什么时候真的需要它</b>
+<p>大多数应用<b>不必手工刷新内存状态</b> —— 并发修改通常在<b>事务提交时</b>解决。<b>最佳用例是「扩展的持久化上下文」</b>：它可能跨越多个请求/响应周期或多个系统事务。当我们保持上下文打开、等待用户输入时，<b>数据会变陈旧</b>，视会话时长和人机对话情况可能需要选择性刷新。<b>如果用户取消对话，刷新还能用来撤销会话期间在内存中所做的修改。</b></p>
+<p style="margin-top:6px">如果数据库行已不存在（被别人删了），<code>refresh()</code> 会抛 <code>EntityNotFoundException</code>。</p></div>
+
+<h3 id="s27">10.2.7　复制数据：<code>replicate()</code>（仅 Hibernate Session API）</h3>
+
+<pre><code>EntityManager emA = getDatabaseA().createEntityManager();
+emA.getTransaction().begin();
+Item item = emA.find(Item.class, ITEM_ID);
+emA.getTransaction().commit();
+
+EntityManager emB = getDatabaseB().createEntityManager();
+emB.getTransaction().begin();
+emB.unwrap(Session.class)
+   .replicate(item, org.hibernate.ReplicationMode.LATEST_VERSION);
+Item item1 = emB.find(Item.class, ITEM_ID);
+assertEquals(<span class="str">"Some Item"</span>, item1.getName());
+emB.getTransaction().commit();</code></pre>
+
+<div class="tablewrap"><table>
+<thead><tr><th style="width:190px"><code>ReplicationMode</code></th><th>行为</th></tr></thead>
+<tbody>
+<tr><td><code>IGNORE</code></td><td>目标库已有同标识符的行时，<b>忽略</b>该实例</td></tr>
+<tr><td><code>OVERWRITE</code></td><td><b>覆盖</b>任何同标识符的已有行</td></tr>
+<tr><td><code>EXCEPTION</code></td><td>目标库已有同标识符的行时<b>抛异常</b></td></tr>
+<tr><td><code>LATEST_VERSION</code></td><td>数据库中行的<b>版本更旧</b>就覆盖，否则忽略。<b>要求开启带实体版本的乐观并发控制</b>（§11.2.2）</td></tr>
+</tbody></table></div>
+<p><b>用途</b>：从一个数据库取数据存进另一个（通常来自两个不同的 <code>EntityManagerFactory</code> 配置，代表两个逻辑数据库；实体必须在两套配置里都映射）。典型场景是<b>产品升级</b> —— 新版本需要新的数据库（schema）时，一次性迁移并复制既有数据。</p>
+
+<h3 id="s28">10.2.8　持久化上下文中的缓存：<code>OutOfMemoryError</code> 的常见原因</h3>
+
+<div class="pit"><b>很多 Hibernate 用户因为忽略这个简单事实而遇到 <code>OutOfMemoryError</code></b>
+<p><b>每个持久态的实体实例都关联着持久化上下文。</b>典型场景是：一个工作单元里加载了<b>成千上万个实体实例但根本不打算修改它们</b> —— Hibernate 仍然必须为<b>每一个</b>在上下文缓存里创建快照，从而耗尽内存。（显然，要改动成千上万行时应该用<b>批量数据操作</b>。）</p>
+<p style="margin-top:6px"><b>持久化上下文缓存永不自动收缩</b>，所以应把它的大小保持在必要的最小值。很多时候，上下文里的持久实例是<b>意外进来的</b> —— 比如只需要几个 item 却查出了一大堆。<b>超大的对象图会有严重的性能后果，并为状态快照占用大量内存。检查你的查询是否只返回了需要的数据。</b></p></div>
+
+<div class="tablewrap"><table>
+<thead><tr><th style="width:330px">控制手段</th><th>效果</th></tr></thead>
+<tbody>
+<tr><td><code>em.detach(i)</code></td><td>手工把一个持久实例从上下文中<b>逐出</b></td></tr>
+<tr><td><code>em.clear()</code></td><td>游离<b>所有</b>持久实体实例，留下一个空的上下文</td></tr>
+<tr><td><code>em.unwrap(Session.class).setDefaultReadOnly(true)</code></td><td>把<b>整个上下文</b>设为只读：禁用状态快照与脏检查，Hibernate 不会把修改写库 —— 因此 <code>flush()</code> 不会更新数据库</td></tr>
+<tr><td><code>em.unwrap(Session.class).setReadOnly(item, true)</code></td><td>对<b>单个实体实例</b>禁用脏检查</td></tr>
+<tr><td><code>query.setReadOnly(true)</code>（<code>org.hibernate.query.Query</code>）</td><td>查询返回<b>只读结果</b>，Hibernate 不检查其修改</td></tr>
+<tr><td><code>em.createQuery(q).setHint(QueryHints.READ_ONLY, true)</code></td><td>用<b>查询提示</b>在标准 <code>javax.persistence.Query</code> 上禁用脏检查</td></tr>
+</tbody></table></div>
+
+<div class="warn"><b>小心只读实体实例</b><p><b>你仍然可以删除它们，而且对集合的修改很棘手！</b>如果要把这些设置用在映射集合上，请先阅读 Hibernate 手册里那一长串特殊情形。</p></div>
+
+<h3 id="s29">10.2.9　刷新持久化上下文：<code>FlushModeType</code></h3>
+
+<figure><div class="fig-box">
+<svg viewBox="0 0 820 250" xmlns="http://www.w3.org/2000/svg" font-family="Inter,system-ui,sans-serif">
+  <rect x="20" y="18" width="380" height="128" rx="8" fill="var(--sql-soft)" stroke="var(--sql)" stroke-width="1.8"/>
+  <text x="210" y="42" text-anchor="middle" font-size="13.5" font-weight="700" fill="var(--sql)">Hibernate 在这三种时刻同步</text>
+  <text x="38" y="68" font-size="12" fill="var(--ink)">① 加入的 JTA 系统事务<tspan font-weight="700">提交</tspan>时</text>
+  <text x="38" y="94" font-size="12" fill="var(--ink)">② <tspan font-weight="700">查询执行之前</tspan>（指 <tspan font-family="monospace">Query</tspan> 查询，</text>
+  <text x="52" y="110" font-size="12" fill="var(--ink)">　<tspan font-weight="700">不是</tspan> <tspan font-family="monospace">find()</tspan> 那种按标识符查找）</text>
+  <text x="38" y="136" font-size="12" fill="var(--ink)">③ 应用显式调用 <tspan font-family="monospace">flush()</tspan></text>
+
+  <rect x="420" y="18" width="380" height="128" rx="8" fill="var(--warn-soft)" stroke="var(--warn)" stroke-width="1.8"/>
+  <text x="610" y="42" text-anchor="middle" font-size="13.5" font-weight="700" fill="var(--warn)">用 FlushModeType 控制</text>
+  <text x="438" y="70" font-family="monospace" font-size="12.5" font-weight="700" fill="var(--sql)">AUTO</text>
+  <text x="500" y="70" font-size="12" fill="var(--ink)">默认（EntityManager 加入事务时）</text>
+  <text x="438" y="88" font-size="11.5" fill="var(--ink-soft)">查询前会先同步，所以查询能看到内存中的改动</text>
+  <text x="438" y="114" font-family="monospace" font-size="12.5" font-weight="700" fill="var(--accent)">COMMIT</text>
+  <text x="510" y="114" font-size="12" fill="var(--ink)">禁用查询前刷新</text>
+  <text x="438" y="132" font-size="11.5" fill="var(--danger)">→ <tspan font-weight="700">查询返回的数据可能与内存中的不同</tspan>，只在提交时同步</text>
+
+  <rect x="20" y="160" width="780" height="80" rx="8" fill="var(--code-bg)" stroke="var(--line-strong)"/>
+  <g font-family="monospace" font-size="11.5" fill="var(--ink)">
+    <text x="38" y="182">Item item = em.find(Item.class, ITEM_ID);  item.setName("New Name");</text>
+    <text x="38" y="200" fill="var(--accent)">em.setFlushMode(FlushModeType.COMMIT);</text>
+    <text x="38" y="220">assertEquals(<tspan fill="var(--danger)" font-weight="700">"Original Name"</tspan>,   // ← 查到的仍是库里的旧值！</text>
+    <text x="54" y="236">    em.createQuery("select i.name from Item i where i.id = :id", String.class)
+                .setParameter("id", ITEM_ID).getSingleResult());</text>
+  </g>
+</svg>
+</div><figcaption>图 10-B　刷新时机与 <code>FlushModeType</code></figcaption></figure>
+
+<h2 id="s3"><span class="num">10.3</span>处理游离（detached）状态</h2>
+
+<p>当一个引用<b>离开了「保证的标识作用域」</b>，我们就称它是对游离实体实例的引用。持久化上下文一关闭，它就不再提供标识映射服务，<b>处理游离实例时会遇到别名（aliasing）问题</b>。</p>
+
+<h3 id="s31">10.3.1　游离实例的标识</h3>
+
+<div class="filename">SimpleTransitionsTest.java – scopeOfIdentity()</div>
+<pre><code>em = emf.createEntityManager();  em.getTransaction().begin();
+Item a = em.find(Item.class, ITEM_ID);
+Item b = em.find(Item.class, ITEM_ID);
+assertTrue(<span class="hl">a == b</span>);                      <span class="cmt">// 同一上下文取得 → <b>Java 标识相同</b></span>
+assertTrue(a.equals(b));                   <span class="cmt">// 默认 equals() 依赖 Java 标识比较</span>
+assertEquals(a.getId(), b.getId());
+em.getTransaction().commit();  em.close();  <span class="cmt">// a、b 现在都是游离态</span>
+
+em = emf.createEntityManager();  em.getTransaction().begin();
+Item c = em.find(Item.class, ITEM_ID);      <span class="cmt">// <b>在<u>另一个</u>上下文中加载</b></span>
+assertTrue(<span class="hl">a != c</span>);                      <span class="cmt">// 不是同一个实例</span>
+assertFalse(<span class="hl">a.equals(c)</span>);                 <span class="cmt">// equals() 没被重写 → 用 == 判断</span>
+assertEquals(a.getId(), c.getId());        <span class="cmt">// <b>但数据库标识测试仍然为 true</b></span></code></pre>
+
+<figure><div class="fig-box">
+<svg viewBox="0 0 840 260" xmlns="http://www.w3.org/2000/svg" font-family="Inter,system-ui,sans-serif">
+  <rect x="20" y="20" width="390" height="140" rx="8" fill="var(--danger-soft)" stroke="var(--danger)" stroke-width="1.6"/>
+  <text x="215" y="42" text-anchor="middle" font-size="13" font-weight="700" fill="var(--danger)">默认 equals()：Set 的大小是 2</text>
+  <g font-family="monospace" font-size="11.5" fill="var(--ink)">
+    <text x="38" y="66">Set&lt;Item&gt; allItems = new HashSet&lt;&gt;();</text>
+    <text x="38" y="84">allItems.add(a); allItems.add(b); allItems.add(c);</text>
+    <text x="38" y="106" fill="var(--danger)">assertEquals(2, allItems.size());</text>
+  </g>
+  <text x="38" y="130" font-size="11.5" fill="var(--ink)">a、b 是同一实例；c 来自另一个上下文，是堆上另一个实例</text>
+  <text x="38" y="150" font-size="11.5" fill="var(--danger)"><tspan font-weight="700">但真实应用中你并不知道 a/b 和 c 来自不同上下文！</tspan></text>
+
+  <rect x="430" y="20" width="390" height="140" rx="8" fill="var(--sql-soft)" stroke="var(--sql)" stroke-width="1.6"/>
+  <text x="625" y="42" text-anchor="middle" font-size="13" font-weight="700" fill="var(--sql)">我们期望的语义：大小应该是 1</text>
+  <text x="448" y="68" font-size="11.5" fill="var(--ink)">因为 a、b、c <tspan font-weight="700">代表同一数据库行、同一个 Item</tspan></text>
+  <text x="448" y="94" font-size="11.5" fill="var(--ink)"><tspan font-weight="700">Set 不允许重复</tspan>：每次 add，都会自动对集合中</text>
+  <text x="448" y="110" font-size="11.5" fill="var(--ink)">已有的每个元素调用 <tspan font-family="monospace">equals()</tspan>；返回 true 就不加入</text>
+  <text x="448" y="136" font-size="11.5" fill="var(--sql)">→ 必须为映射的实体类<tspan font-weight="700">自己实现 equals() 和 hashCode()</tspan></text>
+  <text x="448" y="152" font-size="11.5" fill="var(--sql)">（<tspan font-family="monospace">java.lang.Object</tspan> 的默认实现用 <tspan font-family="monospace">==</tspan> 比较堆上实例）</text>
+
+  <rect x="20" y="178" width="800" height="66" rx="8" fill="var(--warn-soft)" stroke="var(--warn)" stroke-width="1.6"/>
+  <text x="420" y="200" text-anchor="middle" font-size="12.5" font-weight="700" fill="var(--warn)">但这是一个「有条件」的要求 —— 别过度工程</text>
+  <text x="38" y="222" font-size="11.5" fill="var(--ink)">• <tspan font-weight="700">如果不在游离态使用实体实例</tspan>，什么都不用做，默认的 <tspan font-family="monospace">Object#equals()</tspan> 就够了 —— 靠 Hibernate 在上下文内保证的标识作用域</text>
+  <text x="38" y="240" font-size="11.5" fill="var(--ink)">• 即使用了游离实例，只要<tspan font-weight="700">从不检查它们是否相等、不放进 Set、不当 Map 的键</tspan>，也不必担心。只是把游离的 Item 渲染到屏幕上，并没有跟谁比较</text>
+</svg>
+</div><figcaption>图 10-C　游离态下的标识陷阱</figcaption></figure>
+
+<h3 id="s32">10.3.2　实现相等性方法：业务键（business key）</h3>
+
+<div class="pit"><b>一个看似聪明、实则严重错误的做法：用数据库标识符比较</b>
+<p>「两个 <code>Item</code> 的 <code>getId()</code> 相同就是同一个；返回 <code>null</code> 就是尚未保存的瞬时 Item。」</p>
+<p style="margin-top:6px"><b>这个方案有一个巨大问题：标识符值直到实例变持久时才由 Hibernate 赋予。</b>如果在保存之前把一个瞬时实例加进了 <code>Set</code>，那么保存时<b>它的哈希值会在仍被 Set 持有的情况下改变</b> —— 这违反了 <code>java.util.Set</code> 的契约，<b>破坏了这个集合</b>。尤其是，这个问题会让<b>基于 set 的映射关联的级联持久化变得毫无用处</b>。<b>我们强烈不建议用数据库标识符做相等性判断。</b></p></div>
+
+<div class="tip"><b>业务键的定义</b>
+<p>一个属性或若干属性的组合，<b>对每个具有相同数据库标识的实例都是唯一的</b>。本质上，它就是「如果不用代理主键的话我们会用的那个自然键」。</p>
+<p style="margin-top:6px"><b>与自然主键不同，业务键并非绝对不能变 —— 只要变得<u>很少</u>就够了。</b></p>
+<p style="margin-top:6px"><b>作者主张：基本上每个实体类都该有一个业务键</b>，哪怕它包含类的所有属性（对某些不可变类这是合适的）。<b>如果用户在屏幕上看到一列 item，他们靠什么区分 A、B、C？那同一个属性或属性组合就是我们要的业务键。</b>业务键是<b>用户</b>心目中唯一标识一条记录的东西，而代理键是<b>应用和数据库系统</b>依赖的东西。业务键属性在数据库 schema 里<b>很可能带 UNIQUE 约束</b>。</p></div>
+
+<div class="filename">为 User 实体写自定义相等性 —— <code>username</code> 是绝佳的业务键候选</div>
+<pre><code><span class="ann">@Entity</span>
+<span class="ann">@Table</span>(name = <span class="str">"USERS"</span>,
+        uniqueConstraints = <span class="ann">@UniqueConstraint</span>(columnNames = <span class="str">"USERNAME"</span>))
+<span class="kw">public class</span> User {
+    <span class="ann">@Override</span>
+    <span class="kw">public boolean</span> equals(Object other) {
+        <span class="kw">if</span> (<span class="kw">this</span> == other) <span class="kw">return true</span>;
+        <span class="kw">if</span> (other == <span class="kw">null</span>) <span class="kw">return false</span>;
+        <span class="kw">if</span> (!(other <span class="hl">instanceof</span> User)) <span class="kw">return false</span>;      <span class="cmt">// ← 不要用 getClass() 比较！</span>
+        User that = (User) other;
+        <span class="kw">return this</span>.<span class="hl">getUsername()</span>.equals(that.<span class="hl">getUsername()</span>);  <span class="cmt">// ← 一定要用 getter！</span>
+    }
+    <span class="ann">@Override</span>
+    <span class="kw">public int</span> hashCode() { <span class="kw">return</span> getUsername().hashCode(); }
+}</code></pre>
+
+<div class="pit"><b>两个至关重要的细节</b>
+<p><b>① 永远通过 getter 访问 other 的属性。</b>因为传进来的 <code>other</code> <b>可能是一个 Hibernate 代理</b>，而不是真正持有持久状态的实例。<b>你无法直接访问 User 代理的 <code>username</code> 字段</b>；要初始化代理并取到属性值，必须用 getter。<b>这是 Hibernate 不完全透明的一处</b>，不过用 getter 代替直接访问实例变量本来就是好实践。</p>
+<p style="margin-top:6px">② <b>用 <code>instanceof</code> 检查类型，而不是比较 <code>getClass()</code> 的值。</b>同样因为 <code>other</code> 可能是代理 —— 它是 <code>User</code> 在<b>运行期生成的子类</b>，所以 <code>this</code> 和 <code>other</code> 可能不是完全相同的类型，而是有效的父类型或子类型。</p>
+<p style="margin-top:6px">③ <b>在子类上重写 <code>equals()</code> 并加入另一个属性进行比较，极少是正确的。</b>这种情况下要同时满足对称性与传递性很微妙；更重要的是，<b>业务键可能并不对应数据库中任何定义良好的候选自然键</b>（子类属性可能映射到不同的表）。</p></div>
+
+<h4>寻找业务键的五条线索</h4>
+<div class="keyhint"><span class="k">① 用户如何区分</span><span>想想应用的用户在现实中要识别一个对象时会引用哪些属性。<b>如果它们显示在屏幕上，用户靠什么分辨？</b>这多半就是你要找的业务键。</span></div>
+<div class="keyhint"><span class="k">② 不可变属性</span><span>每个<b>不可变</b>属性都可能是好候选。可变属性也可以，只要它<b>很少更新</b>，或你能控制更新时机（比如确保更新时实例不在 <code>Set</code> 里）。</span></div>
+<div class="keyhint"><span class="k">③ UNIQUE 约束</span><span>每个带数据库 <code>UNIQUE</code> 约束的属性都是好候选。<b>记住业务键的精度必须足够高，避免重叠。</b></span></div>
+<div class="keyhint"><span class="k">④ 时间属性要小心</span><span>创建时间戳这类基于日期/时间的属性通常是业务键的好组成部分，<b>但 <code>System.currentTimeMillis()</code> 的精度取决于虚拟机和操作系统</b>。作者建议的安全缓冲是 <b>50 毫秒</b> —— 如果时间属性是业务键的<b>唯一</b>属性，这个精度可能不够。</span></div>
+<div class="keyhint"><span class="k">⑤ 可以用<u>关联实体</u>的数据库标识符</span><span>这看似与前面的说法矛盾，但我们说的<b>不是本实体的标识符值</b>，而是<b>关联实体实例的标识符</b>。例如 <code>Bid</code> 的候选业务键是「它所属 <code>Item</code> 的标识符 + 出价金额」；甚至可能在 schema 中就有对应的唯一约束。可以用 Item 的标识符值，<b>因为它在 Bid 的整个生命周期中永不改变</b> —— <code>Bid</code> 的构造器可以要求传入一个<b>已经持久化的</b> <code>Item</code>。</span></div>
+
+<div class="note"><p>遇到难例时，<b>抛开 Hibernate 去想</b> —— 这纯粹是个面向对象问题。更多关于定制相等性比较的内容，见 Joshua Bloch 的 <i>Effective Java</i> 第三版（Java 程序员的必读书）。</p></div>
+
+<h3 id="s33">10.3.3　手工游离实例：<code>detach()</code></h3>
+<pre><code>User user = em.find(User.class, USER_ID);
+em.detach(user);                      <span class="cmt">// 不必等到上下文关闭，可手工逐出</span>
+assertFalse(em.contains(user));       <span class="cmt">// contains() 判断实例是否处于受管持久态</span></code></pre>
+<p>很多应用只是在持久化上下文关闭之后<b>读取并渲染</b>数据。<b>上下文关闭后再修改已加载的 user，对它在数据库中的持久表示没有任何影响。</b>但 JPA 允许在<b>新的持久化上下文</b>里把这些改动<b>合并</b>回数据库。</p>
+
+<h3 id="s34">10.3.4　合并实体实例：<code>merge()</code></h3>
+
+<figure><div class="fig-box">
+<svg viewBox="0 0 840 300" xmlns="http://www.w3.org/2000/svg" font-family="Inter,system-ui,sans-serif">
+  <defs><marker id="m10" markerWidth="9" markerHeight="9" refX="8" refY="4.5" orient="auto"><path d="M0 0 L9 4.5 L0 9 z" fill="var(--accent)"/></marker></defs>
+  <rect x="200" y="20" width="440" height="130" rx="10" fill="none" stroke="var(--accent)" stroke-width="1.6" stroke-dasharray="6 4"/>
+  <text x="420" y="14" text-anchor="middle" font-size="11.5" fill="var(--accent)">持久化上下文</text>
+
+  <circle cx="70" cy="70" r="20" fill="var(--sql-soft)" stroke="var(--sql)" stroke-width="1.8"/>
+  <text x="70" y="76" text-anchor="middle" font-size="14" font-weight="700" fill="var(--sql)">D</text>
+  <text x="70" y="112" text-anchor="middle" font-size="11" fill="var(--ink-soft)">detachedUser</text>
+  <text x="70" y="146" text-anchor="middle" font-size="11" fill="var(--danger)">6. 丢弃它！(garbage)</text>
+
+  <path d="M94 70 L376 70" stroke="var(--accent)" stroke-width="1.8" marker-end="url(#m10)"/>
+  <text x="200" y="60" text-anchor="middle" font-family="monospace" font-size="12" font-weight="700" fill="var(--accent)">2. merge()</text>
+  <text x="300" y="60" text-anchor="middle" font-size="11" fill="var(--ink-soft)">4. (拷贝状态)</text>
+  <text x="140" y="130" text-anchor="middle" font-family="monospace" font-size="11" fill="var(--ink-soft)">1. createEM()</text>
+
+  <circle cx="400" cy="70" r="20" fill="var(--accent-soft)" stroke="var(--accent)" stroke-width="2"/>
+  <text x="400" y="76" text-anchor="middle" font-size="14" font-weight="700" fill="var(--accent)">P</text>
+  <text x="400" y="112" text-anchor="middle" font-size="11" fill="var(--accent)">mergedUser（返回值）</text>
+
+  <path d="M400 94 L400 128" stroke="var(--sql)" stroke-width="1.4" stroke-dasharray="4 3" marker-end="url(#m10)"/>
+  <text x="470" y="120" text-anchor="middle" font-size="11" fill="var(--sql)">3. (按 ID 查找)</text>
+  <rect x="330" y="132" width="140" height="26" rx="5" fill="var(--sql-soft)" stroke="var(--sql)"/>
+  <text x="400" y="150" text-anchor="middle" font-size="11.5" font-weight="700" fill="var(--sql)">Database</text>
+
+  <path d="M424 70 L716 70" stroke="var(--sql)" stroke-width="1.8" marker-end="url(#m10)"/>
+  <text x="570" y="60" text-anchor="middle" font-family="monospace" font-size="11.5" fill="var(--sql)">5. flush() / close()</text>
+  <circle cx="740" cy="70" r="20" fill="var(--sql-soft)" stroke="var(--sql)" stroke-width="1.8"/>
+  <text x="740" y="76" text-anchor="middle" font-size="14" font-weight="700" fill="var(--sql)">D</text>
+
+  <rect x="20" y="178" width="800" height="112" rx="8" fill="var(--panel)" stroke="var(--line-strong)"/>
+  <text x="420" y="200" text-anchor="middle" font-size="12.5" font-weight="700" fill="var(--ink)">merge() 的三种情形</text>
+  <text x="38" y="224" font-size="11.5" fill="var(--ink)">① 上下文中<tspan font-weight="700">已有</tspan>同标识符的持久实例 → 直接把游离实例的状态<tspan font-weight="700">拷贝到它上面</tspan></text>
+  <text x="38" y="246" font-size="11.5" fill="var(--ink)">② 上下文中没有，且按标识符去库里查<tspan font-weight="700">能查到</tspan> → 先加载，再拷贝（<tspan font-weight="700">上图演示的就是这种</tspan>）</text>
+  <text x="38" y="268" font-size="11.5" fill="var(--ink)">③ 库里也<tspan font-weight="700">查不到</tspan>，或传入的是<tspan font-weight="700">瞬时</tspan>实例（没有标识符值）→ 实例化一个全新的 User，拷贝状态，使其持久化并返回</text>
+  <text x="38" y="286" font-size="11.5" fill="var(--sql)"><tspan font-weight="700">无论哪种情形，Hibernate 总是把结果作为「持久实例」返回给你</tspan> —— 所以 merge() 既能处理游离实例，也能处理瞬时实例</text>
+</svg>
+</div><figcaption>图 10-5　<code>merge()</code> 的工作过程</figcaption></figure>
+
+<pre><code>detachedUser.setUsername(<span class="str">"johndoe"</span>);         <span class="cmt">// 在游离态修改</span>
+em = emf.createEntityManager();
+em.getTransaction().begin();
+User mergedUser = em.merge(detachedUser);      <span class="cmt">// ← 注意：<b>要用返回值</b></span>
+mergedUser.setUsername(<span class="str">"doejohn"</span>);            <span class="cmt">// 继续在受管实例上修改</span>
+em.getTransaction().commit();                  <span class="cmt">// 刷新时执行<b>一条</b> UPDATE</span>
+em.close();</code></pre>
+
+<div class="pit"><b>基于「游离 + 合并」的架构，最重要的是引用切换</b>
+<p>这样的应用架构<b>可能根本不调 <code>persist()</code></b> —— 新实例和游离实例都可以用 merge 来存。<b>关键差别在于返回的当前状态，以及你在应用代码里如何处理这次引用切换：必须丢弃 <code>detachedUser</code>，从此引用 <code>mergedUser</code>。应用中其他任何仍持有 <code>detachedUser</code> 的组件，也都必须切换到 <code>mergedUser</code>。</b></p></div>
+
+<div class="note"><b>能不能「重新附着」一个游离实例？</b>
+<p>Hibernate 的 <code>Session</code> API 有个重新附着的方法 <code>saveOrUpdate()</code>：它接受瞬时或游离实例，<b>不返回任何东西</b>；操作后给定实例即处于持久态，<b>所以不必切换引用</b>。传入瞬时实例时执行 INSERT，游离实例时执行 UPDATE。</p>
+<p style="margin-top:6px"><b>但作者建议仍然依赖 merge</b>：因为它是标准化的，更容易与其他框架集成；而且<b>如果游离数据没有被修改，merge 可能只触发一条 SELECT 而不是 UPDATE</b>。（顺带一提，<code>Session</code> 的 <code>saveOrUpdateCopy()</code> 就等同于 <code>EntityManager#merge()</code>。）</p>
+<p style="margin-top:6px"><b>想删除一个游离实例？先 merge 它，再对 merge 返回的持久实例调 <code>remove()</code>。</b></p></div>
+
+<div class="summary" id="s4">
+<h3>本章小结</h3>
+<ul>
+<li>实体实例的生命周期包括 <b>transient（瞬时）、persistent（持久）、detached（游离）、removed（已删除）</b> 四种状态。</li>
+<li><b>JPA 中最重要的接口是 <code>EntityManager</code></b>，它代表一个持久化上下文，界定了一个工作单元。</li>
+<li>用 <code>EntityManager</code> 可以：让数据持久化（<code>persist</code>）、检索与修改持久数据（<code>find</code>）、获取引用（<code>getReference</code> 返回代理）、让数据变瞬时（<code>remove</code>）、刷新（<code>refresh</code>）与复制（<code>replicate</code>）数据、控制上下文中的缓存、刷新上下文（<code>flush</code>）。</li>
+<li>持久化上下文提供三大服务：<b>自动脏检查</b>、<b>永远开启的一级缓存</b>、<b>保证的对象标识作用域</b>。它<b>永不自动收缩</b> —— 加载过多实体是 <code>OutOfMemoryError</code> 的常见原因。</li>
+<li>可以在<b>游离状态</b>下工作。此时必须理解游离实例的标识问题，并<b>用业务键（而非数据库标识符）实现 <code>equals()</code>/<code>hashCode()</code></b>；用 <code>merge()</code> 把改动合并回新的持久化上下文，<b>并切换到它返回的引用</b>。</li>
+</ul>
+</div>
+
+<div class="pager">
+  <a href="ch09.html">← 第 9 章　高级实体关联映射</a>
+  <a href="ch11.html">第 11 章　事务与并发 →</a>
+</div>
+</main>
+</div>
+</body>
+</html>

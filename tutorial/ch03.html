@@ -1,0 +1,763 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>第 3 章 · 领域模型与元数据</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="topbar"><div class="topbar-inner">
+  <a class="brand" href="index.html">Java Persistence 讲义</a>
+  <span class="spacer"></span>
+  <a href="ch02.html">← 上一章</a>
+  <a href="index.html">目录</a>
+  <a href="ch04.html">下一章 →</a>
+</div></div>
+
+<div class="wrap">
+<nav class="toc">
+  <h4>本章目录</h4>
+  <a href="#s1">3.1 CaveatEmptor 示例应用</a>
+  <a class="sub" href="#s11">分层架构</a>
+  <a class="sub" href="#s12">分析业务域</a>
+  <a class="sub" href="#s13">CaveatEmptor 领域模型</a>
+  <a href="#s2">3.2 实现领域模型</a>
+  <a class="sub" href="#s21">关注点泄漏</a>
+  <a class="sub" href="#s22">透明 + 自动持久化</a>
+  <a class="sub" href="#s23">编写可持久化类</a>
+  <a class="sub" href="#s24">实现 POJO 关联</a>
+  <a href="#s3">3.3 领域模型元数据</a>
+  <a class="sub" href="#s31">注解元数据</a>
+  <a class="sub" href="#s32">Bean Validation</a>
+  <a class="sub" href="#s33">XML 外置元数据</a>
+  <a class="sub" href="#s34">运行期访问元数据</a>
+  <a href="#s4">本章小结</a>
+</nav>
+
+<main>
+<div class="hero">
+  <div class="eyebrow">Part 1 · 入门 ORM</div>
+  <h1>第 3 章　领域模型与元数据</h1>
+  <p>本章引入贯穿全书的例子 <b>CaveatEmptor</b>（在线拍卖系统，拉丁文「买家当心」），并回答两个工程问题：<b>可持久化的 Java 类该长什么样</b>，以及<b>映射元数据写在哪里</b>。</p>
+</div>
+
+<div class="note"><b>JPA 2 的两个重要新特性（本章会用到）</b>
+<p>① JPA 提供者会<b>自动集成 Bean Validation 提供者</b> —— 存数据时自动校验持久化类上的约束。<br>
+② 新增 <b>Metamodel API</b> —— 可以取到持久化单元中各个类的名字、属性和映射元数据。</p></div>
+
+<h2 id="s1"><span class="num">3.1</span>示例应用：CaveatEmptor</h2>
+
+<h3 id="s11">3.1.1　分层架构</h3>
+<p>任何非平凡应用都应<b>按关注点（concern）组织类</b>。持久化是一种关注点，展现、工作流、业务逻辑是另一些。分层架构在这些关注点之间定义接口，让一层的实现方式改变时不至于严重冲击其他层。</p>
+
+<figure><div class="fig-box">
+<svg viewBox="0 0 780 400" xmlns="http://www.w3.org/2000/svg" font-family="Inter,system-ui,sans-serif">
+  <defs><marker id="c3d" markerWidth="9" markerHeight="9" refX="8" refY="4.5" orient="auto"><path d="M0 0 L9 4.5 L0 9 z" fill="var(--accent)"/></marker></defs>
+
+  <rect x="190" y="30" width="330" height="66" rx="8" fill="var(--panel)" stroke="var(--line-strong)"/>
+  <text x="355" y="55" text-anchor="middle" font-size="14" font-weight="700" fill="var(--ink)">Presentation layer 展现层</text>
+  <text x="355" y="76" text-anchor="middle" font-size="11.5" fill="var(--ink-soft)">UI 逻辑、页面/屏幕导航控制；可直接渲染共享领域模型的实体</text>
+  <text x="355" y="90" text-anchor="middle" font-size="11" fill="var(--ink-faint)">若不同机部署，则需自己的数据传输模型（领域模型的可传输子集）</text>
+
+  <path d="M355 96 L355 118" stroke="var(--accent)" stroke-width="1.6" marker-end="url(#c3d)"/>
+
+  <rect x="190" y="120" width="330" height="66" rx="8" fill="var(--panel)" stroke="var(--line-strong)"/>
+  <text x="355" y="145" text-anchor="middle" font-size="14" font-weight="700" fill="var(--ink)">Business layer 业务层</text>
+  <text x="355" y="166" text-anchor="middle" font-size="11.5" fill="var(--ink-soft)">实现问题域中的业务规则；含「知道何时调用哪条规则」的控制组件</text>
+  <text x="355" y="180" text-anchor="middle" font-size="11" fill="var(--ink-faint)">可有自己的实体表示，也可复用共享领域模型</text>
+
+  <path d="M355 186 L355 208" stroke="var(--accent)" stroke-width="1.6" marker-end="url(#c3d)"/>
+
+  <rect x="190" y="210" width="330" height="66" rx="8" fill="var(--accent-soft)" stroke="var(--accent)" stroke-width="2"/>
+  <text x="355" y="235" text-anchor="middle" font-size="14" font-weight="700" fill="var(--accent)">Persistence layer 持久化层</text>
+  <text x="355" y="256" text-anchor="middle" font-size="11.5" fill="var(--ink)">负责把数据存入/取出一个或多个数据存储</text>
+  <text x="355" y="270" text-anchor="middle" font-size="11" fill="var(--ink-soft)">JPA / Hibernate / Spring Data 的绝大部分用武之地</text>
+
+  <path d="M355 276 L355 298" stroke="var(--accent)" stroke-width="1.6" marker-end="url(#c3d)"/>
+
+  <rect x="190" y="300" width="330" height="56" rx="8" fill="var(--sql-soft)" stroke="var(--sql)"/>
+  <text x="355" y="324" text-anchor="middle" font-size="14" font-weight="700" fill="var(--sql)">Database 数据库（通常外部）</text>
+  <text x="355" y="344" text-anchor="middle" font-size="11.5" fill="var(--ink-soft)">系统状态的真实持久表示：schema，可能还有存储过程</text>
+
+  <!-- domain model spans -->
+  <rect x="20" y="30" width="150" height="246" rx="8" fill="var(--java-soft)" stroke="var(--java)" stroke-width="1.6"/>
+  <text x="95" y="140" text-anchor="middle" font-size="14" font-weight="700" fill="var(--java)">Domain</text>
+  <text x="95" y="162" text-anchor="middle" font-size="14" font-weight="700" fill="var(--java)">model</text>
+  <text x="95" y="188" text-anchor="middle" font-size="11" fill="var(--ink-soft)">被三层共享</text>
+  <text x="95" y="204" text-anchor="middle" font-size="11" fill="var(--ink-soft)">的领域模型</text>
+
+  <!-- utility -->
+  <rect x="540" y="30" width="150" height="246" rx="8" fill="var(--bg-soft)" stroke="var(--line-strong)" stroke-dasharray="5 4"/>
+  <text x="615" y="120" text-anchor="middle" font-size="12.5" font-weight="700" fill="var(--ink-soft)">拦截器、工具类</text>
+  <text x="615" y="142" text-anchor="middle" font-size="12.5" font-weight="700" fill="var(--ink-soft)">和辅助类</text>
+  <text x="615" y="172" text-anchor="middle" font-size="11" fill="var(--ink-faint)">横切关注点：</text>
+  <text x="615" y="188" text-anchor="middle" font-size="11" fill="var(--ink-faint)">日志 / 授权 / 缓存</text>
+  <text x="615" y="204" text-anchor="middle" font-size="11" fill="var(--ink-faint)">/ 事务边界</text>
+  <text x="615" y="230" text-anchor="middle" font-size="11" fill="var(--danger)">✗ 它们不构成「层」</text>
+  <text x="615" y="246" text-anchor="middle" font-size="11" fill="var(--danger)">因为不遵守层间依赖规则</text>
+
+  <rect x="20" y="372" width="740" height="24" rx="5" fill="var(--warn-soft)" stroke="var(--warn)"/>
+  <text x="390" y="389" text-anchor="middle" font-size="12" fill="var(--ink)"><tspan font-weight="700">分层规则：</tspan>层间自上而下通信；每层<tspan font-weight="700">只依赖紧邻下层的接口</tspan>，除此之外对其他层一无所知</text>
+</svg>
+</div><figcaption>图 3-1　持久化层是分层架构的基座</figcaption></figure>
+
+<h3 id="s12">3.1.2　分析业务域</h3>
+<p>这一步要和领域专家一起，识别相关的<b>主要实体</b>及其交互。实体通常是系统用户能理解的概念：支付、客户、订单、商品、出价……有些是抽象一些的东西（如定价算法），但用户一般也能理解。这些实体存在于业务的<b>概念视图</b>中，有时称为<b>信息模型（information model）</b>。</p>
+
+<div class="tip"><b>对象模型 vs 数据模型：谁先谁后不重要</b>
+<p>工程师可以从 UML 类图（对象模型）出发，也可以从 E-R 图（数据模型）出发。就<b>持久化</b>而言，两者差别很小，只是<b>起点不同</b>。我们真正关心的是：业务实体的<b>结构与关系</b>、保证数据完整性所需的<b>规则</b>（如关系的多重性）、以及操纵数据的<b>代码过程</b>（通常不在模型中）。</p></div>
+
+<h3 id="s13">3.1.3　CaveatEmptor 领域模型</h3>
+<p>业务规则：拍卖采用<b>英式拍卖</b>策略 —— 用户对某商品不断出价，直到该商品的竞价期结束，<b>出价最高者胜出</b>。商品按类别分层组织，可浏览可搜索；商品可挂图片；用户信息含姓名、地址、账单信息。</p>
+
+<figure><div class="fig-box">
+<svg viewBox="0 0 920 610" xmlns="http://www.w3.org/2000/svg" font-family="Inter,system-ui,sans-serif">
+  <defs>
+    <marker id="tri" markerWidth="14" markerHeight="14" refX="13" refY="7" orient="auto">
+      <path d="M0 0 L14 7 L0 14 z" fill="var(--bg)" stroke="var(--java)" stroke-width="1.3"/></marker>
+  </defs>
+
+  <!-- Category -->
+  <rect x="30" y="70" width="150" height="64" rx="7" fill="var(--java-soft)" stroke="var(--java)" stroke-width="1.6"/>
+  <text x="105" y="92" text-anchor="middle" font-size="13.5" font-weight="700" fill="var(--ink)">Category</text>
+  <line x1="30" y1="100" x2="180" y2="100" stroke="var(--java)"/>
+  <text x="42" y="120" font-size="11.5" fill="var(--ink-soft)">name : String</text>
+  <!-- self loop -->
+  <path d="M30 82 C-8 82 -8 24 60 24 C120 24 128 62 128 70" fill="none" stroke="var(--java)" stroke-width="1.4"/>
+  <text x="60" y="18" text-anchor="middle" font-size="11" fill="var(--accent)" font-weight="700">parent（递归关联）</text>
+  <text x="-4" y="60" font-size="10.5" fill="var(--ink-faint)">0..*</text>
+
+  <!-- Category -> Item -->
+  <line x1="105" y1="134" x2="105" y2="228" stroke="var(--java)" stroke-width="1.5"/>
+  <text x="112" y="152" font-size="10.5" fill="var(--ink-faint)">1..*</text>
+  <text x="112" y="222" font-size="10.5" fill="var(--ink-faint)">0..*</text>
+
+  <!-- Item -->
+  <rect x="20" y="230" width="185" height="98" rx="7" fill="var(--accent-soft)" stroke="var(--accent)" stroke-width="2"/>
+  <text x="112" y="252" text-anchor="middle" font-size="13.5" font-weight="700" fill="var(--ink)">Item</text>
+  <line x1="20" y1="260" x2="205" y2="260" stroke="var(--accent)"/>
+  <text x="32" y="280" font-size="11.5" fill="var(--ink-soft)">name : String</text>
+  <text x="32" y="299" font-size="11.5" fill="var(--ink-soft)">initialPrice : BigDecimal</text>
+  <text x="32" y="318" font-size="11.5" fill="var(--ink-soft)">auctionEnd : Date</text>
+
+  <!-- Item -> Image -->
+  <line x1="112" y1="328" x2="112" y2="418" stroke="var(--java)" stroke-width="1.5"/>
+  <text x="119" y="412" font-size="10.5" fill="var(--ink-faint)">0..*</text>
+  <rect x="30" y="420" width="165" height="66" rx="7" fill="var(--java-soft)" stroke="var(--java)" stroke-width="1.6"/>
+  <text x="112" y="442" text-anchor="middle" font-size="13.5" font-weight="700" fill="var(--ink)">Image</text>
+  <line x1="30" y1="450" x2="195" y2="450" stroke="var(--java)"/>
+  <text x="42" y="468" font-size="11.5" fill="var(--ink-soft)">title : String</text>
+  <text x="42" y="482" font-size="11.5" fill="var(--ink-soft)">filename : String</text>
+
+  <!-- Item -> Bid -->
+  <line x1="205" y1="248" x2="300" y2="130" stroke="var(--java)" stroke-width="1.5"/>
+  <text x="228" y="212" font-size="10.5" fill="var(--ink-faint)">0..*</text>
+  <!-- Bid -->
+  <rect x="300" y="60" width="170" height="70" rx="7" fill="var(--java-soft)" stroke="var(--java)" stroke-width="1.6"/>
+  <text x="385" y="82" text-anchor="middle" font-size="13.5" font-weight="700" fill="var(--ink)">Bid</text>
+  <line x1="300" y1="90" x2="470" y2="90" stroke="var(--java)"/>
+  <text x="312" y="108" font-size="11.5" fill="var(--ink-soft)">amount : BigDecimal</text>
+  <text x="312" y="124" font-size="11.5" fill="var(--ink-soft)">createdOn : Date</text>
+
+  <!-- Bid -> User (bidder) -->
+  <line x1="470" y1="105" x2="595" y2="228" stroke="var(--java)" stroke-width="1.5"/>
+  <text x="486" y="128" font-size="10.5" fill="var(--ink-faint)">0..*</text>
+  <text x="530" y="180" font-size="11" font-weight="700" fill="var(--accent)">bidder</text>
+
+  <!-- Item -> User (seller) -->
+  <line x1="205" y1="292" x2="595" y2="292" stroke="var(--java)" stroke-width="1.5"/>
+  <text x="220" y="286" font-size="10.5" fill="var(--ink-faint)">0..*</text>
+  <text x="400" y="286" font-size="11" font-weight="700" fill="var(--accent)">seller</text>
+
+  <!-- User -->
+  <rect x="595" y="230" width="170" height="98" rx="7" fill="var(--java-soft)" stroke="var(--java)" stroke-width="1.6"/>
+  <text x="680" y="252" text-anchor="middle" font-size="13.5" font-weight="700" fill="var(--ink)">User</text>
+  <line x1="595" y1="260" x2="765" y2="260" stroke="var(--java)"/>
+  <text x="607" y="280" font-size="11.5" fill="var(--ink-soft)">username : String</text>
+  <text x="607" y="299" font-size="11.5" fill="var(--ink-soft)">firstname : String</text>
+  <text x="607" y="318" font-size="11.5" fill="var(--ink-soft)">lastname : String</text>
+
+  <!-- User -> Address x3 -->
+  <line x1="765" y1="270" x2="810" y2="252" stroke="var(--java)" stroke-width="1.3"/>
+  <line x1="765" y1="280" x2="810" y2="280" stroke="var(--java)" stroke-width="1.3"/>
+  <line x1="765" y1="290" x2="810" y2="308" stroke="var(--java)" stroke-width="1.3"/>
+  <text x="787" y="238" text-anchor="middle" font-size="9.5" fill="var(--accent)">home</text>
+  <text x="787" y="274" text-anchor="middle" font-size="9.5" fill="var(--accent)">billing</text>
+  <text x="787" y="322" text-anchor="middle" font-size="9.5" fill="var(--accent)">shipping</text>
+  <rect x="810" y="234" width="100" height="90" rx="7" fill="var(--sql-soft)" stroke="var(--sql)" stroke-width="1.6"/>
+  <text x="860" y="254" text-anchor="middle" font-size="12.5" font-weight="700" fill="var(--ink)">Address</text>
+  <line x1="810" y1="262" x2="910" y2="262" stroke="var(--sql)"/>
+  <text x="818" y="279" font-size="10.5" fill="var(--ink-soft)">street : String</text>
+  <text x="818" y="296" font-size="10.5" fill="var(--ink-soft)">zipcode : String</text>
+  <text x="818" y="313" font-size="10.5" fill="var(--ink-soft)">city : String</text>
+
+  <!-- User -> BillingDetails -->
+  <line x1="680" y1="328" x2="680" y2="398" stroke="var(--java)" stroke-width="1.5"/>
+  <text x="687" y="392" font-size="10.5" fill="var(--ink-faint)">0..*</text>
+  <rect x="590" y="400" width="180" height="58" rx="7" fill="var(--panel)" stroke="var(--java)" stroke-width="1.8" stroke-dasharray="6 3"/>
+  <text x="680" y="422" text-anchor="middle" font-size="13" font-style="italic" font-weight="700" fill="var(--ink)">BillingDetails</text>
+  <line x1="590" y1="430" x2="770" y2="430" stroke="var(--java)"/>
+  <text x="602" y="448" font-size="11.5" fill="var(--ink-soft)">owner : String　<tspan font-size="10" fill="var(--ink-faint)">（抽象类）</tspan></text>
+
+  <!-- inheritance -->
+  <path d="M540 520 L540 480 L680 480 L680 462" fill="none" stroke="var(--java)" stroke-width="1.5" marker-end="url(#tri)"/>
+  <path d="M810 520 L810 480 L680 480" fill="none" stroke="var(--java)" stroke-width="1.5"/>
+  <rect x="460" y="522" width="160" height="80" rx="7" fill="var(--java-soft)" stroke="var(--java)" stroke-width="1.4"/>
+  <text x="540" y="542" text-anchor="middle" font-size="12.5" font-weight="700" fill="var(--ink)">CreditCard</text>
+  <line x1="460" y1="550" x2="620" y2="550" stroke="var(--java)"/>
+  <text x="470" y="567" font-size="10.5" fill="var(--ink-soft)">number : String</text>
+  <text x="470" y="583" font-size="10.5" fill="var(--ink-soft)">expMonth : String</text>
+  <text x="470" y="598" font-size="10.5" fill="var(--ink-soft)">expYear : String</text>
+
+  <rect x="730" y="522" width="160" height="80" rx="7" fill="var(--java-soft)" stroke="var(--java)" stroke-width="1.4"/>
+  <text x="810" y="542" text-anchor="middle" font-size="12.5" font-weight="700" fill="var(--ink)">BankAccount</text>
+  <line x1="730" y1="550" x2="890" y2="550" stroke="var(--java)"/>
+  <text x="740" y="567" font-size="10.5" fill="var(--ink-soft)">account : String</text>
+  <text x="740" y="583" font-size="10.5" fill="var(--ink-soft)">bankname : String</text>
+  <text x="740" y="598" font-size="10.5" fill="var(--ink-soft)">swift : String</text>
+
+  <!-- annotations -->
+  <text x="240" y="440" font-size="11" fill="var(--ink-faint)">① 每件商品只拍一次 →</text>
+  <text x="240" y="456" font-size="11" fill="var(--ink-faint)">　 不必区分 Item 与「拍卖」实体，</text>
+  <text x="240" y="472" font-size="11" fill="var(--ink-faint)">　 Bid 直接关联 Item</text>
+  <text x="240" y="496" font-size="11" fill="var(--ink-faint)">② Category 可无限嵌套：多个子类别，</text>
+  <text x="240" y="512" font-size="11" fill="var(--ink-faint)">　 但<tspan font-weight="700">至多一个父类别</tspan>；每个 Item 至少属于一个类别</text>
+  <text x="240" y="536" font-size="11" fill="var(--ink-faint)">③ 这只是<tspan font-weight="700">需要持久化能力</tspan>的那部分类；</text>
+  <text x="240" y="552" font-size="11" fill="var(--ink-faint)">　 像 WinningBidStrategy 这种只有瞬时实例的类不在其中</text>
+</svg>
+</div><figcaption>图 3-3　CaveatEmptor 领域模型的持久化类及其关系（全书主线模型）</figcaption></figure>
+
+<div class="warn"><b>领域模型的实体应当同时封装状态与行为</b><p>例如 <code>User</code> 实体既定义客户的姓名地址，也应包含「计算运往该客户的运费」这类逻辑。业务规则并非不重要，只是它们大多与<b>持久化问题正交</b>，所以本书不深入。</p></div>
+
+<div class="note"><b>什么时候<u>不</u>需要领域模型</b>
+<p>完整 ORM 最适合<b>富领域模型</b>的应用。如果你的应用没有复杂业务规则、实体之间也没有复杂交互，或者实体很少，那么<b>面向表的方案</b>（围绕数据库数据模型设计、逻辑放存储过程里）往往更合适。还要考虑<b>学习曲线</b>：一旦你精通了 Hibernate 和 Spring Data，你会想在所有应用里用它 —— 但对一个平凡的用例来说，这份时间和开销未必值得。</p></div>
+
+<h2 id="s2"><span class="num">3.2</span>实现领域模型</h2>
+
+<h3 id="s21">3.2.1　关注点泄漏（leakage of concerns）</h3>
+<p>当<b>持久化、事务管理、授权</b>这类关注点开始出现在领域模型类里，就发生了关注点泄漏。领域模型实现是被反复复用的核心代码，<b>不应依赖任何正交的 API</b>——比如领域模型里的代码不该直接（或经由某个中间抽象）调用数据库。</p>
+
+<figure><div class="fig-box">
+<svg viewBox="0 0 840 250" xmlns="http://www.w3.org/2000/svg" font-family="Inter,system-ui,sans-serif">
+  <rect x="20" y="30" width="390" height="200" rx="10" fill="var(--danger-soft)" stroke="var(--danger)" stroke-width="1.6"/>
+  <text x="215" y="56" text-anchor="middle" font-size="14" font-weight="700" fill="var(--danger)">✗ 泄漏的领域模型</text>
+  <rect x="45" y="70" width="340" height="140" rx="7" fill="var(--panel)" stroke="var(--line-strong)"/>
+  <text x="60" y="92" font-family="monospace" font-size="11.5" fill="var(--ink)">class Item {</text>
+  <text x="76" y="112" font-family="monospace" font-size="11.5" fill="var(--danger)">Connection conn = pool.get();  // 数据库</text>
+  <text x="76" y="132" font-family="monospace" font-size="11.5" fill="var(--danger)">logger.audit(...);             // 日志</text>
+  <text x="76" y="152" font-family="monospace" font-size="11.5" fill="var(--danger)">checkPermission(user);         // 授权</text>
+  <text x="76" y="172" font-family="monospace" font-size="11.5" fill="var(--danger)">tx.begin(); ... tx.commit();   // 事务</text>
+  <text x="60" y="192" font-family="monospace" font-size="11.5" fill="var(--ink)">}</text>
+  <text x="215" y="224" text-anchor="middle" font-size="11.5" fill="var(--ink-soft)">要单测它，先得起容器、再 mock 一堆服务</text>
+
+  <rect x="430" y="30" width="390" height="200" rx="10" fill="var(--sql-soft)" stroke="var(--sql)" stroke-width="1.6"/>
+  <text x="625" y="56" text-anchor="middle" font-size="14" font-weight="700" fill="var(--sql)">✓ 透明的领域模型</text>
+  <rect x="455" y="70" width="340" height="140" rx="7" fill="var(--panel)" stroke="var(--line-strong)"/>
+  <text x="470" y="92" font-family="monospace" font-size="11.5" fill="var(--accent)">@Entity</text>
+  <text x="470" y="112" font-family="monospace" font-size="11.5" fill="var(--ink)">class Item {</text>
+  <text x="486" y="132" font-family="monospace" font-size="11.5" fill="var(--ink)">private String name;</text>
+  <text x="486" y="152" font-family="monospace" font-size="11.5" fill="var(--ink)">private Set&lt;Bid&gt; bids;</text>
+  <text x="486" y="172" font-family="monospace" font-size="11.5" fill="var(--sql)">BigDecimal shippingCost(User u){…}</text>
+  <text x="470" y="192" font-family="monospace" font-size="11.5" fill="var(--ink)">}</text>
+  <text x="625" y="224" text-anchor="middle" font-size="11.5" fill="var(--ink-soft)">纯 new 出来就能跑单测，无需容器、无需 mock</text>
+</svg>
+</div><figcaption>图 3-A　防止关注点泄漏，才能对领域模型做无依赖的单元测试</figcaption></figure>
+
+<h3 id="s22">3.2.2　透明持久化与自动持久化</h3>
+<div class="keyhint"><span class="k">透明（transparent）</span><span>领域模型的持久化类与持久化层之间<b>完全分离关注点</b>。持久化类<b>不知道也不依赖</b>持久化机制；从类内部看不到任何指向外部持久化机制的引用。</span></div>
+<div class="keyhint"><span class="k">自动（automatic）</span><span>持久化方案（你的注解化领域 + 持久化层 + 机制）把你从<b>底层机械细节</b>中解放出来 —— 不用写大部分 SQL，不用摆弄 JDBC API。</span></div>
+
+<div class="pit"><b>没有完全透明的持久化</b>
+<p>每个自动持久化层（JPA 与 Hibernate 也不例外）都会对持久化类<b>提出一些要求</b>：</p>
+<ul style="margin-bottom:0">
+<li>集合类型的属性必须声明为<b>接口</b>（<code>java.util.Set</code>、<code>List</code>），不能是 <code>HashSet</code> 这种具体实现（这本来就是好实践）。</li>
+<li>JPA 实体类必须有一个特殊属性：<b>数据库标识符</b>（限制很小，而且通常很方便）。</li>
+</ul></div>
+
+<h3 id="s23">3.2.3　编写可持久化的类（POJO）</h3>
+
+<div class="tablewrap"><table>
+<thead><tr><th style="width:180px">规则</th><th>说明</th></tr></thead>
+<tbody>
+<tr><td>可以是抽象类</td><td>可以继承非持久化类、可以实现接口</td></tr>
+<tr><td>必须是顶层类</td><td>不能嵌套在另一个类里面</td></tr>
+<tr><td><b>不能是 final</b></td><td>类和访问持久化字段的方法都不能 final —— 这是 <b>JPA 规范</b>的要求。Hibernate 没这么严格，但 final 会<b>阻止它用代理模式</b>做性能优化。想保持在不同 JPA 提供者之间可移植，就守规范。</td></tr>
+<tr><td><b>无参构造器</b></td><td>Hibernate/JPA 要求每个持久化类有无参构造器（或者你干脆一个构造器都不写，用 Java 默认的）。Hibernate 通过<b>反射</b>调用它创建实例。不必 <code>public</code>，但至少要<b>包可见</b>，否则无法用运行期生成的代理做优化。</td></tr>
+<tr><td>属性 = 字段 + 访问器</td><td>通常私有/受保护字段 + 公有/受保护的 getter/setter。遵循 JavaBean 命名约定（<code>getXxx</code> / <code>setXxx</code>，boolean 可用 <code>isXxx</code>），Hibernate 这类通用工具才好发现和操纵属性值。</td></tr>
+<tr><td>访问器<b>不是必须的</b></td><td>Hibernate 既能<b>直接访问字段</b>，也能<b>调用访问器方法</b>。你可以把某些访问器改成非 public 甚至删掉，然后配置 Hibernate 对这些属性走字段访问。</td></tr>
+</tbody></table></div>
+
+<div class="cols">
+<div>
+<div class="filename">…/ch03/ex01/User.java　—— 最简 POJO</div>
+<pre><code><span class="kw">public class</span> User {
+    <span class="kw">private</span> String username;
+
+    <span class="kw">public</span> String getUsername() {
+        <span class="kw">return</span> username;
+    }
+    <span class="kw">public void</span> setUsername(String username) {
+        <span class="kw">this</span>.username = username;
+    }
+}</code></pre>
+</div>
+<div>
+<div class="filename">…/ch03/ex02/User.java　—— 访问器里放逻辑</div>
+<pre><code><span class="kw">public class</span> User {
+    <span class="kw">private</span> String firstname;
+    <span class="kw">private</span> String lastname;
+
+    <span class="cmt">// 数据库只有一列 NAME，但类里有两个字段</span>
+    <span class="kw">public</span> String getName() {
+        <span class="kw">return</span> firstname + <span class="str">' '</span> + lastname;
+    }
+    <span class="kw">public void</span> setName(String name) {
+        StringTokenizer t = <span class="kw">new</span> StringTokenizer(name);
+        firstname = t.nextToken();
+        lastname  = t.nextToken();
+    }
+}</code></pre>
+</div>
+</div>
+
+<div class="tip"><b>为什么偏爱 JavaBean 风格访问器：封装</b><p>你可以在<b>不改变公有接口</b>的前提下修改属性的内部实现。如果配置 Hibernate 走方法访问，就把类的<b>内部数据结构（实例变量）</b>从<b>数据库设计</b>中抽象出来了。不过后面你会看到，这类场景更好的解法是持久化服务里的<b>自定义类型转换器</b>（第 6 章）—— 多一个选择总是好的。</p></div>
+
+<h4>脏检查的三个细节</h4>
+<div class="keyhint"><span class="k">getter 返回新实例是安全的</span><span>Hibernate 按<b>值</b>而非对象标识来比较，判断属性的持久状态是否需要更新。所以 <code>return new String(firstname);</code> <b>不会</b>引发多余的 UPDATE。</span></div>
+<div class="keyhint"><span class="k">但集合 setter 会</span><span><code>item.setBids(bids); em.persist(item); item.setBids(bids);</code> 会导致一条<b>不必要的 UPDATE</b>，因为 Hibernate 有自己的集合实现（<code>PersistentSet</code> / <code>PersistentList</code> / <code>PersistentMap</code>），你把它替换掉了。<b>为整个集合提供 setter 本来就不是好实践。</b></span></div>
+<div class="keyhint"><span class="k">访问器抛异常怎么办</span><span>抛 <code>RuntimeException</code>（非受检）→ 当前事务<b>回滚</b>，异常交由调用 JPA/Hibernate API 的代码处理。抛受检的应用异常 → Hibernate 把它<b>包装进 <code>RuntimeException</code></b>。</span></div>
+
+<h3 id="s24">3.2.4　实现 POJO 关联：双向链接的两个动作</h3>
+
+<p><code>Item</code> 与 <code>Bid</code> 之间是一对多/多对一。<b>关联相关的属性和操纵它们的方法称为脚手架代码（scaffolding code）</b>：</p>
+
+<div class="cols">
+<div>
+<div class="filename">…/ch03/ex03/Bid.java</div>
+<pre><code><span class="kw">public class</span> Bid {
+    <span class="kw">private</span> Item item;                <span class="cmt">// 多对一</span>
+
+    <span class="kw">public</span> Item getItem() { <span class="kw">return</span> item; }
+    <span class="kw">public void</span> setItem(Item item) {
+        <span class="kw">this</span>.item = item;
+    }
+}</code></pre>
+</div>
+<div>
+<div class="filename">…/ch03/ex03/Item.java</div>
+<pre><code><span class="kw">public class</span> Item {
+    <span class="kw">private</span> Set&lt;Bid&gt; bids = <span class="kw">new</span> HashSet&lt;&gt;();
+
+    <span class="kw">public</span> Set&lt;Bid&gt; getBids() {
+        <span class="kw">return</span> Collections.unmodifiableSet(bids);
+    }
+}</code></pre>
+</div>
+</div>
+
+<div class="note"><b>为什么用 <code>Set</code> 并初始化为 <code>new HashSet&lt;&gt;()</code></b>
+<p>① JPA 要求集合属性用<b>接口</b>类型（<code>Set</code>/<code>List</code>/<code>Collection</code>）。② 应用不允许重复出价，所以选 <code>Set</code>。③ <b>初始化能避免 NullPointerException</b> —— 访问一个新建 <code>Item</code> 的 bids 时会得到空集合。JPA 提供者也<b>必须</b>给映射的集合属性设置非空值（比如从数据库加载一个没有出价的 Item 时）；具体实现由提供者决定，Hibernate 用的是自己带脏检查能力的集合实现。</p></div>
+
+<div class="warn"><b>出价难道不该用 List 保序吗？</b>
+<p>第一反应往往是想保留用户录入的顺序。但<b>展示顺序不该被持久化</b>：数据完整性不受展示顺序影响。你会存每次出价的<b>金额</b>（随时能找最高价）和<b>创建时间戳</b>（随时能找最新出价）。<b>拿不准时保持系统灵活 —— 排序应发生在从数据存储取出时（查询里）或展示给用户时（Java 代码里），而不是存储时。</b></p></div>
+
+<h4>链接一个 Bid 与一个 Item：必须做两件事</h4>
+
+<figure><div class="fig-box">
+<svg viewBox="0 0 840 320" xmlns="http://www.w3.org/2000/svg" font-family="Inter,system-ui,sans-serif">
+  <defs><marker id="c3ar" markerWidth="9" markerHeight="9" refX="8" refY="4.5" orient="auto"><path d="M0 0 L9 4.5 L0 9 z" fill="var(--accent)"/></marker></defs>
+
+  <text x="200" y="24" text-anchor="middle" font-size="13" font-weight="700" fill="var(--java)">步骤 1：把 Bid 加进 Item 的集合</text>
+  <rect x="40" y="40" width="320" height="86" rx="8" fill="var(--java-soft)" stroke="var(--java)" stroke-width="1.6"/>
+  <text x="200" y="62" text-anchor="middle" font-size="13" font-weight="700" fill="var(--ink)">Item</text>
+  <text x="60" y="86" font-family="monospace" font-size="11.5" fill="var(--ink)">Set&lt;Bid&gt; bids</text>
+  <rect x="240" y="72" width="100" height="26" rx="5" fill="var(--panel)" stroke="var(--accent)"/>
+  <text x="290" y="90" text-anchor="middle" font-family="monospace" font-size="11" fill="var(--accent)">Bid</text>
+  <path d="M195 100 L232 88" stroke="var(--accent)" stroke-width="1.5" marker-end="url(#c3ar)"/>
+  <text x="200" y="120" text-anchor="middle" font-family="monospace" font-size="11" fill="var(--ink-soft)">anItem.getBids().add(aBid);</text>
+
+  <text x="620" y="24" text-anchor="middle" font-size="13" font-weight="700" fill="var(--java)">步骤 2：在 Bid 一侧设置 Item</text>
+  <rect x="460" y="40" width="320" height="86" rx="8" fill="var(--java-soft)" stroke="var(--java)" stroke-width="1.6"/>
+  <text x="620" y="62" text-anchor="middle" font-size="13" font-weight="700" fill="var(--ink)">Bid</text>
+  <text x="480" y="86" font-family="monospace" font-size="11.5" fill="var(--ink)">Item item</text>
+  <rect x="655" y="72" width="105" height="26" rx="5" fill="var(--panel)" stroke="var(--accent)"/>
+  <text x="707" y="90" text-anchor="middle" font-family="monospace" font-size="11" fill="var(--accent)">Item</text>
+  <path d="M600 100 L648 88" stroke="var(--accent)" stroke-width="1.5" marker-end="url(#c3ar)"/>
+  <text x="620" y="120" text-anchor="middle" font-family="monospace" font-size="11" fill="var(--ink-soft)">aBid.setItem(anItem);</text>
+
+  <rect x="40" y="146" width="740" height="52" rx="8" fill="var(--danger-soft)" stroke="var(--danger)"/>
+  <text x="410" y="168" text-anchor="middle" font-size="13" font-weight="700" fill="var(--danger)">JPA 不会替你管理持久化关联</text>
+  <text x="410" y="188" text-anchor="middle" font-size="12" fill="var(--ink)">要操纵关联，你写的代码和没有 Hibernate 时<tspan font-weight="700">一模一样</tspan>。搞不懂 JPA 里的关联行为时，就问自己：「没有 Hibernate 我会怎么写？」</text>
+
+  <rect x="40" y="214" width="740" height="94" rx="8" fill="var(--sql-soft)" stroke="var(--sql)" stroke-width="1.6"/>
+  <text x="410" y="236" text-anchor="middle" font-size="13" font-weight="700" fill="var(--sql)">解法：在 Item 上提供便捷方法，把两个动作打包</text>
+  <text x="60" y="258" font-family="monospace" font-size="11.5" fill="var(--ink)">public void addBid(Bid bid) {</text>
+  <text x="76" y="274" font-family="monospace" font-size="11.5" fill="var(--ink)">if (bid == null) throw new NullPointerException("Can't add null Bid");</text>
+  <text x="76" y="290" font-family="monospace" font-size="11.5" fill="var(--ink)">if (bid.getItem() != null) throw new IllegalStateException("Bid is already assigned to an Item");</text>
+  <text x="76" y="304" font-family="monospace" font-size="11.5" fill="var(--sql)">bids.add(bid);　bid.setItem(this);　}</text>
+</svg>
+</div><figcaption>图 3-5/3-6　双向关联必须两侧都设置；便捷方法既减代码，又强制了关联的基数约束</figcaption></figure>
+
+<div class="pit"><b>三条配套的防御措施</b>
+<ol style="margin-bottom:0">
+<li>让 <code>addBid()</code>（也许再加个 <code>removeBid()</code>）成为 bids 的<b>唯一对外可见变更入口</b> → 考虑把 <code>Bid#setItem()</code> 降为<b>包可见</b>。</li>
+<li><code>Item#getBids()</code> <b>不要返回可修改集合</b>。用 <code>Collections.unmodifiableSet(s)</code> 包一层：客户端直接往集合里加的 Bid 虽然属于该 Item，却<b>没有指回该 Item 的引用</b>，按数据库约束就是不一致状态。</li>
+<li>把「用指针网络模型」和「用外键声明式约束」对比一下就明白：<b>关系模型一条声明式约束能保证的东西，对象模型里你得写过程式代码来保证。</b></li>
+</ol></div>
+
+<h4>另一条路：不可变实例 + 构造器强制完整性</h4>
+
+<div class="filename">…/ch03/ex04/Bid.java</div>
+<pre><code><span class="kw">public class</span> Bid {
+    <span class="kw">private</span> Item item;
+
+    <span class="kw">public</span> Bid() { }                  <span class="cmt">// ← Hibernate 需要它，至少包可见</span>
+
+    <span class="kw">public</span> Bid(Item item) {
+        <span class="kw">this</span>.item = item;
+        item.bids.add(<span class="kw">this</span>);         <span class="cmt">// 同时维护双向；Item#bids 改为包私有</span>
+    }
+    <span class="kw">public</span> Item getItem() { <span class="kw">return</span> item; }   <span class="cmt">// 没有 setItem()</span>
+}</code></pre>
+
+<div class="warn"><b>这条路的代价</b>
+<ul style="margin-bottom:0">
+<li>Hibernate <b>调不了</b>这个有参构造器 → 必须补一个至少包可见的无参构造器。</li>
+<li>没有 <code>setItem()</code> → 必须配置 Hibernate <b>直接访问字段</b>。</li>
+<li>于是字段<b>不能是 final</b> → 类<b>并不能真正保证不可变</b>。</li>
+</ul>
+<p style="margin-top:8px">要包几层便捷方法由你决定，但<b>请保持一致</b>，对所有领域模型类用同一套策略。</p></div>
+
+<h2 id="s3"><span class="num">3.3</span>领域模型元数据</h2>
+
+<p>元数据是<b>关于数据的数据</b>。ORM 工具需要元数据来指定：类↔表、属性↔列、关联↔外键、Java 类型↔SQL 类型……<b>创建并维护这些信息是工程师的职责</b>。JPA 标准化了两种元数据方式：</p>
+
+<figure><div class="fig-box">
+<svg viewBox="0 0 840 300" xmlns="http://www.w3.org/2000/svg" font-family="Inter,system-ui,sans-serif">
+  <rect x="20" y="30" width="250" height="240" rx="10" fill="var(--accent-soft)" stroke="var(--accent)" stroke-width="2"/>
+  <text x="145" y="56" text-anchor="middle" font-size="14" font-weight="700" fill="var(--accent)">① 注解（推荐/主流）</text>
+  <text x="145" y="78" text-anchor="middle" font-family="monospace" font-size="11" fill="var(--ink-soft)">javax.persistence.*</text>
+  <g font-size="11.5" fill="var(--ink)">
+    <text x="38" y="106">✓ 元数据<tspan font-weight="700">紧挨着</tspan>它描述的信息</text>
+    <text x="38" y="128">✓ <tspan font-weight="700">类型安全</tspan>，编入 class 文件</text>
+    <text x="38" y="150">✓ IDE 能校验与高亮</text>
+    <text x="38" y="172">✓ <tspan font-weight="700">重构时会被一起改名</tspan></text>
+    <text x="38" y="194" fill="var(--ink-faint)">（XML 元素/属性值改不动）</text>
+    <text x="38" y="222">运行期 Hibernate 用反射读取</text>
+    <text x="38" y="248" fill="var(--ink-faint)">全局元数据 → package-info.java</text>
+  </g>
+
+  <rect x="290" y="30" width="250" height="240" rx="10" fill="var(--panel)" stroke="var(--line-strong)" stroke-width="1.6"/>
+  <text x="415" y="56" text-anchor="middle" font-size="14" font-weight="700" fill="var(--ink)">② XML 描述符</text>
+  <text x="415" y="78" text-anchor="middle" font-family="monospace" font-size="11" fill="var(--ink-soft)">META-INF/orm.xml</text>
+  <g font-size="11.5" fill="var(--ink)">
+    <text x="308" y="106">✓ 映射元数据与源码<tspan font-weight="700">分离</tspan></text>
+    <text x="308" y="128">✓ Java 类更可复用</text>
+    <text x="308" y="150">✗ <tspan font-weight="700">失去类型安全</tspan></text>
+    <text x="308" y="172">✗ 重构工具帮不上忙</text>
+    <text x="308" y="200" fill="var(--ink-faint)">可以<tspan font-weight="700">替换</tspan>也可以<tspan font-weight="700">覆盖</tspan>任何注解</text>
+    <text x="308" y="222" fill="var(--ink-faint)">如今用得较少，但你仍可能遇到</text>
+  </g>
+
+  <rect x="560" y="30" width="260" height="240" rx="10" fill="var(--sql-soft)" stroke="var(--sql)" stroke-width="1.6"/>
+  <text x="690" y="56" text-anchor="middle" font-size="14" font-weight="700" fill="var(--sql)">③ Bean Validation 约束</text>
+  <text x="690" y="78" text-anchor="middle" font-family="monospace" font-size="11" fill="var(--ink-soft)">javax.validation.constraints.*</text>
+  <g font-size="11.5" fill="var(--ink)">
+    <text x="578" y="106">JSR 303，参考实现 =</text>
+    <text x="578" y="124" font-weight="700">Hibernate Validator</text>
+    <text x="578" y="150">规则声明在领域模型这个中心，</text>
+    <text x="578" y="168">于是<tspan font-weight="700">每一层</tspan>都能用同一套校验</text>
+    <text x="578" y="196">数据完整性约束既影响 Java 代码，</text>
+    <text x="578" y="214">也影响 SQL schema…</text>
+    <text x="578" y="242" font-weight="700" fill="var(--sql)">所以它也可以视作一种 ORM 元数据</text>
+  </g>
+</svg>
+</div><figcaption>图 3-B　三类元数据来源。注解是本书的主力工具</figcaption></figure>
+
+<h3 id="s31">3.3.1　基于注解的元数据</h3>
+
+<pre><code><span class="kw">import</span> javax.persistence.Entity;
+
+<span class="ann">@Entity</span>
+<span class="kw">public class</span> Item { }   <span class="cmt">// 所有属性自动按默认策略变为持久化状态的一部分</span></code></pre>
+
+<div class="note"><b>我的类现在依赖 JPA 了吗？</b><p><b>编译</b>领域模型源码时 classpath 上需要 JPA 库。但<b>创建实例时不需要</b>（比如一个不执行任何 JPA 代码的客户端应用）。只有当运行期<b>通过反射访问这些注解</b>时（Hibernate 内部读元数据就是这么干的）才需要这些包在 classpath 上。</p></div>
+
+<h4>厂商扩展</h4>
+<pre><code><span class="ann">@Entity</span>
+<span class="ann">@org.hibernate.annotations.Cache</span>(
+    usage = org.hibernate.annotations.CacheConcurrencyStrategy.READ_WRITE
+)
+<span class="kw">public class</span> Item { }</code></pre>
+<div class="tip"><b>好实践：Hibernate 注解写全限定包名</b><p>用 <code>org.hibernate.annotations.</code> 前缀，你能<b>一眼看出</b>哪些元数据来自 JPA 规范、哪些是厂商特有的；而且全局搜索 <code>org.hibernate.annotations</code> 就能<b>一次列出</b>应用里所有非标准注解。换 JPA 提供者时，你只需替换这些厂商扩展。</p></div>
+
+<h4>全局注解元数据</h4>
+<p><code>@Entity</code> 映射的是某个具体类。但像 <code>@NamedQuery</code> 这种是<b>全局作用域</b>的，放哪儿？作者建议放在<b>包级注解</b>文件 <code>package-info.java</code> 里 —— 集中一处，不用翻遍源文件。</p>
+
+<div class="filename">Ch03/domainmodel/src/main/java/…/ch03/ex05/package-info.java　（注意 package 声明在<b>最下面</b>）</div>
+<pre><code><span class="ann">@org.hibernate.annotations.NamedQueries</span>({
+    <span class="ann">@org.hibernate.annotations.NamedQuery</span>(
+        name  = <span class="str">"findItemsOrderByName"</span>,
+        query = <span class="str">"select i from Item i order by i.name asc"</span>
+    ),
+    <span class="ann">@org.hibernate.annotations.NamedQuery</span>(
+        name    = <span class="str">"findItemBuyNowPriceGreaterThan"</span>,
+        query   = <span class="str">"select i from Item i where i.buyNowPrice &gt; :price"</span>,
+        timeout = 60,                     <span class="cmt">// 秒！</span>
+        comment = <span class="str">"Custom SQL comment"</span>
+    )
+})
+
+<span class="kw">package</span> com.manning.javapersistence.ch03.ex05;</code></pre>
+
+<h3 id="s32">3.3.2　给 Java 对象加约束：Bean Validation</h3>
+
+<p>核心思想：声明「这个属性不能为 null」「这个数必须在某范围内」，<b>比反复写 if-then-else 更容易、更不易错</b>。而且把规则声明在应用的中心组件（领域模型）上，<b>系统的每一层都能用上</b>这些完整性检查。</p>
+
+<div class="filename">Ch03/validation/src/main/java/…/ch03/validation/Item.java</div>
+<pre><code><span class="kw">import</span> javax.validation.constraints.Future;
+<span class="kw">import</span> javax.validation.constraints.NotNull;
+<span class="kw">import</span> javax.validation.constraints.Size;
+
+<span class="kw">public class</span> Item {
+    <span class="ann">@NotNull</span>
+    <span class="ann">@Size</span>(min = 2, max = 255,
+           message = <span class="str">"Name is required, maximum 255 characters."</span>)
+    <span class="kw">private</span> String name;      <span class="cmt">// 必填、可读（一个字的名字没意义）、不过长</span>
+
+    <span class="ann">@Future</span>
+    <span class="kw">private</span> Date auctionEnd;  <span class="cmt">// 拍卖结束时间显然应该在未来</span>
+}</code></pre>
+
+<div class="keyhint"><span class="k">注解在字段上</span><span>校验引擎<b>直接访问字段</b>。</span></div>
+<div class="keyhint"><span class="k">注解在 getter 上</span><span>走访问器调用。<b>注意：setter 上的注解不被支持</b>。放 getter 的好处是约束成为类 API 的一部分，会出现在 Javadoc 里，让领域模型更易理解。</span></div>
+<div class="keyhint"><span class="k">互相独立</span><span>约束属于类 API 这件事，与 JPA 提供者用哪种访问方式无关 —— Hibernate Validator 可能调访问器，而 Hibernate ORM 可能直接读字段。</span></div>
+<div class="keyhint"><span class="k">不限于内置注解</span><span>你可以自定义约束和注解。<b>类级</b>的自定义约束还能一次校验实例上的<b>多个</b>属性值。</span></div>
+
+<div class="filename">Ch03/validation/src/test/java/…/ch03/validation/ModelValidation.java　（手工校验，实际很少这么写）</div>
+<pre><code>ValidatorFactory factory = Validation.buildDefaultValidatorFactory();
+Validator validator = factory.getValidator();
+
+Item item = <span class="kw">new</span> Item();
+item.setName(<span class="str">"Some Item"</span>);
+item.setAuctionEnd(<span class="kw">new</span> Date());          <span class="cmt">// ← 「现在」不是未来！</span>
+
+Set&lt;ConstraintViolation&lt;Item&gt;&gt; violations = validator.validate(item);
+ConstraintViolation&lt;Item&gt; violation = violations.iterator().next();
+String failedPropertyName =
+        violation.getPropertyPath().iterator().next().getName();
+
+assertAll(() -&gt; assertEquals(1, violations.size()),
+          () -&gt; assertEquals(<span class="str">"auctionEnd"</span>, failedPropertyName),
+          () -&gt; { <span class="kw">if</span> (Locale.getDefault().getLanguage().equals(<span class="str">"en"</span>))
+                      assertEquals(violation.getMessage(), <span class="str">"must be a future date"</span>); });</code></pre>
+
+<h4>Hibernate 自动集成 Bean Validation 后你得到什么</h4>
+<figure><div class="fig-box">
+<svg viewBox="0 0 820 250" xmlns="http://www.w3.org/2000/svg" font-family="Inter,system-ui,sans-serif">
+  <defs><marker id="bv" markerWidth="9" markerHeight="9" refX="8" refY="4.5" orient="auto"><path d="M0 0 L9 4.5 L0 9 z" fill="var(--sql)"/></marker></defs>
+  <rect x="20" y="30" width="190" height="76" rx="8" fill="var(--java-soft)" stroke="var(--java)"/>
+  <text x="115" y="54" text-anchor="middle" font-size="12.5" font-weight="700" fill="var(--java)">领域模型上的约束</text>
+  <text x="115" y="76" text-anchor="middle" font-family="monospace" font-size="11" fill="var(--ink)">@NotNull @Size(255)</text>
+  <text x="115" y="94" text-anchor="middle" font-family="monospace" font-size="11" fill="var(--ink)">@Future</text>
+
+  <path d="M212 68 L286 68" stroke="var(--sql)" stroke-width="1.6" marker-end="url(#bv)"/>
+
+  <rect x="290" y="20" width="250" height="46" rx="7" fill="var(--sql-soft)" stroke="var(--sql)"/>
+  <text x="415" y="40" text-anchor="middle" font-size="12" font-weight="700" fill="var(--sql)">① 存库前自动校验</text>
+  <text x="415" y="58" text-anchor="middle" font-size="11" fill="var(--ink)">insert/update 前触发，你不必手工校验</text>
+
+  <rect x="290" y="76" width="250" height="46" rx="7" fill="var(--sql-soft)" stroke="var(--sql)"/>
+  <text x="415" y="96" text-anchor="middle" font-size="12" font-weight="700" fill="var(--sql)">② 校验失败抛异常</text>
+  <text x="415" y="114" text-anchor="middle" font-family="monospace" font-size="10.5" fill="var(--ink)">ConstraintViolationException</text>
+
+  <rect x="290" y="132" width="250" height="60" rx="7" fill="var(--sql-soft)" stroke="var(--sql)"/>
+  <text x="415" y="152" text-anchor="middle" font-size="12" font-weight="700" fill="var(--sql)">③ 生成等价的 SQL DDL 约束</text>
+  <text x="415" y="170" text-anchor="middle" font-size="11" fill="var(--ink)">@NotNull → NOT NULL</text>
+  <text x="415" y="186" text-anchor="middle" font-size="11" fill="var(--ink)">@Size(n) → VARCHAR(n)</text>
+
+  <rect x="570" y="30" width="230" height="162" rx="8" fill="var(--panel)" stroke="var(--line-strong)"/>
+  <text x="685" y="52" text-anchor="middle" font-size="12.5" font-weight="700" fill="var(--ink)">用 persistence.xml 控制</text>
+  <text x="685" y="70" text-anchor="middle" font-family="monospace" font-size="11" fill="var(--accent)">&lt;validation-mode&gt;</text>
+  <text x="586" y="96" font-family="monospace" font-size="11.5" font-weight="700" fill="var(--ink)">AUTO</text>
+  <text x="586" y="112" font-size="10.5" fill="var(--ink-soft)">（默认）classpath 上有提供者才校验</text>
+  <text x="586" y="136" font-family="monospace" font-size="11.5" font-weight="700" fill="var(--ink)">CALLBACK</text>
+  <text x="586" y="152" font-size="10.5" fill="var(--ink-soft)">总是校验；忘了打包提供者会部署报错</text>
+  <text x="586" y="176" font-family="monospace" font-size="11.5" font-weight="700" fill="var(--ink)">NONE</text>
+  <text x="586" y="190" font-size="10.5" fill="var(--ink-soft)">关闭 JPA 提供者的自动校验</text>
+
+  <rect x="20" y="210" width="780" height="28" rx="6" fill="var(--warn-soft)" stroke="var(--warn)"/>
+  <text x="410" y="229" text-anchor="middle" font-size="12" fill="var(--ink)">因此，<tspan font-weight="700">选 UI 框架时要留意它是否集成 Bean Validation</tspan> —— 这样校验才能真正贯通所有层</text>
+</svg>
+</div><figcaption>图 3-C　Hibernate 与 Hibernate Validator 的自动集成带来三重收益</figcaption></figure>
+
+<h3 id="s33">3.3.3　用 XML 文件外置元数据</h3>
+
+<div class="filename">Ch03/metadataxmljpa/src/test/resources/META-INF/orm.xml　（放这个路径会被自动识别）</div>
+<pre><code>&lt;entity-mappings version=<span class="str">"2.2"</span> …&gt;
+  &lt;<span class="kw">persistence-unit-metadata</span>&gt;                          <span class="cmt">❶ 全局元数据</span>
+      &lt;<span class="ann">xml-mapping-metadata-complete</span>/&gt;                  <span class="cmt">❷ 完全忽略所有映射注解！</span>
+      &lt;persistence-unit-defaults&gt;
+          &lt;<span class="ann">delimited-identifiers</span>/&gt;                      <span class="cmt">❸ 转义所有 SQL 名字（表名叫 "USER" 这种关键字时有用）</span>
+      &lt;/persistence-unit-defaults&gt;
+  &lt;/<span class="kw">persistence-unit-metadata</span>&gt;
+
+  &lt;<span class="kw">entity</span> class=<span class="str">"com.manning…metadataxmljpa.Item"</span> access=<span class="str">"FIELD"</span>&gt;   <span class="cmt">❹ 声明为实体，字段访问</span>
+     &lt;attributes&gt;
+         &lt;id name=<span class="str">"id"</span>&gt;&lt;generated-value strategy=<span class="str">"AUTO"</span>/&gt;&lt;/id&gt;
+         &lt;basic name=<span class="str">"name"</span>/&gt;
+         &lt;basic name=<span class="str">"auctionEnd"</span>&gt;&lt;temporal&gt;TIMESTAMP&lt;/temporal&gt;&lt;/basic&gt;
+     &lt;/attributes&gt;
+  &lt;/<span class="kw">entity</span>&gt;
+&lt;/entity-mappings&gt;</code></pre>
+
+<p>想用别的文件名或多个文件，就在 <code>META-INF/persistence.xml</code> 里声明：</p>
+<pre><code>&lt;persistence-unit name=<span class="str">"persistenceUnitName"</span>&gt;
+    &lt;mapping-file&gt;file1.xml&lt;/mapping-file&gt;
+    &lt;mapping-file&gt;file2.xml&lt;/mapping-file&gt;
+&lt;/persistence-unit&gt;</code></pre>
+
+<h4>不是「替换」而是「覆盖」：去掉 complete 标记</h4>
+<pre><code>&lt;entity class=<span class="str">"com.manning…metadataxmljpa.Item"</span>&gt;
+    &lt;attributes&gt;
+        &lt;basic name=<span class="str">"name"</span>&gt;
+            &lt;column name=<span class="str">"ITEM_NAME"</span>/&gt;      <span class="cmt">默认会映射到 NAME 列，这里改成 ITEM_NAME</span>
+        &lt;/basic&gt;
+    &lt;/attributes&gt;
+&lt;/entity&gt;</code></pre>
+
+<div class="pit"><b>覆盖的精确语义（很容易搞错）</b>
+<ul style="margin-bottom:0">
+<li>Hibernate 会忽略 <code>Item#name</code> 属性上<b>所有</b> <code>javax.persistence.annotation</code> 和 <code>org.hibernate.annotations</code> 的注解。</li>
+<li>但<b>不会</b>忽略 <b>Bean Validation 注解</b> —— 依然用于自动校验和 schema 生成。</li>
+<li><code>Item</code> 类上<b>其他所有</b>注解仍然生效。</li>
+<li>这段映射<b>没有指定访问策略</b>，因此按 <code>Item</code> 中 <code>@Id</code> 注解的<b>位置</b>决定走字段还是访问器。</li>
+</ul></div>
+
+<h3 id="s34">3.3.4　运行期访问元数据：动态 vs 静态元模型</h3>
+
+<p>两种口味，<b>都是只读的</b>，运行期不能修改元数据。</p>
+
+<h4>动态 Metamodel API</h4>
+<div class="filename">Ch03/metamodel/src/test/java/…/ch03/metamodel/MetamodelTest.java</div>
+<pre><code>Metamodel metamodel = emf.getMetamodel();       <span class="cmt">// 也可 em.getMetamodel()</span>
+Set&lt;ManagedType&lt;?&gt;&gt; managedTypes = metamodel.getManagedTypes();
+ManagedType&lt;?&gt; itemType = managedTypes.iterator().next();
+
+assertAll(() -&gt; assertEquals(1, managedTypes.size()),
+          () -&gt; assertEquals(Type.PersistenceType.ENTITY, itemType.getPersistenceType()));
+
+<span class="cmt">// 再往下挖每个属性</span>
+SingularAttribute&lt;?,?&gt; idAttribute = itemType.getSingularAttribute(<span class="str">"id"</span>);
+assertFalse(idAttribute.isOptional());          <span class="cmt">// 主键，不可为 NULL</span>
+
+SingularAttribute&lt;?,?&gt; nameAttribute = itemType.getSingularAttribute(<span class="str">"name"</span>);
+assertAll(() -&gt; assertEquals(String.class, nameAttribute.getJavaType()),
+          () -&gt; assertEquals(Attribute.PersistentAttributeType.BASIC,
+                             nameAttribute.getPersistentAttributeType()));
+
+SingularAttribute&lt;?,?&gt; auctionEndAttribute = itemType.getSingularAttribute(<span class="str">"auctionEnd"</span>);
+assertAll(() -&gt; assertEquals(Date.class, auctionEndAttribute.getJavaType()),
+          () -&gt; assertFalse(auctionEndAttribute.isCollection()),
+          () -&gt; assertFalse(auctionEndAttribute.isAssociation()));</code></pre>
+
+<div class="warn"><b>动态 API 的软肋</b><p>属性是<b>用字符串</b>访问的。这显然不类型安全 —— 一旦你改了属性名，这段代码就<b>失效且过时</b>，而且 IDE 的重构操作<b>不会自动包含这些字符串</b>。</p></div>
+
+<h4>静态元模型：把类型安全找回来</h4>
+
+<figure><div class="fig-box">
+<svg viewBox="0 0 820 300" xmlns="http://www.w3.org/2000/svg" font-family="Inter,system-ui,sans-serif">
+  <defs><marker id="mm" markerWidth="9" markerHeight="9" refX="8" refY="4.5" orient="auto"><path d="M0 0 L9 4.5 L0 9 z" fill="var(--accent)"/></marker></defs>
+  <rect x="30" y="30" width="220" height="90" rx="8" fill="var(--java-soft)" stroke="var(--java)" stroke-width="1.6"/>
+  <text x="140" y="54" text-anchor="middle" font-size="13" font-weight="700" fill="var(--java)">你的实体类</text>
+  <text x="140" y="76" text-anchor="middle" font-family="monospace" font-size="12" fill="var(--ink)">@Entity class Item</text>
+  <text x="140" y="98" text-anchor="middle" font-size="11" fill="var(--ink-soft)">id · name · auctionEnd</text>
+
+  <path d="M255 75 L330 75" stroke="var(--accent)" stroke-width="1.8" marker-end="url(#mm)"/>
+  <text x="292" y="66" text-anchor="middle" font-size="10.5" fill="var(--accent)">编译期</text>
+
+  <rect x="335" y="24" width="250" height="102" rx="8" fill="var(--accent-soft)" stroke="var(--accent)" stroke-width="1.8"/>
+  <text x="460" y="46" text-anchor="middle" font-size="12.5" font-weight="700" fill="var(--accent)">hibernate-jpamodelgen</text>
+  <text x="460" y="66" text-anchor="middle" font-size="11" fill="var(--ink)">Hibernate JPA 2 Metamodel Generator</text>
+  <text x="460" y="86" text-anchor="middle" font-size="11" fill="var(--ink-soft)">加进 pom.xml 后，每次构建自动运行</text>
+  <text x="460" y="106" text-anchor="middle" font-size="11" fill="var(--ink-soft)">产物在 target/generated-sources</text>
+
+  <path d="M590 75 L665 75" stroke="var(--accent)" stroke-width="1.8" marker-end="url(#mm)"/>
+
+  <rect x="620" y="30" width="180" height="90" rx="8" fill="var(--sql-soft)" stroke="var(--sql)" stroke-width="1.6"/>
+  <text x="710" y="56" text-anchor="middle" font-family="monospace" font-size="14" font-weight="700" fill="var(--sql)">Item_</text>
+  <text x="710" y="76" text-anchor="middle" font-size="11" fill="var(--ink-soft)">注意末尾那个下划线</text>
+  <text x="710" y="98" text-anchor="middle" font-size="11" fill="var(--ink)">类型安全的属性引用</text>
+
+  <rect x="30" y="146" width="770" height="140" rx="8" fill="var(--panel)" stroke="var(--line-strong)"/>
+  <text x="46" y="168" font-size="12" font-weight="700" fill="var(--ink-soft)">生成出来的 Item_ 长这样：</text>
+  <g font-family="monospace" font-size="11.5" fill="var(--ink)">
+    <text x="46" y="190" fill="var(--accent)">@Generated(value = "org.hibernate.jpamodelgen.JPAMetaModelEntityProcessor")</text>
+    <text x="46" y="208" fill="var(--accent)">@StaticMetamodel(Item.class)</text>
+    <text x="46" y="226">public abstract class Item_ {</text>
+    <text x="62" y="244">public static volatile SingularAttribute&lt;Item, Date&gt;   auctionEnd;</text>
+    <text x="62" y="260">public static volatile SingularAttribute&lt;Item, String&gt; name;</text>
+    <text x="62" y="276">public static volatile SingularAttribute&lt;Item, Long&gt;   id;    // 另有 NAME / ID / AUCTION_END 常量</text>
+  </g>
+</svg>
+</div><figcaption>图 3-D　静态元模型：由注解处理器在编译期生成，把「字符串属性名」变成编译期可检查的引用</figcaption></figure>
+
+<div class="cols">
+<div>
+<div class="filename">✗ 字符串版：类型安全在这里断掉</div>
+<pre><code>CriteriaBuilder cb = em.getCriteriaBuilder();
+CriteriaQuery&lt;Item&gt; query = cb.createQuery(Item.class);
+Root&lt;Item&gt; fromItem = query.from(Item.class);
+query.select(fromItem);
+
+Path&lt;String&gt; namePath = fromItem.get(<span class="str">"name"</span>);   <span class="cmt">← 字符串</span>
+query.where(cb.like(namePath,
+        cb.parameter(String.class, <span class="str">"pattern"</span>)));
+
+List&lt;Item&gt; items = em.createQuery(query)
+        .setParameter(<span class="str">"pattern"</span>, <span class="str">"%Item 1%"</span>)
+        .getResultList();
+<span class="cmt">// 等价于 select i from Item i where i.name like :pattern</span></code></pre>
+</div>
+<div>
+<div class="filename">✓ 静态元模型版：编译期就能发现不匹配</div>
+<pre><code>query.where(
+    cb.like(
+        fromItem.get(<span class="hl">Item_.name</span>),          <span class="cmt">← 类型安全</span>
+        cb.parameter(String.class, <span class="str">"pattern"</span>)
+    )
+);</code></pre>
+<div class="filename" style="margin-top:14px">Ch03/metamodel/pom.xml</div>
+<pre><code>&lt;dependency&gt;
+    &lt;groupId&gt;org.hibernate&lt;/groupId&gt;
+    &lt;artifactId&gt;<span class="ann">hibernate-jpamodelgen</span>&lt;/artifactId&gt;
+    &lt;version&gt;5.6.9.Final&lt;/version&gt;
+&lt;/dependency&gt;</code></pre>
+</div>
+</div>
+
+<div class="tip"><b>为什么值得</b><p>用字符串时，你可以放心地用 IDE 重构工具重命名 <code>Item</code> <b>实体类</b>（查询仍然工作），但一旦动了 <code>Item#name</code> <b>属性</b>就必须手工调整 —— 只能寄望测试失败时能发现。静态元模型把这个错误<b>从运行期提前到编译期</b>。</p></div>
+
+<div class="summary" id="s4">
+<h3>本章小结</h3>
+<ul>
+<li>先分析了信息模型、数据模型这些抽象概念，再落到 JPA/Hibernate 上，以便从 Java 程序操作数据库。</li>
+<li>持久化类的实现应<b>不含任何横切关注点</b>（日志、授权、事务边界）。</li>
+<li>持久化类<b>只在编译期</b>依赖 JPA。</li>
+<li><b>持久化相关的关注点不应泄漏进领域模型实现。</b></li>
+<li>要想让业务对象能被独立执行和测试，<b>透明持久化</b>很重要。</li>
+<li>POJO 概念与 JPA 实体编程模型有诸多共同点，都源自老的 JavaBean 规范：属性实现为私有/受保护字段，访问器方法一般是公有/受保护的。</li>
+<li>元数据可用<b>注解</b>（推荐）、<b>XML 描述符</b>（可替换或覆盖注解）表达；<b>Bean Validation</b> 约束也可视为一种 ORM 元数据。</li>
+<li>运行期访问元数据有两条路：<b>动态元模型</b>（字符串，灵活但不安全）与<b>静态元模型</b>（<code>Item_</code>，由 <code>hibernate-jpamodelgen</code> 生成，类型安全、重构友好）。</li>
+</ul>
+</div>
+
+<div class="pager">
+  <a href="ch02.html">← 第 2 章　启动一个项目</a>
+  <a href="ch04.html">第 4 章　使用 Spring Data JPA →</a>
+</div>
+</main>
+</div>
+</body>
+</html>

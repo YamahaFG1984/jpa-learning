@@ -1,0 +1,519 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>第 12 章 · 抓取计划、策略与剖面</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="topbar"><div class="topbar-inner">
+  <a class="brand" href="index.html">Java Persistence 讲义</a>
+  <span class="spacer"></span>
+  <a href="ch11.html">← 上一章</a>
+  <a href="index.html">目录</a>
+  <a href="ch13.html">下一章 →</a>
+</div></div>
+
+<div class="wrap">
+<nav class="toc">
+  <h4>本章目录</h4>
+  <a href="#s0">三个核心概念</a>
+  <a href="#s1">12.1 懒加载与急加载</a>
+  <a class="sub" href="#s11">理解实体代理</a>
+  <a class="sub" href="#s12">懒加载持久集合</a>
+  <a class="sub" href="#s13">急加载</a>
+  <a href="#s2">12.2 选择抓取策略</a>
+  <a class="sub" href="#s2">n+1 selects 问题</a>
+  <a class="sub" href="#s2">笛卡儿积问题</a>
+  <a class="sub" href="#s2">批量预抓取</a>
+  <a class="sub" href="#s2">子查询预抓取</a>
+  <a class="sub" href="#s2">多 SELECT 急抓取</a>
+  <a class="sub" href="#s2">动态急抓取</a>
+  <a href="#s3">12.3 使用抓取剖面</a>
+  <a class="sub" href="#s31">Hibernate 抓取剖面</a>
+  <a class="sub" href="#s32">实体图 Entity graphs</a>
+  <a href="#s4">本章小结</a>
+</nav>
+
+<main>
+<div class="hero">
+  <div class="eyebrow">Part 3 · 事务性数据处理</div>
+  <h1>第 12 章　抓取计划、策略与剖面</h1>
+  <p>本章解决第 1 章提出的 ORM 根本难题之一：<b>导航（§1.2.5）</b> —— Java 代码访问数据的方式与关系数据库访问数据的方式之间的差异。这是全书<b>性能优化的核心章节</b>。</p>
+</div>
+
+<div class="note"><b>Hibernate 把数据从数据库放进内存的五种方式</b>
+<ol style="margin-bottom:0">
+<li><b>按标识符取回实体实例</b> —— 已知唯一标识符时最方便，如 <code>entityManager.find(Item.class, 123)</code></li>
+<li><b>导航实体图</b> —— 从一个已加载实例出发，通过属性访问器访问关联实例，如 <code>someItem.getSeller().getAddress().getCity()</code>；开始遍历映射集合时元素也会按需加载。<b>只要持久化上下文还开着，Hibernate 就会自动加载图中的节点。本章的焦点就是：调访问器和遍历集合时<u>加载了什么</u>、<u>怎么加载的</u>。</b></li>
+<li><b>JPQL</b> —— 基于字符串的完整面向对象查询语言</li>
+<li><b>CriteriaQuery</b> 接口 —— 类型安全、面向对象、无需字符串拼接</li>
+<li><b>原生 SQL 查询 / 存储过程</b> —— 让 Hibernate 负责把 JDBC 结果集映射成领域模型实例</li>
+</ol>
+<p style="margin-top:8px"><b>JPA 2 新特性</b>：用新的 <code>PersistenceUtil</code> 静态帮助类手工检查实体或属性的初始化状态；用新的 <code>EntityGraph</code> API 创建标准化的声明式抓取计划。运行示例前先执行 <code>Ch12/Ch12.sql</code>。</p></div>
+
+<h2 id="s0"><span class="num">§</span>三个核心概念，一次分清</h2>
+
+<figure><div class="fig-box">
+<svg viewBox="0 0 840 220" xmlns="http://www.w3.org/2000/svg" font-family="Inter,system-ui,sans-serif">
+  <defs><marker id="c12" markerWidth="9" markerHeight="9" refX="8" refY="4.5" orient="auto"><path d="M0 0 L9 4.5 L0 9 z" fill="var(--accent)"/></marker></defs>
+  <rect x="20" y="24" width="240" height="150" rx="9" fill="var(--java-soft)" stroke="var(--java)" stroke-width="1.8"/>
+  <text x="140" y="50" text-anchor="middle" font-size="15" font-weight="700" fill="var(--java)">抓取计划 fetch plan</text>
+  <text x="140" y="72" text-anchor="middle" font-size="12.5" font-weight="700" fill="var(--ink)">加载<u>什么</u>（WHAT）</text>
+  <text x="140" y="98" text-anchor="middle" font-size="11.5" fill="var(--ink)">定义对象网络中<tspan font-weight="700">应被加载的子图</tspan></text>
+  <text x="140" y="122" text-anchor="middle" font-size="11.5" fill="var(--ink-soft)">用 <tspan font-family="monospace">FetchType.LAZY</tspan> /</text>
+  <text x="140" y="138" text-anchor="middle" font-family="monospace" font-size="11.5" fill="var(--ink-soft)">FetchType.EAGER</text>
+  <text x="140" y="160" text-anchor="middle" font-size="11" fill="var(--accent)">这是<tspan font-weight="700">全局默认</tspan>计划</text>
+
+  <path d="M266 100 L296 100" stroke="var(--accent)" stroke-width="1.8" marker-end="url(#c12)"/>
+
+  <rect x="300" y="24" width="240" height="150" rx="9" fill="var(--sql-soft)" stroke="var(--sql)" stroke-width="1.8"/>
+  <text x="420" y="50" text-anchor="middle" font-size="15" font-weight="700" fill="var(--sql)">抓取策略 fetch strategy</text>
+  <text x="420" y="72" text-anchor="middle" font-size="12.5" font-weight="700" fill="var(--ink)"><u>怎么</u>加载（HOW）</text>
+  <text x="420" y="98" text-anchor="middle" font-size="11.5" fill="var(--ink)">目标：<tspan font-weight="700">最小化 SQL 语句数量</tspan>，</text>
+  <text x="420" y="114" text-anchor="middle" font-size="11.5" fill="var(--ink)">并<tspan font-weight="700">简化每条 SQL</tspan></text>
+  <text x="420" y="140" text-anchor="middle" font-size="11.5" fill="var(--ink-soft)">JOIN · SELECT · SUBSELECT · BATCH</text>
+  <text x="420" y="160" text-anchor="middle" font-size="11" fill="var(--accent)">也可以是查询里的 join fetch</text>
+
+  <path d="M546 100 L576 100" stroke="var(--accent)" stroke-width="1.8" marker-end="url(#c12)"/>
+
+  <rect x="580" y="24" width="240" height="150" rx="9" fill="var(--accent-soft)" stroke="var(--accent)" stroke-width="2"/>
+  <text x="700" y="50" text-anchor="middle" font-size="15" font-weight="700" fill="var(--accent)">抓取剖面 fetch profile</text>
+  <text x="700" y="72" text-anchor="middle" font-size="12.5" font-weight="700" fill="var(--ink)">把计划 + 策略<u>存起来复用</u></text>
+  <text x="700" y="98" text-anchor="middle" font-size="11.5" fill="var(--ink)">封装成<tspan font-weight="700">可复用的元数据或代码</tspan></text>
+  <text x="700" y="124" text-anchor="middle" font-size="11.5" fill="var(--ink-soft)">Hibernate <tspan font-family="monospace">@FetchProfile</tspan></text>
+  <text x="700" y="142" text-anchor="middle" font-size="11.5" fill="var(--ink-soft)">JPA 2.1 <tspan font-family="monospace">@NamedEntityGraph</tspan></text>
+  <text x="700" y="162" text-anchor="middle" font-size="11" fill="var(--danger)">实体图只能改「计划」，改不了「策略」</text>
+
+  <rect x="20" y="186" width="800" height="26" rx="6" fill="var(--panel)" stroke="var(--line-strong)"/>
+  <text x="420" y="204" text-anchor="middle" font-size="12" fill="var(--ink)"><tspan font-weight="700">本书的推荐：全局抓取计划一律用 <tspan font-family="monospace">FetchType.LAZY</tspan></tspan>，然后<tspan font-weight="700">按需逐案覆盖</tspan></text>
+</svg>
+</div><figcaption>图 12-A　计划、策略、剖面三者的关系</figcaption></figure>
+
+<h2 id="s1"><span class="num">12.1</span>懒加载与急加载</h2>
+
+<p>为实现懒加载，Hibernate 依赖<b>运行期生成的实体占位符（代理 proxy）</b>和<b>智能的集合包装器（collection wrapper）</b>。</p>
+
+<h3 id="s11">12.1.1　理解实体代理</h3>
+
+<figure><div class="fig-box">
+<svg viewBox="0 0 840 330" xmlns="http://www.w3.org/2000/svg" font-family="Inter,system-ui,sans-serif">
+  <rect x="20" y="16" width="390" height="130" rx="8" fill="var(--java-soft)" stroke="var(--java)" stroke-width="1.6"/>
+  <text x="215" y="38" text-anchor="middle" font-size="13" font-weight="700" fill="var(--java)">代理是什么</text>
+  <text x="38" y="62" font-size="11.5" fill="var(--ink)">• <tspan font-family="monospace">Item</tspan> 的一个<tspan font-weight="700">运行期生成的子类</tspan>的实例</text>
+  <text x="38" y="82" font-size="11.5" fill="var(--ink)">• <tspan font-weight="700">只携带它所代表实体实例的标识符值</tspan></text>
+  <text x="38" y="102" font-size="11.5" fill="var(--ink)">• 类名很怪，形如 <tspan font-family="monospace" font-size="10.5">Item$HibernateProxy$BLsrPly8</tspan></text>
+  <text x="38" y="126" font-size="11.5" fill="var(--danger)">→ 所以 <tspan font-family="monospace">item.getClass() != Item.class</tspan>！</text>
+  <text x="52" y="140" font-size="11" fill="var(--ink-soft)">要拿真实类型用 <tspan font-family="monospace">HibernateProxyHelper.getClassWithoutInitializingProxy()</tspan></text>
+
+  <rect x="430" y="16" width="390" height="130" rx="8" fill="var(--warn-soft)" stroke="var(--warn)" stroke-width="1.6"/>
+  <text x="625" y="38" text-anchor="middle" font-size="13" font-weight="700" fill="var(--warn)">因此对实体类的三条硬性要求</text>
+  <text x="448" y="62" font-size="11.5" fill="var(--ink)">① 至少有一个 <tspan font-weight="700">public 或 protected 的无参构造器</tspan></text>
+  <text x="448" y="84" font-size="11.5" fill="var(--ink)">② <tspan font-weight="700">类和方法都不能是 final</tspan>，否则无法生成代理</text>
+  <text x="448" y="108" font-size="11.5" fill="var(--ink-soft)">③ JPA 规范<tspan font-weight="700">根本没提代理</tspan> —— 懒加载怎么实现</text>
+  <text x="462" y="124" font-size="11.5" fill="var(--ink-soft)">完全由 JPA 提供者决定</text>
+  <text x="625" y="142" text-anchor="middle" font-size="11" fill="var(--sql)">（好处：领域模型类无需实现任何特殊类型，也不用代码生成或字节码后处理）</text>
+
+  <rect x="20" y="160" width="390" height="160" rx="8" fill="var(--code-bg)" stroke="var(--line-strong)"/>
+  <text x="38" y="182" font-size="12" font-weight="700" fill="var(--ink-soft)">什么会触发初始化？</text>
+  <g font-family="monospace" font-size="11" fill="var(--ink)">
+    <text x="38" y="204">Item item = em.getReference(Item.class, ITEM_ID);</text>
+    <text x="38" y="220" fill="var(--sql)">assertEquals(ITEM_ID, item.getId());   // 不触发！</text>
+    <text x="38" y="242" fill="var(--danger)">item.getName();  // ← 触发 SELECT，完全初始化</text>
+  </g>
+  <text x="38" y="266" font-size="11" fill="var(--ink-soft)"><tspan font-weight="700">前提</tspan>：<tspan font-family="monospace">@Id</tspan> 标在 <tspan font-weight="700">getter</tspan> 上时，<tspan font-family="monospace">getId()</tspan> 才是「标识符 getter」</text>
+  <text x="38" y="282" font-size="11" fill="var(--ink-soft)">而不触发初始化。<tspan font-family="monospace">@Id</tspan> 在<tspan font-weight="700">字段</tspan>上时，调 <tspan font-family="monospace">getId()</tspan> 和调</text>
+  <text x="38" y="298" font-size="11" fill="var(--ink-soft)">其他方法一样<tspan font-weight="700">会</tspan>初始化代理。</text>
+  <text x="38" y="316" font-size="11" fill="var(--accent)">（本书通常偏好字段映射与字段访问 —— 那给访问器设计更多自由）</text>
+
+  <rect x="430" y="160" width="390" height="160" rx="8" fill="var(--sql-soft)" stroke="var(--sql)" stroke-width="1.6"/>
+  <text x="625" y="182" text-anchor="middle" font-size="13" font-weight="700" fill="var(--sql)">检查与手工初始化的两套 API</text>
+  <g font-family="monospace" font-size="11" fill="var(--ink)">
+    <text x="448" y="206">PersistenceUtil pu = Persistence.getPersistenceUtil();</text>
+    <text x="448" y="222">pu.isLoaded(item);              // JPA 标准</text>
+    <text x="448" y="238">pu.isLoaded(item, "seller");    // 还能查单个属性</text>
+    <text x="448" y="258">Hibernate.isInitialized(item);   // Hibernate 版</text>
+    <text x="448" y="278" fill="var(--accent)">Hibernate.initialize(item);      // 快速粗暴地初始化</text>
+  </g>
+  <text x="448" y="300" font-size="11" fill="var(--danger)">⚠ 写 <tspan font-family="monospace">Hibernate.isInitialized(item.getSeller())</tspan> 这句本身</text>
+  <text x="462" y="314" font-size="11" fill="var(--danger)">就会先把 item <tspan font-weight="700">初始化掉</tspan>！</text>
+</svg>
+</div><figcaption>图 12-1　代理的本质、约束与检查方式</figcaption></figure>
+
+<div class="pit"><b><code>@ManyToOne</code> 的 JPA 默认值是 <code>EAGER</code>！</b>
+<pre style="margin:8px 0"><code><span class="ann">@Entity</span>
+<span class="kw">public class</span> Item {
+    <span class="ann">@ManyToOne</span>(fetch = FetchType.<span class="hl">LAZY</span>)     <span class="cmt">// ← <b>必须显式覆盖</b>，否则加载 Item 就连带加载 seller</span>
+    <span class="kw">public</span> User getSeller() { <span class="kw">return</span> seller; }
+}</code></pre>
+<p><b>集合（<code>@ElementCollection</code>、<code>@OneToMany</code>、<code>@ManyToMany</code>）默认就是 LAZY</b>，不必写。</p></div>
+
+<div class="warn"><b>懒抓取计划下的 <code>LazyInitializationException</code></b>
+<pre style="margin:8px 0"><code>Item item = em.find(Item.class, ITEM_ID);   <span class="cmt">// seller 是未初始化的 User 代理</span>
+em.detach(item);
+em.detach(item.getSeller());                <span class="cmt">// 或直接 em.close() 游离一切</span>
+
+assertTrue(pu.isLoaded(item));              <span class="cmt">// PersistenceUtil <b>没有上下文也能工作</b></span>
+assertFalse(pu.isLoaded(item, <span class="str">"seller"</span>));
+assertEquals(USER_ID, item.getSeller().getId());   <span class="cmt">// 游离态下调「标识符 getter」<b>可以</b></span>
+<span class="cmt">// item.getSeller().getUsername();          ← 抛 <b>LazyInitializationException</b></span></code></pre>
+<p><b>数据只能在持久化上下文管理该代理期间按需加载，游离态下不行。</b></p></div>
+
+<div class="note"><b>一对一关联的懒加载为什么令人困惑？</b><p>考虑基于<b>共享主键</b>的一对一（§9.1.1）：<b>只有 <code>optional=false</code> 时该关联才能被代理化</b>。例如 <code>Address</code> 总是引用一个 <code>User</code>。如果这个关联可空、可选，<b>Hibernate 必须先打库才能知道该放代理还是放 null —— 而懒加载的目的恰恰是「根本不打库」。</b></p></div>
+
+<div class="tip"><b>代理的妙用：不加载任何数据就能存新 Bid</b>
+<pre style="margin:8px 0"><code>Item item = em.getReference(Item.class, ITEM_ID);   <span class="cmt">// 产生 Item 代理</span>
+User user = em.getReference(User.class, USER_ID);   <span class="cmt">// 产生 User 代理</span>
+Bid newBid = <span class="kw">new</span> Bid(<span class="kw">new</span> BigDecimal(<span class="str">"99.00"</span>));
+newBid.setItem(item);  newBid.setBidder(user);
+em.persist(newBid);
+<span class="cmt">// 整个过程<b>没有一条 SELECT</b>，只有一条 INSERT ——
+// 所有外键值都可以从 Item 与 User 代理的标识符值拿到</span></code></pre></div>
+
+<div class="pit"><b>运行期代理的三点局限</b>
+<ol style="margin-bottom:0">
+<li>有些代理<b>不完全透明</b>：例如用 <code>instanceof</code> 测试的多态关联（§7.8.1 演示过）。</li>
+<li>写自定义 <code>equals()</code>/<code>hashCode()</code> 时<b>不能直接访问字段</b>（§10.3.2）。</li>
+<li><b>代理只能懒加载实体关联</b>，不能懒加载单个基本属性或嵌入组件（如 <code>Item#description</code>、<code>User#homeAddress</code>）。给这类属性加 <code>@Basic(fetch = FetchType.LAZY)</code> <b>会被 Hibernate 忽略</b>，值在拥有者实体加载时就急切加载了。<b>除非你有大量可选/可空列、或有因物理限制必须按需取的大值列，否则在「SQL 选取的单个列」这个层面优化是不必要的；大值最好用 LOB 表示 —— 它们按定义就提供懒加载（§6.3.1）。</b></li>
+</ol></div>
+
+<h3 id="s12">12.1.2　懒加载的持久集合</h3>
+
+<figure><div class="fig-box">
+<svg viewBox="0 0 840 260" xmlns="http://www.w3.org/2000/svg" font-family="Inter,system-ui,sans-serif">
+  <defs><marker id="cw" markerWidth="9" markerHeight="9" refX="8" refY="4.5" orient="auto"><path d="M0 0 L9 4.5 L0 9 z" fill="var(--ink-soft)"/></marker></defs>
+  <rect x="20" y="20" width="380" height="220" rx="10" fill="none" stroke="var(--accent)" stroke-width="1.6" stroke-dasharray="6 4"/>
+  <text x="210" y="14" text-anchor="middle" font-size="11.5" fill="var(--accent)">持久化上下文</text>
+
+  <rect x="60" y="98" width="90" height="54" rx="6" fill="var(--accent-soft)" stroke="var(--accent)" stroke-width="1.8"/>
+  <text x="105" y="120" text-anchor="middle" font-size="12" font-weight="700" fill="var(--ink)">Item</text>
+  <text x="105" y="140" text-anchor="middle" font-family="monospace" font-size="12" fill="var(--accent)">123</text>
+
+  <path d="M152 112 L228 76" stroke="var(--ink-soft)" stroke-width="1.4" marker-end="url(#cw)"/>
+  <text x="182" y="86" font-size="10" fill="var(--ink-faint)">seller</text>
+  <rect x="232" y="58" width="90" height="38" rx="6" fill="var(--java-soft)" stroke="var(--java)" stroke-dasharray="5 3"/>
+  <text x="277" y="74" text-anchor="middle" font-size="11.5" font-weight="700" fill="var(--java)">User</text>
+  <text x="277" y="90" text-anchor="middle" font-family="monospace" font-size="11" fill="var(--java)">345</text>
+  <text x="277" y="110" text-anchor="middle" font-size="10" fill="var(--danger)">未初始化的代理</text>
+
+  <path d="M152 128 L228 140" stroke="var(--ink-soft)" stroke-width="1.4" marker-end="url(#cw)"/>
+  <text x="182" y="146" font-size="10" fill="var(--ink-faint)">bids</text>
+  <rect x="232" y="124" width="90" height="38" rx="6" fill="var(--java-soft)" stroke="var(--java)" stroke-dasharray="5 3"/>
+  <text x="277" y="146" text-anchor="middle" font-size="11.5" font-weight="700" fill="var(--java)">Set …</text>
+  <text x="277" y="176" text-anchor="middle" font-size="10" fill="var(--danger)">未初始化的集合包装器</text>
+
+  <path d="M152 142 L228 194" stroke="var(--ink-soft)" stroke-width="1.4" marker-end="url(#cw)"/>
+  <text x="176" y="180" font-size="10" fill="var(--ink-faint)">images</text>
+  <rect x="232" y="180" width="90" height="38" rx="6" fill="var(--java-soft)" stroke="var(--java)" stroke-dasharray="5 3"/>
+  <text x="277" y="202" text-anchor="middle" font-size="11.5" font-weight="700" fill="var(--java)">List …</text>
+
+  <text x="210" y="234" text-anchor="middle" font-size="11" fill="var(--accent)"><tspan font-weight="700">代理与集合包装器就是「已加载图」的边界</tspan></text>
+
+  <rect x="420" y="20" width="400" height="220" rx="8" fill="var(--sql-soft)" stroke="var(--sql)" stroke-width="1.6"/>
+  <text x="620" y="42" text-anchor="middle" font-size="13" font-weight="700" fill="var(--sql)">集合包装器（collection wrapper）</text>
+  <g font-family="monospace" font-size="11" fill="var(--ink)">
+    <text x="438" y="66">Set&lt;Bid&gt; bids = item.getBids();</text>
+    <text x="438" y="84" fill="var(--sql)">assertTrue(Set.class.isAssignableFrom(bids.getClass()));</text>
+    <text x="438" y="102" fill="var(--danger)">assertNotEquals(HashSet.class, bids.getClass());</text>
+    <text x="438" y="120" fill="var(--accent)">assertEquals(org.hibernate.collection.internal</text>
+    <text x="454" y="134" fill="var(--accent)">        .PersistentSet.class, bids.getClass());</text>
+  </g>
+  <text x="438" y="160" font-size="11.5" fill="var(--ink)">Hibernate 用自己的实现替换掉了你的 <tspan font-family="monospace">HashSet</tspan>，</text>
+  <text x="438" y="176" font-size="11.5" fill="var(--ink)">用来实现集合的<tspan font-weight="700">懒加载</tspan>与<tspan font-weight="700">脏检查</tspan>；行为完全一致。</text>
+  <text x="438" y="200" font-size="11.5" fill="var(--danger)"><tspan font-weight="700">这就是为什么领域模型里必须面向接口编程 ——</tspan></text>
+  <text x="438" y="216" font-size="11.5" fill="var(--danger)"><tspan font-weight="700">只依赖 Set 而不是 HashSet。</tspan>List 和 Map 同理。</text>
+  <text x="438" y="234" font-size="11" fill="var(--ink-soft)">一旦开始遍历 bids，集合与该 item 的所有出价都会被加载</text>
+</svg>
+</div><figcaption>图 12-2　持久化上下文中的代理与集合包装器</figcaption></figure>
+
+<div class="tip"><b>特殊优化：<code>LazyCollectionOption.EXTRA</code></b>
+<pre style="margin:8px 0"><code><span class="ann">@OneToMany</span>(mappedBy = <span class="str">"item"</span>)
+<span class="ann">@org.hibernate.annotations.LazyCollection</span>(
+    org.hibernate.annotations.LazyCollectionOption.<span class="hl">EXTRA</span>)
+<span class="kw">public</span> Set&lt;Bid&gt; getBids() { <span class="kw">return</span> bids; }
+
+<span class="cmt">// 用法</span>
+Item item = em.find(Item.class, ITEM_ID);      <span class="cmt">// select * from ITEM where ID = ?</span>
+assertEquals(3, item.getBids().<span class="hl">size()</span>);       <span class="cmt">// select count(b) from BID b where b.ITEM_ID = ?
+                                               // ← <b>不把 bids 加载进内存</b>！</span></code></pre>
+<p><b>extra-lazy 集合支持的免初始化操作</b>：<code>size()</code>、<code>isEmpty()</code>、<code>contains()</code>；<code>Set</code> 的 <code>add()</code> 用一条简单查询检查重复；<code>List</code> 的 <code>get(index)</code> 只加载一个元素；<code>Map</code> 支持 <code>containsKey()</code>/<code>containsValue()</code>。</p>
+<p style="margin-top:6px">另外：<code>Hibernate.initialize(bids)</code> 会把集合<b>完全</b>加载 —— <b>没法说「只加载前两条出价」，那得写查询。</b></p></div>
+
+<h3 id="s13">12.1.3　关联与集合的急加载</h3>
+
+<pre><code><span class="ann">@Entity</span>
+<span class="kw">public class</span> Item {
+    <span class="ann">@ManyToOne</span>(fetch = FetchType.EAGER)                          <span class="cmt">// 实体的默认值本来就是 EAGER</span>
+    <span class="kw">private</span> User seller;
+    <span class="ann">@OneToMany</span>(mappedBy = <span class="str">"item"</span>, fetch = FetchType.EAGER)      <span class="cmt">// ← <b>一般不推荐</b></span>
+    <span class="kw">private</span> Set&lt;Bid&gt; bids = <span class="kw">new</span> HashSet&lt;&gt;();
+}</code></pre>
+
+<div class="pit"><b>LAZY 是提示，EAGER 是硬性要求</b>
+<p><code>FetchType.LAZY</code> 是一个 <b>JPA 提供者可以忽略的提示</b>；而 <code>FetchType.EAGER</code> 是<b>硬性要求</b> —— 提供者必须保证数据被加载、在游离态可用，<b>不能忽略这个设置</b>。</p>
+<p style="margin-top:6px"><b>集合上写 EAGER 真的是好主意吗？</b>「只要 item 被加载进内存，就立刻把它的出价也加载进来」—— 即便你只想显示商品名或看拍卖何时结束，<b>所有出价都会被载入内存</b>。<b>把 <code>FetchType.EAGER</code> 作为映射中的默认抓取计划通常不是好策略</b>（下一节的笛卡儿积问题会说明原因）。<b>集合最好保持默认的 <code>FetchType.LAZY</code>。</b></p></div>
+
+<pre><code>Item item = em.find(Item.class, ITEM_ID);
+<span class="cmt">// select i.*, u.*, b.*
+// from ITEM i
+//   left outer join USERS u on u.ID = i.SELLER_ID
+//   left outer join BID   b on b.ITEM_ID = i.ID
+// where i.ID = ?                        ← <b>一条 SQL，JOIN 三张表</b></span>
+em.detach(item);                          <span class="cmt">// 抓取结束，不再有懒加载</span>
+assertEquals(3, item.getBids().size());              <span class="cmt">// ✓ 游离态可用</span>
+assertEquals(<span class="str">"johndoe"</span>, item.getSeller().getUsername()); <span class="cmt">// ✓ 游离态可用</span>
+<span class="cmt">// 但每个 Bid 仍持有一个<b>未初始化的 bidder 代理</b> —— 访问它就抛异常</span></code></pre>
+
+<h2 id="s2"><span class="num">12.2</span>选择抓取策略：在两个极端之间找中点</h2>
+
+<figure><div class="fig-box">
+<svg viewBox="0 0 840 380" xmlns="http://www.w3.org/2000/svg" font-family="Inter,system-ui,sans-serif">
+  <rect x="20" y="16" width="390" height="176" rx="8" fill="var(--danger-soft)" stroke="var(--danger)" stroke-width="1.8"/>
+  <text x="215" y="40" text-anchor="middle" font-size="14" font-weight="700" fill="var(--danger)">极端 A：全懒 → n+1 selects 问题</text>
+  <g font-family="monospace" font-size="11" fill="var(--ink)">
+    <text x="38" y="66">List&lt;Item&gt; items = em.createQuery("select i from Item i")</text>
+    <text x="38" y="80">                     .getResultList();</text>
+    <text x="38" y="96" fill="var(--sql)">// select * from ITEM              ← 1 条</text>
+    <text x="38" y="116">for (Item item : items) {</text>
+    <text x="54" y="132">  item.getSeller().getUsername();</text>
+    <text x="54" y="148" fill="var(--danger)">  // select * from USERS where ID = ?   ← n 条</text>
+    <text x="38" y="164">}</text>
+  </g>
+  <text x="38" y="184" font-size="11.5" fill="var(--danger)"><tspan font-weight="700">集合同理</tspan>：100 条出价 → <tspan font-weight="700">101 条 SQL 查询！</tspan></text>
+
+  <rect x="430" y="16" width="390" height="176" rx="8" fill="var(--warn-soft)" stroke="var(--warn)" stroke-width="1.8"/>
+  <text x="625" y="40" text-anchor="middle" font-size="14" font-weight="700" fill="var(--warn)">极端 B：全急 → 笛卡儿积问题</text>
+  <text x="448" y="64" font-size="11.5" fill="var(--ink)">同时用一条 SQL + JOIN <tspan font-weight="700">急加载两个集合</tspan>时出现</text>
+  <text x="448" y="86" font-size="11.5" fill="var(--ink)">（两个集合是 @OneToMany、@ManyToMany 还是</text>
+  <text x="448" y="102" font-size="11.5" fill="var(--ink)"> @ElementCollection <tspan font-weight="700">都无所谓</tspan>）</text>
+  <rect x="448" y="112" width="354" height="34" rx="5" fill="var(--panel)" stroke="var(--warn)"/>
+  <text x="625" y="133" text-anchor="middle" font-size="11.5" fill="var(--ink)">3 条出价 × 3 张图 = <tspan font-weight="700">9 行</tspan>；50 条出价 × 5 张图 = <tspan font-weight="700">250 行</tspan></text>
+  <text x="448" y="164" font-size="11.5" fill="var(--danger)"><tspan font-weight="700">@ManyToOne / @OneToOne 的 JOIN 急抓取<u>不</u>成问题</tspan> ——</text>
+  <text x="462" y="180" font-size="11.5" fill="var(--ink)">即使把 Item→seller→Address→City 全设 EAGER，结果集也只有<tspan font-weight="700">一行</tspan></text>
+
+  <rect x="20" y="204" width="800" height="102" rx="8" fill="var(--panel)" stroke="var(--line-strong)"/>
+  <text x="420" y="226" text-anchor="middle" font-size="12.5" font-weight="700" fill="var(--ink)">笛卡儿积结果集：只有<tspan font-weight="700">阴影格</tspan>是 Hibernate 需要的，其余全是冗余</text>
+  <g font-family="monospace" font-size="10.5">
+    <text x="60" y="250" fill="var(--ink-soft)">i.ID  i.NAME  …   b.ID  b.AMOUNT   img.FILENAME</text>
+    <text x="60" y="266" fill="var(--ink-faint)">1     One     …   </text><text x="220" y="266" fill="var(--ink)">1     99.00    </text><text x="360" y="266" fill="var(--ink)">foo.jpg</text>
+    <text x="60" y="280" fill="var(--ink-faint)">1     One     …   1     99.00    </text><text x="360" y="280" fill="var(--ink)">bar.jpg</text>
+    <text x="60" y="294" fill="var(--ink-faint)">1     One     …   1     99.00    bar…  ⋮  （共 9 行）</text>
+    <text x="470" y="266" fill="var(--danger)">数据库要花可观的处理时间与内存去生成这种结果，</text>
+    <text x="470" y="282" fill="var(--danger)">然后还要通过网络传输。</text>
+    <text x="470" y="298" fill="var(--ink)">Hibernate 把结果集组装成实例时<tspan font-weight="700">立刻去掉所有重复</tspan>，</text>
+  </g>
+
+  <rect x="20" y="318" width="800" height="52" rx="8" fill="var(--sql-soft)" stroke="var(--sql)" stroke-width="1.8"/>
+  <text x="420" y="340" text-anchor="middle" font-size="12.5" font-weight="700" fill="var(--sql)">关键认识</text>
+  <text x="420" y="360" text-anchor="middle" font-size="11.5" fill="var(--ink)"><tspan font-weight="700">这些重复无法在 SQL 层面消除 —— <tspan font-family="monospace">DISTINCT</tspan> 在这里帮不上忙。</tspan>要同时取一个实体和两个集合，<tspan font-weight="700">三条独立查询比一条超大结果的查询更快</tspan></text>
+</svg>
+</div><figcaption>图 12-4/12-5　两个极端各自的病症</figcaption></figure>
+
+<div class="note"><b><code>hibernate.max_fetch_depth</code></b><p>Hibernate 必须在某处停止跟随 <code>EAGER</code> 计划。<b>JOIN 的表数由这个全局配置属性决定，默认无限制</b>。合理值很小，<b>通常 1 到 5</b>；设为 <b>0 可以禁用</b> <code>@ManyToOne</code>/<code>@OneToOne</code> 的 JOIN 抓取。达到上限后 Hibernate <b>仍会按计划急加载数据，但改用额外的 SELECT 语句</b>。（注意有些数据库方言会预设它，例如 <code>MySQLDialect</code> 设为 2。）</p></div>
+
+<h3>四种优化手段横向对比</h3>
+
+<div class="tablewrap"><table>
+<thead><tr><th style="width:170px">手段</th><th>配置</th><th>生成的 SQL</th><th>取舍</th></tr></thead>
+<tbody>
+<tr><td><b>批量预抓取</b><br>§12.2.3</td><td><code>@org.hibernate.annotations.BatchSize(size = 10)</code>（放在<b>实体类</b>上，或<b>集合属性</b>上）</td><td><code>select * from USERS where ID in (?,?,?,?,?,?,?,?,?,?)</code></td><td><b>「盲猜式优化」</b>：我们不知道某个上下文里有多少未初始化代理，10 只是猜。<b>把 n+1 条查询降到 ⌈n/10⌉+1 条</b>，显著减少。合理值通常较小 —— 也不想载入太多不确定要用的数据</td></tr>
+<tr><td><b>子查询预抓取</b><br>§12.2.4</td><td><code>@org.hibernate.annotations.Fetch(FetchMode.SUBSELECT)</code>（<b>只用于集合</b>）</td><td><code>select * from BID where ITEM_ID in (select ID from ITEM)</code></td><td><b>不是盲猜</b>：Hibernate 记住加载 items 的原始查询，把它（略作修改）嵌进子查询。<b>但这个「记忆」只在<u>某个持久化上下文内</u>有效</b> —— 若把 Item 游离后再 merge 进新上下文再遍历集合，<b>不会发生预抓取</b></td></tr>
+<tr><td><b>多 SELECT 急抓取</b><br>§12.2.5</td><td><code>@Fetch(FetchMode.SELECT)</code> + <code>FetchType.EAGER</code></td><td>三条独立 SELECT：ITEM、USERS、BID</td><td>用来<b>避开笛卡儿积</b>。<code>FetchMode</code> 默认是 <code>JOIN</code>。<b>注意：这些额外 SELECT 不是懒执行的</b> —— 一次 <code>find()</code> 就产生多条 SQL</td></tr>
+<tr><td><b>动态急抓取</b><br>§12.2.6<br><span class="badge new">推荐</span></td><td>查询里写 <code>join fetch</code>，或 Criteria 的 <code>root.fetch("seller")</code></td><td><code>inner join USERS u on u.ID = i.SELLER_ID</code></td><td><b>只对特定过程生效，不是全局设置</b>。上面三种<b>都是全局的、永远激活的</b> —— <b>为解决某一处问题而调的设置，可能对别处产生负面副作用，这种平衡很难维持</b></td></tr>
+</tbody></table></div>
+
+<div class="cols">
+<div>
+<div class="filename">§12.2.3 批量预抓取</div>
+<pre><code><span class="ann">@Entity</span> <span class="ann">@Table</span>(name = <span class="str">"USERS"</span>)
+<span class="ann">@org.hibernate.annotations.BatchSize</span>(size = 10)
+<span class="kw">public class</span> User { … }
+
+<span class="ann">@Entity</span> <span class="kw">public class</span> Item {
+    <span class="ann">@OneToMany</span>(mappedBy = <span class="str">"item"</span>)
+    <span class="ann">@org.hibernate.annotations.BatchSize</span>(size = 5)
+    <span class="kw">private</span> Set&lt;Bid&gt; bids = <span class="kw">new</span> HashSet&lt;&gt;();
+}</code></pre>
+<div class="note" style="margin-top:12px"><b>真实的批量抓取算法（比上面复杂）</b>
+<p>假设批大小 32。<b>启动时</b> Hibernate 在内部创建若干批加载器，每个知道自己能初始化多少个代理。目标是<b>最小化创建加载器的内存消耗</b>、<b>创建足够多的加载器覆盖每种可能的批次</b>、以及<b>最小化 SQL 查询数</b>。</p>
+<p style="margin-top:6px"><b>要初始化 31 个代理，Hibernate 执行 3 批（你大概以为是 1，因为 32&gt;31）</b>，自动选中的加载器是 <b>16、10、5</b>。</p>
+<p style="margin-top:6px">可用 <code>hibernate.batch_fetch_style</code> 定制：默认 <code>LEGACY</code>（启动时构建并挑选多个批加载器）；<code>PADDED</code>（启动时只建<b>一条</b>带 32 个 IN 占位符的 SQL，不足 32 个时<b>重复绑定标识符</b>）；<code>DYNAMIC</code>（运行时知道要初始化多少个代理后<b>动态构建</b>批 SQL）。</p></div>
+</div>
+<div>
+<div class="filename">§12.2.6 动态急抓取 —— JPQL 与 Criteria 两种写法</div>
+<pre><code><span class="cmt">// ① 关联：join fetch（生成 <b>INNER JOIN</b>）</span>
+List&lt;Item&gt; items = em.createQuery(
+    <span class="str">"select i from Item i <span class="hl">join fetch</span> i.seller"</span>, Item.class)
+    .getResultList();
+em.close();                       <span class="cmt">// 全部游离</span>
+<span class="kw">for</span> (Item item : items)
+    assertNotNull(item.getSeller().getUsername());  <span class="cmt">// ✓ 数据都在</span>
+
+<span class="cmt">// 等价的 Criteria 写法</span>
+CriteriaQuery&lt;Item&gt; criteria = cb.createQuery(Item.class);
+Root&lt;Item&gt; i = criteria.from(Item.class);
+i.<span class="hl">fetch</span>(<span class="str">"seller"</span>);
+criteria.select(i);
+
+<span class="cmt">// ② 集合：<b>必须用 LEFT OUTER JOIN</b>
+//    —— 因为没有出价的 ITEM 行我们也要</span>
+em.createQuery(
+    <span class="str">"select i from Item i <span class="hl">left join fetch</span> i.bids"</span>, Item.class);
+
+i.<span class="hl">fetch</span>(<span class="str">"bids"</span>, JoinType.LEFT);   <span class="cmt">// Criteria 版</span></code></pre>
+</div>
+</div>
+
+<div class="tip"><b>批量预抓取的价值判断</b><p>「虽然我们可能预抓了用不上的数据、多占了内存，<b>但减少的数据库往返可以带来巨大差别。<u>内存很便宜，扩展数据库服务器却不便宜。</u></b>」</p></div>
+
+<h2 id="s3"><span class="num">12.3</span>使用抓取剖面</h2>
+
+<div class="tablewrap"><table>
+<thead><tr><th style="width:180px"></th><th>Hibernate 抓取剖面</th><th>JPA 实体图（Entity graphs）</th></tr></thead>
+<tbody>
+<tr><td><b>标准性</b></td><td>私有 API</td><td><b>JPA 2.1 规范</b></td></tr>
+<tr><td><b>声明</b></td><td><code>@org.hibernate.annotations.FetchProfile</code></td><td><code>@NamedEntityGraph</code>（注解或 XML），或 <code>EntityGraph</code> API</td></tr>
+<tr><td><b>启用</b></td><td><code>Session#enableFetchProfile()</code>（<b>需要 Hibernate API</b>），启用后<b>对该工作单元中的任何操作都激活</b></td><td>作为 <b>hint</b> 加在 <code>find()</code> 或查询（JPQL/Criteria）上</td></tr>
+<tr><td><b>能改什么</b></td><td>选择性地<b>覆盖懒映射的实体关联与集合</b>，为某个工作单元启用 <b>JOIN 急抓取策略</b></td><td><b>只控制「应加载什么」，遗憾的是<u>不控制怎么加载</u></b></td></tr>
+<tr><td><b>局限</b></td><td>功能较简单，适合较小或较简单的应用</td><td>① <b>只能改抓取计划，改不了 Hibernate 的抓取策略</b>（batch/subselect/join/select）；② 注解或 XML 中声明<b>不是完全类型安全的</b>（属性名是字符串）—— <b>但 <code>EntityGraph</code> API 是类型安全的</b></td></tr>
+</tbody></table></div>
+
+<div class="note"><p>作者评价：「<b>公平地说，这里还有改进空间</b>，我们期待未来版本的 Hibernate 与 JPA 提供一个统一且更强大的 API。」JPQL 查询本身就是一种声明式（具名）抓取剖面，<b>我们缺的是在同一个基础查询上轻松叠加不同计划的能力</b>（见过一些用字符串拼接的「创意方案」，<b>最好避免</b>）。Criteria 查询则已有完整的 Java 能力来组织构建代码。<b>实体图的价值在于：抓取计划可以跨任意类型的查询复用。</b></p></div>
+
+<h3 id="s31">12.3.1　声明 Hibernate 抓取剖面</h3>
+
+<div class="filename">Ch12/profile/src/main/java/…/ch12/profile/package-info.java　—— 全局元数据，作者偏好放包级</div>
+<pre><code><span class="ann">@org.hibernate.annotations.FetchProfiles</span>({
+    <span class="ann">@FetchProfile</span>(name = Item.PROFILE_JOIN_SELLER,      <span class="cmt">// ❶ 每个剖面有名字，抽成常量</span>
+        fetchOverrides = <span class="ann">@FetchProfile.FetchOverride</span>(
+            entity = Item.class,
+            association = <span class="str">"seller"</span>,                     <span class="cmt">// ❷ 每条覆盖指名一个关联或集合</span>
+            mode = FetchMode.JOIN                        <span class="cmt">// ❸ 用 JOIN 急抓取</span>
+        )),
+    <span class="ann">@FetchProfile</span>(name = Item.PROFILE_JOIN_BIDS,
+        fetchOverrides = <span class="ann">@FetchProfile.FetchOverride</span>(
+            entity = Item.class, association = <span class="str">"bids"</span>, mode = FetchMode.JOIN))
+})</code></pre>
+
+<pre><code>Item item = em.find(Item.class, ITEM_ID);                <span class="cmt">// 默认懒计划：只取 Item</span>
+
+em.clear();
+em.unwrap(Session.class).enableFetchProfile(Item.PROFILE_JOIN_SELLER);
+item = em.find(Item.class, ITEM_ID);                     <span class="cmt">// 现在同一条 SQL 里 join 取 seller</span>
+
+em.clear();
+em.unwrap(Session.class).enableFetchProfile(Item.PROFILE_JOIN_BIDS);
+item = em.find(Item.class, ITEM_ID);                     <span class="cmt">// <b>剖面可以叠加</b>：seller 和 bids 都 join 取</span></code></pre>
+
+<h3 id="s32">12.3.2　使用实体图（Entity graphs）</h3>
+
+<figure><div class="fig-box">
+<svg viewBox="0 0 840 250" xmlns="http://www.w3.org/2000/svg" font-family="Inter,system-ui,sans-serif">
+  <rect x="20" y="20" width="390" height="150" rx="8" fill="var(--sql-soft)" stroke="var(--sql)" stroke-width="1.8"/>
+  <text x="215" y="44" text-anchor="middle" font-size="14" font-weight="700" fill="var(--sql)">load graph</text>
+  <text x="215" y="64" text-anchor="middle" font-family="monospace" font-size="11.5" fill="var(--ink-soft)">javax.persistence.loadgraph</text>
+  <text x="38" y="92" font-size="11.5" fill="var(--ink)">图中<tspan font-weight="700">指定了</tspan>的属性 → 视为 <tspan font-family="monospace" font-weight="700">FetchType.EAGER</tspan></text>
+  <text x="38" y="116" font-size="11.5" fill="var(--ink)">图中<tspan font-weight="700">没指定</tspan>的属性 → <tspan font-weight="700">按映射中声明的或默认的</tspan></text>
+  <text x="52" y="132" font-size="11.5" fill="var(--ink)"><tspan font-family="monospace">FetchType</tspan> 处理</text>
+  <text x="215" y="158" text-anchor="middle" font-size="11.5" fill="var(--sql)"><tspan font-weight="700">「增量式」：只增加急加载，不改变其余</tspan></text>
+
+  <rect x="430" y="20" width="390" height="150" rx="8" fill="var(--accent-soft)" stroke="var(--accent)" stroke-width="1.8"/>
+  <text x="625" y="44" text-anchor="middle" font-size="14" font-weight="700" fill="var(--accent)">fetch graph</text>
+  <text x="625" y="64" text-anchor="middle" font-family="monospace" font-size="11.5" fill="var(--ink-soft)">javax.persistence.fetchgraph</text>
+  <text x="448" y="92" font-size="11.5" fill="var(--ink)">图中<tspan font-weight="700">有</tspan>的节点 → <tspan font-family="monospace" font-weight="700">FetchType.EAGER</tspan></text>
+  <text x="448" y="116" font-size="11.5" fill="var(--ink)">图中<tspan font-weight="700">没有</tspan>的属性与集合 → 一律 <tspan font-family="monospace" font-weight="700">FetchType.LAZY</tspan></text>
+  <text x="625" y="146" text-anchor="middle" font-size="11.5" fill="var(--danger)"><tspan font-weight="700">这会完全忽略实体属性与集合映射中的</tspan></text>
+  <text x="625" y="162" text-anchor="middle" font-size="11.5" fill="var(--danger)"><tspan font-weight="700">所有 FetchType 设置</tspan></text>
+
+  <rect x="20" y="184" width="800" height="56" rx="8" fill="var(--panel)" stroke="var(--line-strong)"/>
+  <text x="420" y="206" text-anchor="middle" font-size="12.5" font-weight="700" fill="var(--ink)">命名规则与建议</text>
+  <text x="420" y="226" text-anchor="middle" font-size="11.5" fill="var(--ink)">实体图在元数据中<tspan font-weight="700">有名字并关联到某个实体类</tspan>，通常声明在实体类顶部的注解里。<tspan font-weight="700">不给名字则取拥有它的实体类的简单名</tspan>（这里就是 <tspan font-family="monospace">Item</tspan>）。</text>
+</svg>
+</div><figcaption>图 12-B　load graph 与 fetch graph 的语义差别</figcaption></figure>
+
+<div class="cols">
+<div>
+<div class="filename">① 注解式声明</div>
+<pre><code><span class="ann">@NamedEntityGraphs</span>({
+    <span class="ann">@NamedEntityGraph</span>(
+        name = <span class="str">"ItemSeller"</span>,
+        attributeNodes = { <span class="ann">@NamedAttributeNode</span>(<span class="str">"seller"</span>) })
+})
+<span class="ann">@Entity</span>
+<span class="kw">public class</span> Item {
+    <span class="ann">@NotNull</span> <span class="ann">@ManyToOne</span>(fetch = FetchType.LAZY) <span class="kw">private</span> User seller;
+    <span class="ann">@OneToMany</span>(mappedBy = <span class="str">"item"</span>) <span class="kw">private</span> Set&lt;Bid&gt; bids = <span class="kw">new</span> HashSet&lt;&gt;();
+    <span class="ann">@ElementCollection</span> <span class="kw">private</span> Set&lt;String&gt; images = <span class="kw">new</span> HashSet&lt;&gt;();
+}
+
+<span class="cmt">// 使用</span>
+Map&lt;String,Object&gt; properties = <span class="kw">new</span> HashMap&lt;&gt;();
+properties.put(<span class="str">"javax.persistence.loadgraph"</span>,
+               em.getEntityGraph(<span class="str">"ItemSeller"</span>));
+Item item = em.find(Item.class, ITEM_ID, properties);
+<span class="cmt">// select i.*, u.* from ITEM i inner join USERS u on u.ID = i.SELLER_ID where i.ID = ?</span></code></pre>
+</div>
+<div>
+<div class="filename">② API 式构建（<b>类型安全</b>）</div>
+<pre><code>EntityGraph&lt;Item&gt; itemGraph = em.createEntityGraph(Item.class);
+itemGraph.addAttributeNodes(<span class="hl">Item_.seller</span>);   <span class="cmt">// ← 静态元模型（§3.3.4）</span>
+properties.put(<span class="str">"javax.persistence.loadgraph"</span>, itemGraph);
+Item item = em.find(Item.class, ITEM_ID, properties);
+
+<span class="cmt">// 也可以作为<b>查询提示</b></span>
+List&lt;Item&gt; items = em.createQuery(<span class="str">"select i from Item i"</span>, Item.class)
+    .setHint(<span class="str">"javax.persistence.loadgraph"</span>, itemGraph)
+    .getResultList();
+<span class="cmt">// select i.*, u.* from ITEM i left outer join USERS u on u.ID = i.SELLER_ID</span></code></pre>
+<p style="font-size:14px"><b>空的实体图</b>（不指定任何 attributeNode）会沿用实体类的默认值 —— 因此对全懒的 <code>Item</code> 来说，加不加这个 hint 结果一样。</p>
+</div>
+</div>
+
+<div class="filename">③ 复杂实体图：可复用的子图（subgraph）</div>
+<pre><code><span class="ann">@NamedEntityGraphs</span>({
+    <span class="ann">@NamedEntityGraph</span>(
+        name = <span class="str">"BidBidderItemSellerBids"</span>,
+        attributeNodes = {
+            <span class="ann">@NamedAttributeNode</span>(value = <span class="str">"bidder"</span>),
+            <span class="ann">@NamedAttributeNode</span>(value = <span class="str">"item"</span>, subgraph = <span class="str">"ItemSellerBids"</span>)
+        },
+        subgraphs = {
+            <span class="ann">@NamedSubgraph</span>(name = <span class="str">"ItemSellerBids"</span>,
+                attributeNodes = { <span class="ann">@NamedAttributeNode</span>(<span class="str">"seller"</span>),
+                                   <span class="ann">@NamedAttributeNode</span>(<span class="str">"bids"</span>) })
+        })
+})
+<span class="ann">@Entity</span>
+<span class="kw">public class</span> Bid { … }
+<span class="cmt">// 作为 load graph 取 Bid 时，会连带急抓取 Bid#bidder、Bid#item，
+// 以及更深层的 Item#seller 和全部 Item#bids</span>
+
+<span class="cmt">// 等价的 API 写法</span>
+EntityGraph&lt;Bid&gt; bidGraph = em.createEntityGraph(Bid.class);
+bidGraph.addAttributeNodes(Bid_.bidder, Bid_.item);
+Subgraph&lt;Item&gt; itemGraph = bidGraph.addSubgraph(Bid_.item);
+itemGraph.addAttributeNodes(Item_.seller, Item_.bids);</code></pre>
+
+<div class="tip"><b>命名约定</b><p>「虽然你可以随意命名实体图，<b>我们建议制定一套团队所有人都能遵循的约定，并把这些字符串移到共享常量里。</b>」</p></div>
+
+<div class="summary" id="s4">
+<h3>本章小结</h3>
+<ul>
+<li><b>抓取剖面</b>把<b>抓取计划</b>（加载<u>什么</u>）与<b>抓取策略</b>（<u>怎么</u>加载）结合起来，封装成可复用的元数据或代码。</li>
+<li>可以创建<b>全局抓取计划</b>，定义哪些关联和集合应当始终被加载进内存。<b>本书推荐：全部 <code>FetchType.LAZY</code>，再逐案覆盖。</b></li>
+<li>制定抓取计划的依据是<b>用例</b>：应用如何访问关联实体、如何遍历集合，以及<b>哪些数据必须在游离态可用</b>。</li>
+<li>为抓取计划<b>选择正确的抓取策略</b>，目标是<b>最小化必须执行的 SQL 语句数量以及每条 SQL 的复杂度</b>。</li>
+<li>抓取策略尤其用于<b>避免 n+1 selects 问题与笛卡儿积问题</b>：批量预抓取（<code>@BatchSize</code>，盲猜式）、子查询预抓取（<code>FetchMode.SUBSELECT</code>）、多 SELECT 急抓取（<code>FetchMode.SELECT</code>）、以及<b>最推荐的动态 <code>join fetch</code></b>。</li>
+<li><b>代理与集合包装器</b>是懒加载的实现基础，也是「已加载图」的边界；游离态访问未初始化代理会抛 <code>LazyInitializationException</code>。</li>
+</ul>
+</div>
+
+<div class="pager">
+  <a href="ch11.html">← 第 11 章　事务与并发</a>
+  <a href="ch13.html">第 13 章　过滤数据 →</a>
+</div>
+</main>
+</div>
+</body>
+</html>

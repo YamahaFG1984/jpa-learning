@@ -1,0 +1,592 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>第 8 章 · 映射集合与实体关联</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="topbar"><div class="topbar-inner">
+  <a class="brand" href="index.html">Java Persistence 讲义</a>
+  <span class="spacer"></span>
+  <a href="ch07.html">← 上一章</a>
+  <a href="index.html">目录</a>
+  <a href="ch09.html">下一章 →</a>
+</div></div>
+
+<div class="wrap">
+<nav class="toc">
+  <h4>本章目录</h4>
+  <a href="#s1">8.1 值类型的集合</a>
+  <a class="sub" href="#s11">数据库 schema</a>
+  <a class="sub" href="#s12">要不要映射集合</a>
+  <a class="sub" href="#s13">选择集合接口</a>
+  <a class="sub" href="#s13">映射 Set</a>
+  <a class="sub" href="#s13">映射标识符 bag</a>
+  <a class="sub" href="#s13">映射 List</a>
+  <a class="sub" href="#s13">映射 Map</a>
+  <a class="sub" href="#s18">排序与有序集合</a>
+  <a href="#s2">8.2 组件的集合</a>
+  <a class="sub" href="#s21">组件实例的相等性</a>
+  <a class="sub" href="#s22">组件的 Set / Bag / Map</a>
+  <a class="sub" href="#s26">组件内部的集合</a>
+  <a href="#s3">8.3 映射实体关联</a>
+  <a class="sub" href="#s31">最简单的关联</a>
+  <a class="sub" href="#s32">改成双向</a>
+  <a class="sub" href="#s33">级联状态</a>
+  <a href="#s4">本章小结</a>
+</nav>
+
+<main>
+<div class="hero">
+  <div class="eyebrow">Part 2 · 映射策略</div>
+  <h1>第 8 章　映射集合与实体关联</h1>
+  <p>很多人用 Hibernate 做的第一件事就是映射父/子关系 —— 这通常也是他们第一次遇到集合、第一次不得不思考实体与值类型的区别，或者第一次<b>迷失在 ORM 的复杂度里</b>。管理类之间的关联与表之间的关系正是 ORM 的核心，<b>实现 ORM 方案的大多数难题都与集合和实体关联管理有关</b>。</p>
+</div>
+
+<div class="note"><b>JPA 2 的重要新特性</b>
+<p>① 新增对<b>基本类型和可嵌入类型的集合与 Map</b> 的支持。<br>
+② 新增对<b>持久化 List</b> 的支持 —— 每个元素的索引存在一个额外的数据库列里。<br>
+③ 一对多关联新增了 <b>orphan removal（孤儿移除）</b>选项。</p></div>
+
+<h2 id="s1"><span class="num">8.1</span>值类型的 Set、Bag、List 与 Map</h2>
+<p><span class="badge">源码目录 mapping-collections</span>　运行前先执行 <code>Ch08/Ch08.sql</code>。</p>
+
+<h3 id="s11">8.1.1　数据库 schema：先看表，再看类</h3>
+<p>给拍卖商品挂图片。假设<b>图片文件存在文件系统上，数据库里只存文件名</b>；从数据库删除图片时，另有一个独立进程负责删磁盘上的文件。</p>
+
+<figure><div class="fig-box">
+<svg viewBox="0 0 700 150" xmlns="http://www.w3.org/2000/svg" font-family="Inter,system-ui,sans-serif">
+  <defs><marker id="fk8" markerWidth="9" markerHeight="9" refX="8" refY="4.5" orient="auto"><path d="M0 0 L9 4.5 L0 9 z" fill="var(--accent)"/></marker></defs>
+  <rect x="60" y="24" width="180" height="100" rx="8" fill="var(--sql-soft)" stroke="var(--sql)" stroke-width="1.6"/>
+  <text x="150" y="46" text-anchor="middle" font-size="12" font-style="italic" fill="var(--ink-faint)">« Table »</text>
+  <text x="150" y="66" text-anchor="middle" font-size="14" font-weight="700" fill="var(--ink)">ITEM</text>
+  <line x1="60" y1="76" x2="240" y2="76" stroke="var(--sql)"/>
+  <text x="78" y="96" font-family="monospace" font-size="11.5" fill="var(--accent)">ID «PK»</text>
+  <text x="78" y="114" font-family="monospace" font-size="11.5" fill="var(--ink-soft)">NAME · …</text>
+
+  <path d="M360 74 L248 74" stroke="var(--accent)" stroke-width="1.8" marker-end="url(#fk8)"/>
+  <text x="304" y="66" text-anchor="middle" font-size="10.5" fill="var(--accent)">FK</text>
+
+  <rect x="360" y="24" width="260" height="100" rx="8" fill="var(--sql-soft)" stroke="var(--sql)" stroke-width="1.6"/>
+  <text x="490" y="46" text-anchor="middle" font-size="12" font-style="italic" fill="var(--ink-faint)">« Table »</text>
+  <text x="490" y="66" text-anchor="middle" font-size="14" font-weight="700" fill="var(--ink)">IMAGE</text>
+  <line x1="360" y1="76" x2="620" y2="76" stroke="var(--sql)"/>
+  <text x="378" y="96" font-family="monospace" font-size="11.5" fill="var(--accent)">ITEM_ID «PK» «FK»</text>
+  <text x="378" y="114" font-family="monospace" font-size="11.5" fill="var(--accent)">FILENAME «PK»</text>
+</svg>
+</div><figcaption>图 8-1　schema 里就这么点东西：<b>没有集合，也没有组合</b></figcaption></figure>
+
+<h3 id="s12">8.1.2　该不该映射集合属性？先算清收益与代价</h3>
+
+<div class="pit"><b>请牢记：持久化集合永远是可选的</b><p>就算不映射任何集合，也能把 <code>IMAGE</code> 表当作一个 <code>@Entity</code> 类映射（用 <code>@ManyToOne</code> 映射外键列 + 复合主键映射），需要某个商品的图片时写查询即可：<code>select img from Image img where img.item = :itemParameter</code>。</p></div>
+
+<div class="cols">
+<div>
+<div class="card">
+<h4 style="color:var(--sql)">映射 <code>Item#images</code> 能得到什么</h4>
+<div class="keyhint"><span class="k" style="min-width:70px">按需加载</span><span>调 <code>someItem.getImages()</code> 时自动执行 <code>SELECT * from IMAGE where ITEM_ID = ?</code>。只要领域模型实例处于受管状态，就能<b>边导航边按需读库</b>，不用手写查询。</span></div>
+<div class="keyhint"><span class="k" style="min-width:70px">级联持久化</span><span>不必对每个 <code>Image</code> 调 <code>persist()</code> / <code>save()</code> —— 往集合里 <code>add()</code>，保存 <code>Item</code> 时它就自动持久化了。</span></div>
+<div class="keyhint"><span class="k" style="min-width:70px">依赖生命周期</span><span><code>Item</code> 被删时，Hibernate 用额外的 SQL DELETE 删掉所有附属 <code>Image</code>，你不用操心孤儿清理（假设外键没有 <code>ON DELETE CASCADE</code>）。</span></div>
+</div>
+</div>
+<div>
+<div class="card">
+<h4 style="color:var(--danger)">代价与边界</h4>
+<p><b>代价是额外的映射复杂度。</b>很多 JPA 新手在集合映射上挣扎，而「你为什么要这么做？」的答案常常是——<b>「我以为这个集合是必须的。」</b></p>
+<p><b>局限</b>：一旦开始遍历集合，这个集合查询<b>永远是「该 item 的全部图片」</b>，绝不会是「只要满足条件 XYZ 的图片」。</p>
+<p style="margin-bottom:0"><b>本例为什么值得映射</b>：图片<b>生命周期依赖</b> item；显示 item 时通常也要显示全部图片，<code>someItem.getImages()</code> 在 UI 代码里很方便 —— 这更像是信息的<b>急加载</b>，不用再调持久化服务，图片就在那儿。</p>
+</div>
+</div>
+</div>
+
+<h3 id="s13">8.1.3　选择集合接口</h3>
+
+<pre><code><span class="cmt">// Java 领域模型里集合属性的惯用写法</span>
+&lt;&lt;<span class="kw">Interface</span>&gt;&gt; images = <span class="kw">new</span> &lt;&lt;Implementation&gt;&gt;();   <span class="cmt">// 用<b>接口</b>声明类型，挑一个匹配的实现，<b>立刻初始化</b></span>
+<span class="cmt">// 不推荐在构造器或 setter 里「延迟」初始化集合</span>
+
+Set&lt;Image&gt; images = <span class="kw">new</span> HashSet&lt;Image&gt;();</code></pre>
+
+<div class="tablewrap"><table>
+<thead><tr><th style="width:190px">属性接口 / 实现</th><th>语义</th><th>支持度</th></tr></thead>
+<tbody>
+<tr><td><code>Set</code> / <code>HashSet</code></td><td><b>不保序、不允许重复</b></td><td><span class="badge sql">所有 JPA 提供者</span></td></tr>
+<tr><td><code>SortedSet</code> / <code>TreeSet</code></td><td>稳定的元素顺序：<b>加载后在内存中排序</b></td><td><span class="badge new">Hibernate 扩展</span> 其他提供者可能忽略 sorted</td></tr>
+<tr><td><code>List</code> / <code>ArrayList</code></td><td>用<b>额外的索引列</b>在数据库里保存每个元素的位置</td><td><span class="badge sql">所有 JPA 提供者</span></td></tr>
+<tr><td><code>Collection</code> / <code>ArrayList</code></td><td><b>bag 语义</b>：允许重复，但不保序</td><td><span class="badge sql">所有 JPA 提供者</span></td></tr>
+<tr><td><code>Map</code> / <code>HashMap</code></td><td>键值对都能存进数据库</td><td><span class="badge sql">所有 JPA 提供者</span></td></tr>
+<tr><td><code>SortedMap</code> / <code>TreeMap</code></td><td>稳定顺序：加载后在内存中排序</td><td><span class="badge new">Hibernate 扩展</span></td></tr>
+<tr><td><b>数组</b></td><td>Hibernate 支持持久化数组，<b>但 JPA 不支持</b></td><td><span class="badge">很少用</span> Hibernate <b>无法包装数组属性</b>，按需懒加载等集合红利都没有</td></tr>
+</tbody></table></div>
+
+<div class="tip"><b>Hibernate 为什么要「包装」你的集合</b><p>它会<b>包装</b>你在字段声明处已经初始化的集合，有时甚至<b>替换</b>掉它（如果类型不对）。这样做是为了实现集合元素的<b>懒加载</b>和<b>脏检查</b>等能力。想映射 Hibernate 不直接支持的集合？扩展点是 <code>org.hibernate.collection.spi.PersistentCollection</code>，通常继承已有的 <code>PersistentSet</code>/<code>PersistentBag</code>/<code>PersistentList</code>。<b>自定义持久化集合不好写，不是老手不建议做。</b></p></div>
+
+<div class="warn"><b>不带泛型的原始集合</b><p>如果不用泛型指定元素类型（或 Map 的键/值类型），必须告诉 Hibernate：<code>@ElementCollection(targetClass = String.class)</code>，Map 的键类型用 <code>@MapKeyClass</code>。<b>本书所有例子都用泛型集合，你也应该这样。</b></p></div>
+
+<div class="note"><b>题外话：文件系统不是事务性的</b><p>如果只在 SQL 库里存文件名，二进制数据得放别处。存数据库 BLOB 列是一种选择；若决定存成普通文件，要意识到 <code>java.io.File</code> 和 <code>java.nio.file.Files</code> <b>不是事务性的</b> —— 文件系统操作不会加入 JTA 系统事务：可能事务成功提交、Hibernate 把文件名写进了库，而文件的存储或删除却失败了。<b>你无法把这些操作作为一个原子单元回滚，也得不到正确的隔离性。</b>可以用 Bitronix 这类独立事务管理器把文件操作也纳入同一个事务。</p></div>
+
+<h3>§8.1.4–8.1.7　四种映射的主键差异（本节的核心）</h3>
+
+<figure><div class="fig-box">
+<svg viewBox="0 0 860 560" xmlns="http://www.w3.org/2000/svg" font-family="Inter,system-ui,sans-serif">
+  <!-- SET -->
+  <rect x="16" y="14" width="410" height="126" rx="8" fill="var(--panel)" stroke="var(--line-strong)" stroke-width="1.4"/>
+  <text x="32" y="36" font-size="13" font-weight="700" fill="var(--java)">① Set&lt;String&gt;　<tspan font-family="monospace" font-size="11" fill="var(--ink-faint)">new HashSet&lt;&gt;()</tspan></text>
+  <text x="32" y="54" font-size="11.5" fill="var(--ink-soft)">不允许重复、不保序</text>
+  <rect x="32" y="62" width="378" height="66" rx="5" fill="var(--sql-soft)" stroke="var(--sql)"/>
+  <text x="44" y="82" font-family="monospace" font-size="11.5" font-weight="700" fill="var(--ink)">IMAGE</text>
+  <text x="44" y="100" font-family="monospace" font-size="11" fill="var(--accent)">ITEM_ID «PK» «FK»　FILENAME «PK»</text>
+  <text x="44" y="120" font-size="11" fill="var(--ink)">复合主键 = ITEM_ID + FILENAME → <tspan font-weight="700">同一张图只能挂到同一 item 一次</tspan></text>
+
+  <!-- BAG -->
+  <rect x="440" y="14" width="410" height="126" rx="8" fill="var(--panel)" stroke="var(--line-strong)" stroke-width="1.4"/>
+  <text x="456" y="36" font-size="13" font-weight="700" fill="var(--java)">② Collection&lt;String&gt;（bag）　<tspan font-family="monospace" font-size="11" fill="var(--ink-faint)">new ArrayList&lt;&gt;()</tspan></text>
+  <text x="456" y="54" font-size="11.5" fill="var(--ink-soft)">允许重复、不保序（JDK 里<tspan font-weight="700">没有 bag 实现</tspan>，用 ArrayList，Hibernate 忽略索引）</text>
+  <rect x="456" y="62" width="378" height="66" rx="5" fill="var(--sql-soft)" stroke="var(--sql)"/>
+  <text x="468" y="82" font-family="monospace" font-size="11.5" font-weight="700" fill="var(--ink)">IMAGE</text>
+  <text x="468" y="100" font-family="monospace" font-size="11" fill="var(--accent)">IMAGE_ID «PK»</text><text x="580" y="100" font-family="monospace" font-size="11" fill="var(--ink-soft)">ITEM_ID «FK»　FILENAME</text>
+  <text x="468" y="120" font-size="11" fill="var(--ink)">引入<tspan font-weight="700">代理主键列</tspan> → 同一 ITEM_ID 下 FILENAME 可以重复</text>
+
+  <!-- LIST -->
+  <rect x="16" y="152" width="410" height="126" rx="8" fill="var(--panel)" stroke="var(--line-strong)" stroke-width="1.4"/>
+  <text x="32" y="174" font-size="13" font-weight="700" fill="var(--java)">③ List&lt;String&gt;　<tspan font-family="monospace" font-size="11" fill="var(--ink-faint)">new ArrayList&lt;&gt;()</tspan></text>
+  <text x="32" y="192" font-size="11.5" fill="var(--ink-soft)">保序，允许重复　<tspan font-family="monospace" fill="var(--accent)">@OrderColumn</tspan>（默认列名 IMAGES_ORDER，索引从 0 起）</text>
+  <rect x="32" y="200" width="378" height="66" rx="5" fill="var(--sql-soft)" stroke="var(--sql)"/>
+  <text x="44" y="220" font-family="monospace" font-size="11.5" font-weight="700" fill="var(--ink)">IMAGE</text>
+  <text x="44" y="238" font-family="monospace" font-size="11" fill="var(--accent)">ITEM_ID «PK» «FK»　IMAGES_ORDER «PK»</text><text x="330" y="238" font-family="monospace" font-size="11" fill="var(--ink-soft)">FILENAME</text>
+  <text x="44" y="258" font-size="11" fill="var(--danger)">Hibernate 要求索引<tspan font-weight="700">连续</tspan>；有空洞时加载会补 null 元素</text>
+
+  <!-- MAP -->
+  <rect x="440" y="152" width="410" height="126" rx="8" fill="var(--panel)" stroke="var(--line-strong)" stroke-width="1.4"/>
+  <text x="456" y="174" font-size="13" font-weight="700" fill="var(--java)">④ Map&lt;String,String&gt;　<tspan font-family="monospace" font-size="11" fill="var(--ink-faint)">new HashMap&lt;&gt;()</tspan></text>
+  <text x="456" y="192" font-size="11.5" fill="var(--ink-soft)"><tspan font-family="monospace" fill="var(--accent)">@MapKeyColumn</tspan> 指定键列，<tspan font-family="monospace" fill="var(--accent)">@Column</tspan> 指定值列</text>
+  <rect x="456" y="200" width="378" height="66" rx="5" fill="var(--sql-soft)" stroke="var(--sql)"/>
+  <text x="468" y="220" font-family="monospace" font-size="11.5" font-weight="700" fill="var(--ink)">IMAGE</text>
+  <text x="468" y="238" font-family="monospace" font-size="11" fill="var(--accent)">ITEM_ID «PK» «FK»　FILENAME «PK»</text><text x="740" y="238" font-family="monospace" font-size="11" fill="var(--ink-soft)">IMAGENAME</text>
+  <text x="468" y="258" font-size="11" fill="var(--ink)">Map 不允许重复键 → <tspan font-weight="700">一个文件只能用一次</tspan></text>
+
+  <!-- code -->
+  <rect x="16" y="292" width="410" height="120" rx="8" fill="var(--code-bg)" stroke="var(--line-strong)"/>
+  <g font-family="monospace" font-size="11" fill="var(--ink)">
+    <text x="32" y="312" fill="var(--accent)">@ElementCollection</text>
+    <text x="32" y="328" fill="var(--accent)">@CollectionTable(name = "IMAGE",</text>
+    <text x="32" y="344" fill="var(--accent)">    joinColumns = @JoinColumn(name = "ITEM_ID"))</text>
+    <text x="32" y="360" fill="var(--accent)">@Column(name = "FILENAME")</text>
+    <text x="32" y="376">private Set&lt;String&gt; images = new HashSet&lt;&gt;();</text>
+    <text x="32" y="398" fill="var(--ink-faint)">// 不写 @CollectionTable → 默认表名 ITEM_IMAGES</text>
+  </g>
+
+  <rect x="440" y="292" width="410" height="120" rx="8" fill="var(--code-bg)" stroke="var(--line-strong)"/>
+  <g font-family="monospace" font-size="11" fill="var(--ink)">
+    <text x="456" y="312" fill="var(--accent)">@ElementCollection  @CollectionTable(name="IMAGE")</text>
+    <text x="456" y="328" fill="var(--accent)">@Column(name = "FILENAME")</text>
+    <text x="456" y="344" fill="var(--accent)">@GenericGenerator(name="sequence_gen", strategy="sequence")</text>
+    <text x="456" y="360" fill="var(--accent)">@org.hibernate.annotations.CollectionId(</text>
+    <text x="456" y="376" fill="var(--accent)">    columns = @Column(name = "IMAGE_ID"),</text>
+    <text x="456" y="392" fill="var(--accent)">    type = @Type(type="long"), generator="sequence_gen")</text>
+    <text x="456" y="406">private Collection&lt;String&gt; images = new ArrayList&lt;&gt;();</text>
+  </g>
+
+  <!-- list pitfall -->
+  <rect x="16" y="426" width="834" height="122" rx="8" fill="var(--danger-soft)" stroke="var(--danger)" stroke-width="1.6"/>
+  <text x="433" y="448" text-anchor="middle" font-size="13" font-weight="700" fill="var(--danger)">List 的性能陷阱：Hibernate 并没有你想的那么聪明</text>
+  <text x="36" y="472" font-size="11.5" fill="var(--ink)">列表里有 A、B、C 三张图，<tspan font-weight="700">删掉 A</tspan> 会发生什么？</text>
+  <rect x="36" y="482" width="180" height="26" rx="4" fill="var(--panel)" stroke="var(--danger)"/>
+  <text x="126" y="500" text-anchor="middle" font-family="monospace" font-size="10.5" fill="var(--danger)">1 条 DELETE（删 A 那行）</text>
+  <text x="226" y="500" font-size="14" fill="var(--ink-faint)">+</text>
+  <rect x="244" y="482" width="300" height="26" rx="4" fill="var(--panel)" stroke="var(--danger)"/>
+  <text x="394" y="500" text-anchor="middle" font-family="monospace" font-size="10.5" fill="var(--danger)">2 条 UPDATE（B、C 索引左移填补空洞）</text>
+  <text x="560" y="500" font-size="11.5" fill="var(--ink)">→ 删除元素<tspan font-weight="700">右边的每一个元素</tspan>都要一条 UPDATE</text>
+  <text x="36" y="524" font-size="11.5" fill="var(--ink)">手写 SQL 一条 UPDATE 就够了。<tspan font-weight="700">往列表中间插入也一样</tspan>：所有已有元素被逐个右移。</text>
+  <text x="36" y="542" font-size="11.5" fill="var(--sql)">唯一的安慰：<tspan font-family="monospace">clear()</tspan> 时 Hibernate 够聪明，只发一条 DELETE。</text>
+</svg>
+</div><figcaption>图 8-2 ~ 8-5　四种集合映射对应的表结构与主键构成</figcaption></figure>
+
+<div class="warn"><b>映射 List 之前请三思</b><p>第一反应总是想按用户录入顺序保存，因为之后往往也要按同样顺序展示。<b>但如果有别的排序依据（比如录入时间戳），应该在查询时排序，而不是把展示顺序存下来。</b>如果需要的展示顺序变了怎么办？<b>数据的展示顺序通常不是数据不可分割的一部分，而是一个正交的关注点。</b></p></div>
+
+<div class="tip"><b>Map 的键类型</b><p>例子用 <code>String</code> 作键，但 Hibernate 支持任意基本类型（<code>BigDecimal</code>、<code>Integer</code> 等）。键是 Java <b>枚举</b>时用 <code>@MapKeyEnumerated</code>；键是<b>时间类型</b>（如 <code>java.util.Date</code>）时用 <code>@MapKeyTemporal</code>。</p></div>
+
+<div class="filename">Ch08/mapping-collections/…/ch08/repositories/setofstrings/ItemRepository.java</div>
+<pre><code><span class="kw">public interface</span> ItemRepository <span class="kw">extends</span> JpaRepository&lt;Item, Long&gt; {
+
+    <span class="ann">@Query</span>(<span class="str">"select i from Item i <span class="hl">inner join fetch i.images</span> where i.id = :id"</span>)
+    Item findItemWithImages(<span class="ann">@Param</span>(<span class="str">"id"</span>) Long id);        <span class="cmt">// 用 JPQL 的 join fetch <b>急加载</b>集合</span>
+
+    <span class="ann">@Query</span>(value = <span class="str">"SELECT FILENAME FROM IMAGE WHERE ITEM_ID = ?1"</span>, nativeQuery = <span class="kw">true</span>)
+    Set&lt;String&gt; findImagesNative(Long id);                <span class="cmt">// 原生查询</span>
+}</code></pre>
+
+<div class="note"><b>一个值得思考的问题</b><p>只看 bag 那张 schema，你能说出 Java 侧是怎么映射的吗？<code>ITEM</code> 和 <code>IMAGE</code> 表<b>长得一模一样</b>：各有一个代理主键列和若干规范化的列，<b>每张表都可以映射成 <code>@Entity</code> 类</b>。但我们也可以选择用 JPA 的集合特性把 <code>IMAGE</code> 映射成集合，甚至带上组合生命周期。<b>这实际上是一个设计决定</b>：对这张表来说，一些预定义的查询与操作规则就够了，不需要更通用的 <code>@Entity</code> 映射。<b>做这个决定时，务必清楚理由和后果。</b></p></div>
+
+<h3 id="s18">8.1.8　排序（sorted）与有序（ordered）集合</h3>
+
+<figure><div class="fig-box">
+<svg viewBox="0 0 840 300" xmlns="http://www.w3.org/2000/svg" font-family="Inter,system-ui,sans-serif">
+  <rect x="20" y="20" width="390" height="126" rx="8" fill="var(--java-soft)" stroke="var(--java)" stroke-width="1.6"/>
+  <text x="215" y="44" text-anchor="middle" font-size="13.5" font-weight="700" fill="var(--java)">sorted 排序：<tspan font-weight="700">在内存里</tspan>用 Java Comparator 排</text>
+  <text x="215" y="66" text-anchor="middle" font-size="11.5" fill="var(--ink)">Hibernate 加载数据<tspan font-weight="700">之后</tspan>才排序　<span class="badge">Hibernate 扩展</span></text>
+  <text x="38" y="90" font-family="monospace" font-size="11" fill="var(--accent)">@org.hibernate.annotations.SortComparator(Xxx.class)</text>
+  <text x="38" y="106" font-family="monospace" font-size="11" fill="var(--ink)">private SortedMap&lt;String,String&gt; images = new TreeMap&lt;&gt;();</text>
+  <text x="38" y="126" font-family="monospace" font-size="11" fill="var(--accent)">@org.hibernate.annotations.SortNatural</text>
+  <text x="38" y="140" font-family="monospace" font-size="11" fill="var(--ink)">private SortedSet&lt;String&gt; images = new TreeSet&lt;&gt;();  <tspan fill="var(--ink-faint)">// 自然序，回落到 String#compareTo()</tspan></text>
+
+  <rect x="430" y="20" width="410" height="126" rx="8" fill="var(--sql-soft)" stroke="var(--sql)" stroke-width="1.6"/>
+  <text x="635" y="44" text-anchor="middle" font-size="13.5" font-weight="700" fill="var(--sql)">ordered 有序：<tspan font-weight="700">在数据库里</tspan>用 ORDER BY 排</text>
+  <text x="635" y="66" text-anchor="middle" font-size="11.5" fill="var(--ink)">Hibernate 给加载集合的 SQL 加上 ORDER BY 子句</text>
+  <text x="448" y="90" font-family="monospace" font-size="11" fill="var(--accent)">@org.hibernate.annotations.OrderBy(clause = "FILENAME desc")</text>
+  <text x="448" y="106" font-family="monospace" font-size="11" fill="var(--ink)">private Set&lt;String&gt; images = new <tspan font-weight="700">LinkedHashSet</tspan>&lt;&gt;();</text>
+  <text x="448" y="126" font-size="11" fill="var(--ink-soft)">另有 <tspan font-family="monospace">LinkedHashMap</tspan>（有序键值对）与 bag + ArrayList 版本</text>
+  <text x="448" y="140" font-size="11" fill="var(--ink-soft)">这些实现类都有<tspan font-weight="700">稳定的迭代顺序</tspan>，Hibernate 按序填充</text>
+
+  <rect x="20" y="158" width="820" height="66" rx="8" fill="var(--panel)" stroke="var(--line-strong)"/>
+  <text x="430" y="180" text-anchor="middle" font-size="13" font-weight="700" fill="var(--ink)">两个 @OrderBy 不是一回事</text>
+  <text x="38" y="202" font-size="11.5" fill="var(--ink)"><tspan font-family="monospace" font-weight="700" fill="var(--accent)">@org.hibernate.annotations.OrderBy</tspan>　参数是<tspan font-weight="700">纯 SQL 片段</tspan>，可用于<tspan font-weight="700">任何</tspan>集合。可调 SQL 函数（如 <tspan font-family="monospace">substring(FILENAME,0,3) desc</tspan>），</text>
+  <text x="52" y="218" font-size="11.5" fill="var(--ink)">但要确认 DBMS 支持该函数；还能用 SQL:2003 的 <tspan font-family="monospace">ORDER BY … NULLS FIRST|LAST</tspan>，Hibernate 会自动翻译成你的方言</text>
+
+  <rect x="20" y="230" width="820" height="60" rx="8" fill="var(--panel)" stroke="var(--line-strong)"/>
+  <text x="38" y="252" font-size="11.5" fill="var(--ink)"><tspan font-family="monospace" font-weight="700" fill="var(--java)">@javax.persistence.OrderBy</tspan>　参数<tspan font-weight="700">不是 SQL</tspan>，而是 <tspan font-family="monospace">someProperty DESC|ASC</tspan>。<tspan font-family="monospace">String</tspan>/<tspan font-family="monospace">Integer</tspan> 这类元素<tspan font-weight="700">没有属性</tspan>，</text>
+  <text x="52" y="270" font-size="11.5" fill="var(--ink)">所以用在基本类型集合上时，规范说「按基本对象的<tspan font-weight="700">值</tspan>排序」——你只能改方向（asc/desc），不能改排序依据</text>
+  <text x="52" y="286" font-size="11.5" fill="var(--sql)">元素类是有持久化属性的<tspan font-weight="700">非基本类型</tspan>时（§8.2.2），才该用 JPA 的这个注解，如 <tspan font-family="monospace">@OrderBy("filename DESC, width DESC")</tspan></text>
+</svg>
+</div><figcaption>图 8-A　内存排序 vs 数据库排序，以及两个同名注解的区别</figcaption></figure>
+
+<div class="pit"><b>有序集合的可靠性问题</b><p>有序集合的元素<b>只在刚加载时</b>处于期望的顺序。<b>一旦添加或删除元素，迭代顺序就可能不再是「按文件名」了</b> —— 它们的行为和普通的 linked set/map/list 一样。<b>作者的结论：这个技术方案有其缺陷，算不上可靠的解决办法。</b>另外，<b>bag 无法排序</b>（没有 TreeBag），list 元素的索引已经预定义了它们的顺序。</p></div>
+
+<h2 id="s2"><span class="num">8.2</span>组件（可嵌入类）的集合</h2>
+
+<p>真实系统里往往不止存图片名和文件名，还要 title、width、height。这正是<b>组件集合</b>的完美用例。</p>
+
+<h3 id="s21">8.2.1　组件实例的相等性：一个必须理解的连锁反应</h3>
+
+<pre><code>someItem.addImage(<span class="kw">new</span> Image(<span class="str">"background.jpg"</span>, 640, 480));
+someItem.addImage(<span class="kw">new</span> Image(<span class="str">"foreground.jpg"</span>, 800, 600));
+someItem.addImage(<span class="kw">new</span> Image(<span class="str">"landscape.jpg"</span>, 1024, 768));
+someItem.addImage(<span class="kw">new</span> Image(<span class="str">"landscape.jpg"</span>, 1024, 768));   <span class="cmt">← 完全一样的值</span>
+
+assertEquals(<span class="hl">3</span>, someItem.getImages().size());   <span class="cmt">// 你期望是 4 吗？</span></code></pre>
+
+<div class="warn"><p>如果不重写，Java 的常规相等性检查依赖<b>标识</b>（<code>Object#equals()</code> 用 <code>a==b</code>），集合里会有<b>四个</b> <code>Image</code>。对这个用例来说，<b>三</b>才是「正确」答案。</p></div>
+
+<figure><div class="fig-box">
+<svg viewBox="0 0 840 300" xmlns="http://www.w3.org/2000/svg" font-family="Inter,system-ui,sans-serif">
+  <defs><marker id="eq8" markerWidth="9" markerHeight="9" refX="8" refY="4.5" orient="auto"><path d="M0 0 L9 4.5 L0 9 z" fill="var(--accent)"/></marker></defs>
+  <rect x="20" y="20" width="360" height="120" rx="8" fill="var(--java-soft)" stroke="var(--java)" stroke-width="1.6"/>
+  <text x="200" y="44" text-anchor="middle" font-size="13" font-weight="700" fill="var(--java)">Java 侧：按值实现 equals/hashCode</text>
+  <text x="38" y="68" font-family="monospace" font-size="11" fill="var(--ink)">return width == image.width</text>
+  <text x="38" y="84" font-family="monospace" font-size="11" fill="var(--ink)">    &amp;&amp; height == image.height</text>
+  <text x="38" y="100" font-family="monospace" font-size="11" fill="var(--ink)">    &amp;&amp; filename.equals(image.filename)</text>
+  <text x="38" y="116" font-family="monospace" font-size="11" fill="var(--accent)">    &amp;&amp; item.equals(image.item);   // ← 见下</text>
+  <text x="200" y="134" text-anchor="middle" font-size="11" fill="var(--ink-soft)">hashCode 必须满足契约：相等则哈希相同</text>
+
+  <path d="M390 80 L440 80" stroke="var(--accent)" stroke-width="2" marker-end="url(#eq8)"/>
+  <text x="415" y="72" text-anchor="middle" font-size="10.5" fill="var(--accent)">对应</text>
+
+  <rect x="460" y="20" width="360" height="120" rx="8" fill="var(--sql-soft)" stroke="var(--sql)" stroke-width="1.6"/>
+  <text x="640" y="44" text-anchor="middle" font-size="13" font-weight="700" fill="var(--sql)">数据库侧：复合主键</text>
+  <text x="478" y="70" font-size="11.5" fill="var(--ink)">Hibernate 生成的 schema 把集合表<tspan font-weight="700">所有非空列</tspan></text>
+  <text x="478" y="88" font-size="11.5" fill="var(--ink)">放进复合主键：<tspan font-family="monospace" fill="var(--accent)">ITEM_ID + FNAME + WIDTH + HEIGHT</tspan></text>
+  <text x="478" y="112" font-size="11.5" fill="var(--ink)">列必须非空 —— <tspan font-weight="700">我们无法标识自己不知道的东西</tspan></text>
+  <text x="478" y="130" font-size="11.5" fill="var(--ink-soft)">这与 Java 类里的相等性实现互相呼应</text>
+
+  <rect x="20" y="156" width="800" height="60" rx="8" fill="var(--warn-soft)" stroke="var(--warn)"/>
+  <text x="420" y="178" text-anchor="middle" font-size="12.5" font-weight="700" fill="var(--warn)">不对称问题：为什么 equals 里要带上 item</text>
+  <text x="38" y="200" font-size="11.5" fill="var(--ink)">数据库主键<tspan font-weight="700">包含</tspan> ITEM_ID，所以不同 item 的图片天然可区分；但如果 Java 侧 equals 里<tspan font-weight="700">不含</tspan> item，把不同 item 的图片混进一个 Set 就会出相等性问题。</text>
+
+  <rect x="20" y="224" width="800" height="66" rx="8" fill="var(--panel)" stroke="var(--line-strong)"/>
+  <text x="38" y="246" font-size="12" font-weight="700" fill="var(--ink)">解法：Hibernate 提供的<tspan font-weight="700">反向指针</tspan></text>
+  <text x="38" y="266" font-family="monospace" font-size="11.5" fill="var(--accent)">@Embeddable public class Image { … @org.hibernate.annotations.Parent private Item item; … }</text>
+  <text x="38" y="284" font-size="11.5" fill="var(--ink-soft)">加载 Image 实例时由 Hibernate 填充这个字段，于是可以把父 Item 纳入 equals()/hashCode()，与数据库主键<tspan font-weight="700">对称</tspan></text>
+</svg>
+</div><figcaption>图 8-B　组件相等性与集合表复合主键的对应关系</figcaption></figure>
+
+<div class="tip"><b>为什么第 6 章映射 <code>Address</code> 时没重写相等性？</b><p><b>说实话我们本该重写。</b>唯一的借口是：除非把可嵌入组件放进 <code>Set</code>、或者用作依赖 <code>equals()</code>/<code>hashCode()</code> 的 <code>Map</code> 的键（即不是 <code>TreeMap</code>，后者靠比较来排序定位），否则常规的标识相等性不会出问题。<b>最好在每个 <code>@Embeddable</code> 类上都重写这两个方法 —— 所有值类型都该「按值」比较。</b></p></div>
+
+<div class="pit"><b>Hibernate schema 生成器的一个小问题</b><p>如果给可嵌入类的属性标 <code>@NotNull</code> 而不是 <code>@Column(nullable=false)</code>，Hibernate <b>不会</b>为集合表的那一列生成 <code>NOT NULL</code> 约束 —— Bean Validation 校验正常，但<b>数据库 schema 缺了这条完整性规则</b>。<b>当可嵌入类被映射在集合里、且该属性应当是主键的一部分时，请用 <code>@Column(nullable=false)</code>。</b></p></div>
+
+<h3 id="s22">8.2.2–8.2.5　组件集合的四种形态</h3>
+
+<div class="tablewrap"><table>
+<thead><tr><th style="width:170px">形态</th><th>映射</th><th>集合表主键</th><th>可空性</th></tr></thead>
+<tbody>
+<tr><td><b>Set&lt;Image&gt;</b><br><span style="font-size:12px;color:var(--ink-faint)">setofembeddables</span></td><td><code>@ElementCollection</code> + <code>@CollectionTable(name="IMAGE")</code> + <code>@AttributeOverride</code>（改列名）</td><td><code>ITEM_ID</code> + <b>所有嵌入的非空列</b>（FNAME、WIDTH、HEIGHT）</td><td>所有属性都必须 <b>NOT NULL</b></td></tr>
+<tr><td><b>Collection&lt;Image&gt;</b>（bag）<br><span style="font-size:12px;color:var(--ink-faint)">bagofembeddables</span></td><td>加 <code>@org.hibernate.annotations.CollectionId</code> 引入代理键列 <code>IMAGE_ID</code></td><td><code>IMAGE_ID</code>（代理键）</td><td>属性<b>可以为空</b>（如 <code>title</code>）；记得在 equals 里用 <code>Objects.equals(title, image.title)</code></td></tr>
+<tr><td><b>Map&lt;String, Image&gt;</b><br><span style="font-size:12px;color:var(--ink-faint)">mapofstringsembeddables</span></td><td><code>@MapKeyColumn(name="TITLE")</code>（不写默认 <code>IMAGES_KEY</code>）</td><td><code>ITEM_ID</code> + <code>TITLE</code>（map 的键列）</td><td>其余列（含 <code>filename</code>）<b>可空</b>，因为不属于主键</td></tr>
+<tr><td><b>Map&lt;Filename, Image&gt;</b><br><span style="font-size:12px;color:var(--ink-faint)">mapofembeddables</span></td><td>键和值<b>都是可嵌入类型</b>，<b>不需要任何特殊注解</b></td><td><code>ITEM_ID</code> + <code>NAME</code>（<code>Filename</code> 的列）</td><td>作键的可嵌入类的列<b>都不能为空</b>（全是复合主键的一部分），且必须重写 equals/hashCode</td></tr>
+</tbody></table></div>
+
+<div class="cols">
+<div>
+<div class="filename">setofembeddables/Item.java</div>
+<pre><code><span class="ann">@Entity</span>
+<span class="kw">public class</span> Item {
+    <span class="ann">@ElementCollection</span>              <span class="cmt">// 泛型声明已告知目标是 @Embeddable</span>
+    <span class="ann">@CollectionTable</span>(name = <span class="str">"IMAGE"</span>) <span class="cmt">// 否则默认 ITEM_IMAGES</span>
+    <span class="ann">@AttributeOverride</span>(
+            name = <span class="str">"filename"</span>,
+            column = <span class="ann">@Column</span>(name = <span class="str">"FNAME"</span>, nullable = <span class="kw">false</span>))
+    <span class="kw">private</span> Set&lt;Image&gt; images = <span class="kw">new</span> HashSet&lt;&gt;();
+}</code></pre>
+</div>
+<div>
+<div class="filename">setofembeddablesorderby/Item.java —— JPA 的 @OrderBy</div>
+<pre><code><span class="ann">@ElementCollection</span>
+<span class="ann">@CollectionTable</span>(name = <span class="str">"IMAGE"</span>)
+<span class="ann">@OrderBy</span>(<span class="str">"filename DESC, width DESC"</span>)   <span class="cmt">// ← 参数是<b>属性名</b></span>
+<span class="kw">private</span> Set&lt;Image&gt; images = <span class="kw">new</span> LinkedHashSet&lt;&gt;();</code></pre>
+<p style="font-size:14px">参数是 <code>Image</code> 类的<b>属性</b>加 <code>ASC</code>/<code>DESC</code>（默认升序）。<b>这与接受纯 SQL 的 Hibernate 私有 <code>@OrderBy</code> 不同。</b></p>
+</div>
+</div>
+
+<div class="warn"><b>用 <code>Filename</code> 作 Map 键时的限制</b><p><b>不能</b>使用 <code>@MapKeyColumn</code> 和 <code>@AttributeOverrides</code> —— 当 map 的键是 <code>@Embeddable</code> 类时它们<b>不起作用</b>。另外，因为 map 的键构成一个集合，每个 <code>Filename</code> 在给定键集合内<b>必须唯一</b>，所以必须重写 <code>equals()</code>/<code>hashCode()</code>。</p></div>
+
+<h3 id="s26">8.2.6　可嵌入组件内部的集合</h3>
+
+<div class="cols">
+<div>
+<div class="filename">embeddablesetofstrings/Address.java</div>
+<pre><code><span class="ann">@Embeddable</span>
+<span class="kw">public class</span> Address {
+    <span class="ann">@NotNull</span> <span class="ann">@Column</span>(nullable = <span class="kw">false</span>) <span class="kw">private</span> String street;
+    <span class="ann">@NotNull</span> <span class="ann">@Column</span>(nullable = <span class="kw">false</span>, length = 5) <span class="kw">private</span> String zipcode;
+    <span class="ann">@NotNull</span> <span class="ann">@Column</span>(nullable = <span class="kw">false</span>) <span class="kw">private</span> String city;
+
+    <span class="ann">@ElementCollection</span>                     <span class="cmt">❶ 唯一必需的注解</span>
+    <span class="ann">@CollectionTable</span>(
+            name = <span class="str">"CONTACT"</span>,               <span class="cmt">❷ 默认 USER_CONTACTS</span>
+            joinColumns = <span class="ann">@JoinColumn</span>(name = <span class="str">"USER_ID"</span>))  <span class="cmt">❸ 默认 USER_ID</span>
+    <span class="ann">@Column</span>(name = <span class="str">"NAME"</span>, nullable = <span class="kw">false</span>)   <span class="cmt">❹ 默认 CONTACTS</span>
+    <span class="kw">private</span> Set&lt;String&gt; contacts = <span class="kw">new</span> HashSet&lt;&gt;();
+}</code></pre>
+</div>
+<div>
+<div class="fig-box">
+<svg viewBox="0 0 340 190" xmlns="http://www.w3.org/2000/svg" font-family="Inter,system-ui,sans-serif">
+  <defs><marker id="c8f" markerWidth="9" markerHeight="9" refX="8" refY="4.5" orient="auto"><path d="M0 0 L9 4.5 L0 9 z" fill="var(--accent)"/></marker></defs>
+  <rect x="14" y="20" width="130" height="120" rx="7" fill="var(--sql-soft)" stroke="var(--sql)" stroke-width="1.6"/>
+  <text x="79" y="40" text-anchor="middle" font-size="11" font-style="italic" fill="var(--ink-faint)">« Table »</text>
+  <text x="79" y="58" text-anchor="middle" font-size="13" font-weight="700" fill="var(--ink)">USERS</text>
+  <line x1="14" y1="66" x2="144" y2="66" stroke="var(--sql)"/>
+  <g font-family="monospace" font-size="10.5" fill="var(--ink-soft)">
+    <text x="26" y="84" fill="var(--accent)">ID «PK»</text>
+    <text x="26" y="100">STREET</text>
+    <text x="26" y="116">ZIPCODE</text>
+    <text x="26" y="132">CITY</text>
+  </g>
+  <path d="M200 76 L152 76" stroke="var(--accent)" stroke-width="1.6" marker-end="url(#c8f)"/>
+  <text x="176" y="68" text-anchor="middle" font-size="9.5" fill="var(--accent)">FK</text>
+  <rect x="200" y="30" width="130" height="90" rx="7" fill="var(--sql-soft)" stroke="var(--sql)" stroke-width="1.6"/>
+  <text x="265" y="50" text-anchor="middle" font-size="11" font-style="italic" fill="var(--ink-faint)">« Table »</text>
+  <text x="265" y="68" text-anchor="middle" font-size="13" font-weight="700" fill="var(--ink)">CONTACT</text>
+  <line x1="200" y1="76" x2="330" y2="76" stroke="var(--sql)"/>
+  <g font-family="monospace" font-size="10" fill="var(--accent)">
+    <text x="210" y="94">USER_ID «PK» «FK»</text>
+    <text x="210" y="110">NAME «PK»</text>
+  </g>
+  <text x="170" y="162" text-anchor="middle" font-size="10.5" fill="var(--ink)">复合主键防止重复元素 → 用 Set 是合适的</text>
+  <text x="170" y="180" text-anchor="middle" font-size="10.5" fill="var(--ink-soft)">也可以映射成 list / bag / map，甚至组件的集合</text>
+</svg>
+</div>
+</div>
+</div>
+
+<div class="pit"><b>克制</b><p>Hibernate 在组件映射和细粒度模型上给了很大自由，<b>但要意识到：代码被阅读的次数远多于被编写的次数。想想几年后要维护这段代码的下一个开发者。</b></p></div>
+
+<h2 id="s3"><span class="num">8.3</span>映射实体关联</h2>
+
+<div class="note"><b>先厘清「父/子」这个词</b>
+<p>我们其实<b>已经映射过父/子关系了</b>：父是实体 <code>Item</code>，多个子是<b>值类型</b>（<code>Image</code> 集合）。删除 <code>Item</code> 时它的 <code>Image</code> 集合也随之删除 —— 子完全依赖父，永远和父一起保存、更新、删除，绝不单独存在。</p>
+<p style="margin-top:6px">现在要映射的是<b>另一种关系：两个实体类之间的关联</b>。它们的实例<b>没有依赖的生命周期</b>，一个可以独立于另一个被保存、更新、删除。当然实体之间有时也存在依赖，但我们需要<b>比完全依赖的嵌入类型更细粒度的控制</b>。</p>
+<p style="margin-top:6px"><b>「父/子」这个术语很含混，人人有自己的定义，从现在起我们不再用它</b>，改用更精确、至少是定义明确的词汇。</p></div>
+
+<h3 id="s31">8.3.1　最简单的关联：单向多对一</h3>
+<p><span class="badge">源码目录 mapping-associations</span></p>
+
+<div class="cols">
+<div>
+<div class="filename">…/ch08/onetomany/bidirectional/Bid.java</div>
+<pre><code><span class="ann">@Entity</span>
+<span class="kw">public class</span> Bid {
+    <span class="ann">@ManyToOne</span>(fetch = FetchType.LAZY)
+    <span class="ann">@JoinColumn</span>(name = <span class="str">"ITEM_ID"</span>, nullable = <span class="kw">false</span>)
+    <span class="kw">private</span> Item item;
+}</code></pre>
+<div class="keyhint"><span class="k">@ManyToOne</span><span><b>必需</b>，标记属性是实体关联。<code>fetch</code> 默认 <b><code>EAGER</code></b>（加载 Bid 时连带加载 Item）；<b>作者更倾向把懒加载作为默认策略</b>（§12.1.1）。</span></div>
+<div class="keyhint"><span class="k">连接列（join column）</span><span>多对一关联天然映射到外键列。<b>默认名就是 <code>ITEM_ID</code></b>：目标实体名 + 下划线 + 其标识符属性名。</span></div>
+<div class="keyhint"><span class="k">这里为何还写 @JoinColumn</span><span><b>不是为了改名，而是为了让生成的 SQL schema 里这个外键列是 <code>NOT NULL</code></b> —— 出价必须指向某个商品，不能独立存在（<b>这已经暗示了某种生命周期依赖</b>）。等价写法：<code>@ManyToOne(optional = false)</code> 或 Bean Validation 的 <code>@NotNull</code>。</span></div>
+</div>
+<div>
+<div class="tip"><b>这条建议非常重要</b>
+<p><b>这就完了。而且必须意识到：不用其他任何东西，你也能写出一个完整而复杂的应用。</b></p>
+<p style="margin-top:6px">不需要映射这个关系的另一端，可以<b>忽略</b> <code>Item</code> → <code>Bid</code> 的一对多关联。数据库 schema 里只有一个外键列，我们已经映射过它了。</p>
+<p style="margin-top:6px"><b>我们是认真的：当你看到一个外键列和两个实体类时，多半应该只用 <code>@ManyToOne</code> 映射它，别的什么都不要。</b></p></div>
+<p>调 <code>someBid.getItem()</code> 就能拿到出价对应的商品，JPA 提供者会解引用外键并加载 <code>Item</code>，也会管理外键值。</p>
+<p><b>那怎么拿到某个 item 的全部出价？</b>写查询即可：</p>
+<pre><code><span class="cmt">// JPQL</span>
+select b <span class="kw">from</span> Bid b <span class="kw">where</span> b.item = :itemParameter</code></pre>
+<p style="font-size:14px">当然，我们之所以用 Hibernate / Spring Data JPA，正是因为<b>大多数情况下不想自己写和执行这条查询</b>。</p>
+</div>
+</div>
+
+<h3 id="s32">8.3.2　把它变成双向</h3>
+
+<div class="cols">
+<div>
+<div class="card">
+<h4>映射 <code>Item#bids</code> 的收益</h4>
+<p>① 调 <code>someItem.getBids()</code> 并开始遍历时，自动执行 <code>SELECT * from BID where ITEM_ID = ?</code>。</p>
+<p>② 可以把状态变更从 <code>Item</code> <b>级联</b>到集合中被引用的所有 <code>Bid</code>，并<b>选择</b>哪些生命周期事件是传递性的。</p>
+<p style="margin-bottom:0"><b>这个清单不算长。</b>一对多映射的主要好处是<b>导航式数据访问</b> —— 这是 ORM 的核心承诺之一：只调用自己 Java 领域模型的方法就能访问数据，ORM 引擎负责聪明地加载所需数据。</p>
+</div>
+</div>
+<div>
+<div class="pit"><b>但请先做三个自问</b>
+<p><b>① 数据库里会有任何表带 <code>BID_ID</code> 外键列吗？</b>如果没有，就把 <code>Bid</code> 映射成 <code>@Embeddable</code> 而非 <code>@Entity</code> —— 用同样的表，但换一种映射、带上固定的传递性状态变更规则。如果有别的表引用某个 BID 行，那就需要一个<b>共享的 <code>Bid</code> 实体</b>，它不能被嵌入到 <code>Item</code> 里。</p>
+<p style="margin-top:6px"><b>② 应用里会多频繁地调 <code>someItem.getBids()</code> 并按预定义顺序访问/展示全部出价？</b>如果只想展示<b>子集</b>、或每次需要<b>不同顺序</b>，反正都得手写查询 —— 那么这个一对多映射及其集合就<b>只是维护包袱</b>。</p>
+<p style="margin-top:6px"><b>③ 代价是额外的 Java 代码和显著更高的复杂度</b>，作者的经验是：<b>这是问题和 bug 的常见来源，尤其对 ORM 新手。选择映射集合这件事，应该慎之又慎。</b></p>
+<p style="margin-top:6px">CaveatEmptor 的答案是「是」—— 我们会频繁调 <code>getBids()</code> 展示给想参与拍卖的用户。</p></div>
+</div>
+</div>
+
+<div class="filename">…/ch08/onetomany/bidirectional/Item.java</div>
+<pre><code><span class="ann">@Entity</span>
+<span class="kw">public class</span> Item {
+    <span class="ann">@OneToMany</span>(<span class="hl">mappedBy = "item"</span>, fetch = FetchType.LAZY)
+    <span class="kw">private</span> Set&lt;Bid&gt; bids = <span class="kw">new</span> HashSet&lt;&gt;();
+}</code></pre>
+
+<div class="keyhint"><span class="k">mappedBy 的含义</span><span>参数是「另一侧」属性的名字。<b>Bid 侧负责外键列 <code>ITEM_ID</code>（用 <code>@ManyToOne</code> 映射）</b>；<code>mappedBy</code> 告诉 Hibernate：「<b>用那个属性已经映射好的外键列来加载这个集合</b>」。<b>当一对多是双向的、且你已经映射了外键列时，<code>mappedBy</code> 总是必需的。</b></span></div>
+<div class="keyhint"><span class="k">fetch 默认值</span><span>集合映射的 <code>fetch</code> <b>默认永远是 <code>LAZY</code></b>，所以以后不用写这个选项。<b>这是个好默认值</b>；反过来的 <code>EAGER</code> 很少需要 —— 我们不希望每次加载 <code>Item</code> 都急切地把所有出价拉出来，它们应该在被访问时按需加载。</span></div>
+
+<h3 id="s33">8.3.3　级联状态：四个台阶</h3>
+
+<figure><div class="fig-box">
+<svg viewBox="0 0 860 560" xmlns="http://www.w3.org/2000/svg" font-family="Inter,system-ui,sans-serif">
+  <defs><marker id="st8" markerWidth="9" markerHeight="9" refX="8" refY="4.5" orient="auto"><path d="M0 0 L9 4.5 L0 9 z" fill="var(--accent)"/></marker></defs>
+
+  <!-- 0 -->
+  <rect x="20" y="14" width="820" height="94" rx="8" fill="var(--panel)" stroke="var(--line-strong)" stroke-width="1.4"/>
+  <text x="36" y="36" font-size="13" font-weight="700" fill="var(--ink)">台阶 0：什么都不级联 —— 各自独立管理</text>
+  <g font-family="monospace" font-size="11" fill="var(--ink)">
+    <text x="40" y="58">Item item = new Item("Foo");</text>
+    <text x="40" y="74">Bid bid  = new Bid(BigDecimal.valueOf(100), item);   Bid bid2 = new Bid(BigDecimal.valueOf(200), item);</text>
+    <text x="40" y="90" fill="var(--danger)">itemRepository.save(item);  item.addBid(bid);  item.addBid(bid2);  bidRepository.save(bid);  bidRepository.save(bid2);</text>
+  </g>
+  <text x="40" y="104" font-size="11" fill="var(--ink-soft)">对每个 bid 都调 save() 显得冗余 —— 但 Bid 有<tspan font-weight="700">完全独立的状态</tspan>，Bid 与 Item 的关系并不影响它们的生命周期</text>
+
+  <path d="M430 110 L430 128" stroke="var(--accent)" stroke-width="1.6" marker-end="url(#st8)"/>
+
+  <!-- 1 -->
+  <rect x="20" y="130" width="820" height="94" rx="8" fill="var(--sql-soft)" stroke="var(--sql)" stroke-width="1.6"/>
+  <text x="36" y="152" font-size="13" font-weight="700" fill="var(--sql)">台阶 1：<tspan font-family="monospace">CascadeType.PERSIST</tspan> —— 传递性持久化</text>
+  <text x="40" y="174" font-family="monospace" font-size="11" fill="var(--accent)">@OneToMany(mappedBy = "item", cascade = CascadeType.PERSIST)  private Set&lt;Bid&gt; bids = new HashSet&lt;&gt;();</text>
+  <text x="40" y="196" font-size="11.5" fill="var(--ink)">现在只需 <tspan font-family="monospace">item.addBid(bid); item.addBid(bid2); itemRepository.save(item);</tspan></text>
+  <text x="40" y="214" font-size="11.5" fill="var(--ink-soft)">提交时框架检查受管的 Item，查看 bids 集合，<tspan font-weight="700">内部对每个被引用的 Bid 调 save()</tspan>；<tspan font-family="monospace">BID.ITEM_ID</tspan> 的值取自各 Bid 的 <tspan font-family="monospace">item</tspan> 属性</text>
+
+  <path d="M430 226 L430 244" stroke="var(--accent)" stroke-width="1.6" marker-end="url(#st8)"/>
+
+  <!-- 2 -->
+  <rect x="20" y="246" width="820" height="94" rx="8" fill="var(--warn-soft)" stroke="var(--warn)" stroke-width="1.6"/>
+  <text x="36" y="268" font-size="13" font-weight="700" fill="var(--warn)">台阶 2：<tspan font-family="monospace">CascadeType.REMOVE</tspan> —— 级联删除</text>
+  <text x="40" y="290" font-family="monospace" font-size="11" fill="var(--accent)">cascade = {CascadeType.PERSIST, CascadeType.REMOVE}</text>
+  <text x="40" y="310" font-size="11.5" fill="var(--ink)">一行 <tspan font-family="monospace">itemRepository.delete(item)</tspan> 就够了 —— Hibernate 加载 bids 集合并对每个实例内部调 remove()</text>
+  <text x="40" y="328" font-size="11.5" fill="var(--danger)"><tspan font-weight="700">但这个过程低效</tspan>：必须<tspan font-weight="700">总是加载集合并逐个删除</tspan>。一条 <tspan font-family="monospace">delete from BID where ITEM_ID = ?</tspan> 就能达到同样效果 ——</text>
+
+  <rect x="20" y="342" width="820" height="34" rx="6" fill="var(--panel)" stroke="var(--line-strong)"/>
+  <text x="40" y="363" font-size="11.5" fill="var(--ink)">Hibernate <tspan font-weight="700">不知道</tspan>没人对 BID 表持有外键引用，它也<tspan font-weight="700">无法搜遍整个数据库</tspan>去找可能引用某个 BID_ID 的行。（若 bids 是<tspan font-weight="700">组件集合</tspan>，<tspan font-family="monospace">clear()</tspan> 会执行<tspan font-weight="700">单条 DELETE</tspan>，因为 Hibernate 假定没人能持有对它们的引用。）</text>
+
+  <path d="M430 378 L430 396" stroke="var(--accent)" stroke-width="1.6" marker-end="url(#st8)"/>
+
+  <!-- 3 -->
+  <rect x="20" y="398" width="820" height="76" rx="8" fill="var(--java-soft)" stroke="var(--java)" stroke-width="1.6"/>
+  <text x="36" y="420" font-size="13" font-weight="700" fill="var(--java)">台阶 3：<tspan font-family="monospace">orphanRemoval = true</tspan>（<tspan font-weight="700">仅</tspan> @OneToMany 可用）</text>
+  <text x="40" y="442" font-family="monospace" font-size="11" fill="var(--accent)">@OneToMany(mappedBy = "item", cascade = CascadeType.PERSIST, orphanRemoval = true)</text>
+  <text x="40" y="462" font-size="11.5" fill="var(--ink)">从集合中<tspan font-weight="700">移除</tspan>一个 Bid → 提交时 Hibernate 认为它成了孤儿，<tspan font-weight="700">自动发 SQL DELETE 永久删除它</tspan>。仍然<tspan font-weight="700">拿不到</tspan> clear() 的一次性 DELETE。</text>
+
+  <path d="M430 476 L430 494" stroke="var(--accent)" stroke-width="1.6" marker-end="url(#st8)"/>
+
+  <!-- 4 -->
+  <rect x="20" y="496" width="820" height="58" rx="8" fill="var(--accent-soft)" stroke="var(--accent)" stroke-width="1.8"/>
+  <text x="36" y="518" font-size="13" font-weight="700" fill="var(--accent)">台阶 4：数据库层 <tspan font-family="monospace">ON DELETE CASCADE</tspan> —— 最高效，但也最危险</text>
+  <text x="40" y="538" font-family="monospace" font-size="11" fill="var(--ink)">@org.hibernate.annotations.OnDelete(action = OnDeleteAction.CASCADE)</text>
+  <text x="40" y="552" font-size="11" fill="var(--ink-soft)">一条 DELETE 递归删掉全部依赖数据，<tspan font-weight="700">什么都不用加载进应用内存</tspan>；DDL：<tspan font-family="monospace">foreign key (ITEM_ID) references ITEM on delete cascade</tspan></text>
+</svg>
+</div><figcaption>图 8-C　从「手工管理」到「数据库级级联」的四个台阶，效率递增、风险也递增</figcaption></figure>
+
+<div class="tip"><b><code>@ManyToOne</code> 也有 cascade，但很少用</b><p>你没法真的说「保存 bid 时也保存 item」—— <b>item 必须事先存在</b>，否则这个 bid 在数据库里就是无效的。想想另一个可能的 <code>@ManyToOne</code>：<code>Item#seller</code> —— <b><code>User</code> 必须先存在，才能卖东西。</b></p></div>
+
+<h4>孤儿移除的经典陷阱：共享引用</h4>
+
+<figure><div class="fig-box">
+<svg viewBox="0 0 840 300" xmlns="http://www.w3.org/2000/svg" font-family="Inter,system-ui,sans-serif">
+  <defs><marker id="or8" markerWidth="9" markerHeight="9" refX="8" refY="4.5" orient="auto"><path d="M0 0 L9 4.5 L0 9 z" fill="var(--java)"/></marker></defs>
+  <rect x="40" y="20" width="120" height="40" rx="7" fill="var(--java-soft)" stroke="var(--java)" stroke-width="1.6"/>
+  <text x="100" y="45" text-anchor="middle" font-size="13" font-weight="700" fill="var(--ink)">Item</text>
+  <rect x="350" y="20" width="120" height="40" rx="7" fill="var(--java-soft)" stroke="var(--java)" stroke-width="1.6"/>
+  <text x="410" y="45" text-anchor="middle" font-size="13" font-weight="700" fill="var(--ink)">Bid</text>
+  <rect x="660" y="20" width="120" height="40" rx="7" fill="var(--java-soft)" stroke="var(--java)" stroke-width="1.6"/>
+  <text x="720" y="45" text-anchor="middle" font-size="13" font-weight="700" fill="var(--ink)">User</text>
+  <path d="M164 40 L344 40" stroke="var(--java)" stroke-width="1.6" marker-end="url(#or8)"/>
+  <text x="254" y="32" text-anchor="middle" font-size="10.5" fill="var(--ink-faint)">0..*　Item#bids</text>
+  <path d="M474 40 L654 40" stroke="var(--java)" stroke-width="1.6" marker-end="url(#or8)"/>
+  <text x="564" y="32" text-anchor="middle" font-size="10.5" fill="var(--ink-faint)">0..*　User#bids</text>
+  <text x="410" y="76" text-anchor="middle" font-size="11" fill="var(--ink-soft)">BID 表因此有 BIDDER_ID 外键列，指向 USERS</text>
+
+  <rect x="20" y="92" width="400" height="110" rx="8" fill="var(--danger-soft)" stroke="var(--danger)"/>
+  <text x="220" y="114" text-anchor="middle" font-size="12.5" font-weight="700" fill="var(--danger)">会失败的测试</text>
+  <g font-family="monospace" font-size="10.5" fill="var(--ink)">
+    <text x="36" y="136">item1.removeBid(firstBid);  itemRepository.save(item1);</text>
+    <text x="36" y="156" fill="var(--danger)">// assertEquals(1, user.getBids().size());  ← FAILURE</text>
+    <text x="36" y="174">assertEquals(2, user.getBids().size());   // 实际仍是 2</text>
+    <text x="36" y="194">assertEquals(1, bidRepository.findAll().size()); // 库里只剩 1</text>
+  </g>
+
+  <rect x="440" y="92" width="380" height="110" rx="8" fill="var(--warn-soft)" stroke="var(--warn)"/>
+  <text x="630" y="114" text-anchor="middle" font-size="12.5" font-weight="700" fill="var(--warn)">为什么</text>
+  <text x="456" y="136" font-size="11.5" fill="var(--ink)">Hibernate 认为被移除的 Bid 是孤儿、可删除，</text>
+  <text x="456" y="154" font-size="11.5" fill="var(--ink)">在数据库里自动删掉了它 —— <tspan font-weight="700">数据库状态是对的</tspan>，</text>
+  <text x="456" y="172" font-size="11.5" fill="var(--ink)">被删的 BID 行同时含 ITEM_ID 和 BIDDER_ID 两个外键。</text>
+  <text x="456" y="192" font-size="11.5" fill="var(--danger)"><tspan font-weight="700">但内存里我们仍在 User#bids 中持有对它的引用 → 不一致</tspan></text>
+
+  <rect x="20" y="216" width="800" height="72" rx="8" fill="var(--sql-soft)" stroke="var(--sql)" stroke-width="1.6"/>
+  <text x="420" y="238" text-anchor="middle" font-size="12.5" font-weight="700" fill="var(--sql)">根因与作者的建议</text>
+  <text x="38" y="258" font-size="11.5" fill="var(--ink)"><tspan font-weight="700">「引用从集合中移除时就删除实体实例」这条规则，天然与共享引用相冲突。</tspan></text>
+  <text x="38" y="278" font-size="11.5" fill="var(--ink)">与其用 orphanRemoval 甚至 CascadeType.REMOVE，<tspan font-weight="700">不如考虑更简单的映射</tspan>：把 Item#bids 做成 <tspan font-family="monospace">@ElementCollection</tspan>，Bid 变 <tspan font-family="monospace">@Embeddable</tspan> 并持有一个指向 User 的 <tspan font-family="monospace">@ManyToOne bidder</tspan>（可嵌入组件<tspan font-weight="700">可以</tspan>拥有指向实体的单向关联）；同时<tspan font-weight="700">去掉 User#bids</tspan>，需要时写查询 <tspan font-family="monospace">select b from Bid b where b.bidder = :userParameter</tspan></text>
+</svg>
+</div><figcaption>图 8-16 及其陷阱　孤儿移除遇上共享引用</figcaption></figure>
+
+<div class="tip"><b>什么时候可以放心开启孤儿移除</b><p>当数据库里<b>没有别的表对 BID 有外键引用</b>、删除 BID 行<b>没有任何后果</b>、且内存中对 bid 的<b>唯一引用</b>就在 <code>Item#bids</code> 里时。这时它是个很方便的选项：展现层从集合里移除一个元素就能删除数据，<b>只需操作领域模型实例，不用调服务</b>。</p></div>
+
+<div class="pit"><b>数据库级 ON DELETE CASCADE 的代价</b>
+<ul>
+<li>该选项<b>不影响 Hibernate 的运行期行为</b>，仍会遇到上面那个内存不一致问题。<b>内存中的数据可能不再准确反映数据库状态</b>；如果不小心，甚至可能保存一个自己或别人先前已删除的东西。</li>
+<li><code>Bid</code> 实例<b>不走常规生命周期</b>，<code>@PreRemove</code> 之类的回调<b>不会生效</b>。</li>
+<li>Hibernate <b>不会自动清理</b>可选的二级全局缓存，其中可能残留陈旧数据。</li>
+<li>本质上，这类问题与「另一个应用也在访问同一个数据库」或「有数据库触发器在改数据」是同一类问题。</li>
+</ul>
+<p style="margin-top:6px"><b>Hibernate 的一个怪癖</b>：<code>@OnDelete</code> <b>只影响 Hibernate 的 schema 生成</b>。影响 schema 生成的设置通常放在「另一侧」（映射了外键/连接列的那侧），也就是 <code>Bid</code> 的 <code>@ManyToOne</code> 旁边；<b>但当关联是双向映射时，Hibernate 只在 <code>@OneToMany</code> 一侧识别它。</b>另外<b>这在 MySQL 上不工作</b>，所以书里这个例子改用 H2 演示。</p></div>
+
+<div class="tip"><b>新 schema 的最省心做法</b><p><b>不启用数据库级级联</b>，而是把领域模型里的组合关系映射成 <b>embedded/embeddable</b>，而不是实体关联 —— 这样框架就能执行高效的 SQL DELETE 一次性删掉整个组合。也就是：<b>如果能避免共享引用，就把 <code>Bid</code> 作为 <code>Item</code> 里的 <code>@ElementCollection</code> 映射，而不是带 <code>@ManyToOne</code>/<code>@OneToMany</code> 的独立实体。</b>或者，干脆<b>一个集合都不映射</b>，只用最简单的映射：<code>@Entity</code> 类之间单向的、带 <code>@ManyToOne</code> 的外键列。</p></div>
+
+<div class="summary" id="s4">
+<h3>本章小结</h3>
+<ul>
+<li>用简单的集合映射（如 <code>Set&lt;String&gt;</code>）就能用上一整套丰富的接口与实现；<b>集合表的主键构成随集合类型而变</b>：Set = FK+值列，bag = 代理键，List = FK+索引列，Map = FK+键列。</li>
+<li>可以用<b>排序集合</b>（内存中用 Comparator），也可以用 Hibernate 的选项<b>让数据库按期望顺序返回</b>元素（<code>@OrderBy</code>）—— 但要清楚有序集合只在刚加载时有序。</li>
+<li>可以使用用户自定义可嵌入类型的复杂集合：组件的 set、bag 和 map；<b>组件<u>既能作 Map 的值，也能作 Map 的键</u></b>。</li>
+<li>可嵌入组件<b>自己也能拥有集合</b>。</li>
+<li>值类型集合必须重写 <b><code>equals()</code>/<code>hashCode()</code>「按值」比较</b>，它与集合表的<b>复合主键</b>互相呼应；必要时用 <code>@org.hibernate.annotations.Parent</code> 拿到反向指针来保持对称。</li>
+<li>把<b>第一个外键列映射成实体多对一关联</b>（<code>@ManyToOne</code>）是最简单也最重要的一步 —— <b>只用它就能写出完整的应用</b>；一对多集合是可选的，主要价值是<b>导航式访问</b>与<b>级联</b>，代价是复杂度。</li>
+<li>级联有四个台阶：手工 → <code>CascadeType.PERSIST</code> → <code>CascadeType.REMOVE</code> → <code>orphanRemoval</code> → 数据库 <code>ON DELETE CASCADE</code>；<b>越往后越高效，也越容易与共享引用冲突、造成内存与数据库状态不一致</b>。</li>
+</ul>
+</div>
+
+<div class="pager">
+  <a href="ch07.html">← 第 7 章　映射继承</a>
+  <a href="ch09.html">第 9 章　高级实体关联映射 →</a>
+</div>
+</main>
+</div>
+</body>
+</html>

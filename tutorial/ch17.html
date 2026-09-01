@@ -1,0 +1,915 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>第 17 章 · 使用 Spring Data MongoDB</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="topbar"><div class="topbar-inner">
+  <a class="brand" href="index.html">Java Persistence 讲义</a>
+  <span class="spacer"></span>
+  <a href="ch16.html">← 上一章</a>
+  <a href="index.html">目录</a>
+  <a href="ch18.html">下一章 →</a>
+</div></div>
+
+<div class="wrap">
+<nav class="toc">
+  <h4>本章目录</h4>
+  <a href="#s1">17.1 MongoDB 简介</a>
+  <a href="#s2">17.2 Spring Data MongoDB</a>
+  <a class="sub" href="#s21">依赖与配置</a>
+  <a class="sub" href="#s22">注解总览</a>
+  <a class="sub" href="#s23">User 文档类</a>
+  <a href="#s3">17.3 MongoRepository</a>
+  <a class="sub" href="#s31">查询方法</a>
+  <a class="sub" href="#s32">限制、排序、分页</a>
+  <a class="sub" href="#s33">流式结果</a>
+  <a class="sub" href="#s34">@Query 注解</a>
+  <a href="#s4">17.4 Query by Example</a>
+  <a href="#s5">17.5 引用其他文档</a>
+  <a href="#s6">17.6 MongoTemplate</a>
+  <a href="#s7">两者对比</a>
+  <a href="#s8">本章小结</a>
+</nav>
+
+<main>
+<div class="hero">
+  <div class="eyebrow">Part 5 · 用 Spring 连接 NoSQL 数据库</div>
+  <h1>第 17 章　使用 Spring Data MongoDB</h1>
+  <p><b>面向文档的数据库</b>是 NoSQL 数据库的一种，信息以键/值存储的形式保存。MongoDB 就是这样一个数据库程序。Spring Data MongoDB 作为 Spring Data 大伞项目的一部分，让 Java 程序能够方便地与 MongoDB 文档数据库交互。本章会用<b>两条路线</b>访问 MongoDB：<code>MongoRepository</code> 和 <code>MongoTemplate</code>，并对比它们的优劣与适用场景。</p>
+</div>
+
+<div class="note"><b>本章的三个源码工程</b><p><code>Ch17/springdatamongodb</code>（MongoRepository、查询、分页、QBE）、<code>springdatamongodb2</code>（DBRef 文档引用）、<code>springdatamongodb3</code>（MongoTemplate）。<b>本章没有 <code>.sql</code> 脚本</b>——数据库不是关系型的，你需要先安装并启动本机的 MongoDB。</p></div>
+
+<h2 id="s1"><span class="num">17.1</span> MongoDB 简介</h2>
+
+<p>MongoDB 是一个<b>开源的、面向文档的 NoSQL 数据库</b>。它用类 JSON 的文档来存储信息，核心概念有三个：</p>
+
+<figure>
+<div class="fig-box">
+<svg viewBox="0 0 820 420" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="RDBMS 与 MongoDB 的术语对照">
+  <text x="205" y="26" text-anchor="middle" font-size="13.5" font-weight="700" fill="var(--sql)">关系数据库（RDBMS）</text>
+  <text x="615" y="26" text-anchor="middle" font-size="13.5" font-weight="700" fill="var(--accent)">MongoDB</text>
+
+  <!-- RDBMS -->
+  <rect x="30" y="42" width="350" height="230" rx="10" fill="var(--sql-soft)" stroke="var(--sql)"/>
+  <text x="46" y="64" font-size="12" font-weight="700" fill="var(--ink)">Database（数据库）</text>
+  <rect x="46" y="74" width="318" height="182" rx="8" fill="var(--panel)" stroke="var(--line-strong)"/>
+  <text x="60" y="94" font-size="11.5" font-weight="700" fill="var(--ink)">Table（表）　USERS</text>
+  <rect x="60" y="104" width="290" height="140" rx="6" fill="var(--bg)" stroke="var(--line)"/>
+  <g font-size="10.5" font-family="var(--mono)">
+    <rect x="68" y="112" width="274" height="24" fill="var(--sql-soft)" stroke="var(--line)"/>
+    <text x="76" y="128" fill="var(--ink)">ID  USERNAME  EMAIL  LEVEL  ACTIVE</text>
+    <text x="205" y="150" text-anchor="middle" font-size="10" font-family="var(--sans)" fill="var(--ink-faint)">↑ Column（列）—— 结构固定</text>
+    <rect x="68" y="158" width="274" height="22" fill="var(--panel)" stroke="var(--line)"/>
+    <text x="76" y="173" fill="var(--ink-soft)">1   john      j@..   1      true</text>
+    <rect x="68" y="182" width="274" height="22" fill="var(--panel)" stroke="var(--line)"/>
+    <text x="76" y="197" fill="var(--ink-soft)">2   beth      b@..   2      true</text>
+    <text x="205" y="220" text-anchor="middle" font-size="10" font-family="var(--sans)" fill="var(--ink-faint)">↑ Row（行）—— 每行列数相同</text>
+  </g>
+
+  <!-- arrows -->
+  <g font-size="11" text-anchor="middle" fill="var(--ink-faint)">
+    <path d="M390 100 L430 100" stroke="var(--ink-faint)" stroke-width="1.4" marker-end="url(#a17)"/>
+    <path d="M390 140 L430 140" stroke="var(--ink-faint)" stroke-width="1.4" marker-end="url(#a17)"/>
+    <path d="M390 180 L430 180" stroke="var(--ink-faint)" stroke-width="1.4" marker-end="url(#a17)"/>
+    <path d="M390 220 L430 220" stroke="var(--ink-faint)" stroke-width="1.4" marker-end="url(#a17)"/>
+  </g>
+  <defs><marker id="a17" markerWidth="9" markerHeight="9" refX="8" refY="4.5" orient="auto"><path d="M0 0 L9 4.5 L0 9 z" fill="var(--ink-faint)"/></marker></defs>
+
+  <!-- Mongo -->
+  <rect x="440" y="42" width="350" height="230" rx="10" fill="var(--accent-soft)" stroke="var(--accent)"/>
+  <text x="456" y="64" font-size="12" font-weight="700" fill="var(--ink)">Database（数据库）—— 集合的容器</text>
+  <rect x="456" y="74" width="318" height="182" rx="8" fill="var(--panel)" stroke="var(--line-strong)"/>
+  <text x="470" y="94" font-size="11.5" font-weight="700" fill="var(--ink)">Collection（集合）　user</text>
+  <rect x="470" y="104" width="290" height="64" rx="6" fill="var(--bg)" stroke="var(--line)"/>
+  <g font-size="10" font-family="var(--mono)" fill="var(--ink-soft)">
+    <text x="478" y="120">{ "_id": ..., "username": "john",</text>
+    <text x="478" y="134">  "email": "j@..", "level": 1,</text>
+    <text x="478" y="148">  "active": true }</text>
+    <text x="478" y="162" font-family="var(--sans)" font-size="10" fill="var(--ink-faint)">Document（文档）= 一组键/值对</text>
+  </g>
+  <rect x="470" y="176" width="290" height="66" rx="6" fill="var(--bg)" stroke="var(--warn)"/>
+  <g font-size="10" font-family="var(--mono)" fill="var(--ink-soft)">
+    <text x="478" y="192">{ "_id": ..., "username": "beth",</text>
+    <text x="478" y="206">  "nickname": "B", "tags": ["vip"] }</text>
+    <text x="478" y="226" font-family="var(--sans)" font-size="10" fill="var(--warn)">同一集合里的文档可以有不同的字段集！</text>
+    <text x="478" y="238" font-family="var(--sans)" font-size="10" fill="var(--warn)">这就是「动态模式（dynamic schema）」</text>
+  </g>
+
+  <!-- terminology table -->
+  <rect x="200" y="292" width="420" height="118" rx="8" fill="var(--panel)" stroke="var(--line-strong)"/>
+  <text x="410" y="314" text-anchor="middle" font-size="12.5" font-weight="700" fill="var(--ink)">表 17.1　术语对照</text>
+  <g font-size="11.5">
+    <text x="290" y="338" text-anchor="middle" fill="var(--sql)" font-weight="700">关系数据库</text>
+    <text x="530" y="338" text-anchor="middle" fill="var(--accent)" font-weight="700">MongoDB</text>
+    <path d="M220 344 L600 344" stroke="var(--line)" stroke-width="1"/>
+    <text x="290" y="360" text-anchor="middle" fill="var(--ink-soft)">Database</text>  <text x="530" y="360" text-anchor="middle" fill="var(--ink)">Database</text>
+    <text x="290" y="378" text-anchor="middle" fill="var(--ink-soft)">Table</text>     <text x="530" y="378" text-anchor="middle" fill="var(--ink)">Collection</text>
+    <text x="290" y="396" text-anchor="middle" fill="var(--ink-soft)">Row</text>       <text x="530" y="396" text-anchor="middle" fill="var(--ink)">Document</text>
+    <text x="290" y="404" text-anchor="middle" fill="var(--ink-soft)">　</text>
+  </g>
+  <text x="410" y="404" text-anchor="middle" font-size="11.5" fill="var(--ink-soft)">Column　→　Field</text>
+</svg>
+</div>
+<figcaption>图 17-A　RDBMS 与 MongoDB 的概念对照。最关键的差异不在名字，而在<b>同一个集合里的文档可以有不同的字段集</b>——甚至同名字段在不同文档里类型都可以不同。</figcaption>
+</figure>
+
+<p>安装完 MongoDB 后可以打开 <b>MongoDB Compass</b>——一个用于交互和查询 MongoDB 数据库的图形界面。点 Connect 按钮就连上了本地服务器。一个描述 CaveatEmptor 用户的典型 MongoDB 文档长这样：</p>
+
+<pre><code>{
+  <span class="hl">"_id":{ "$oid":"61c9e17e382deb3ba55d65ac" }</span>,
+  "username":"john",
+  "firstName":"John",
+  "lastName":"Smith",
+  "registrationDate":{ "$date":"2020-04-12T21:00:00.000Z" },
+  "email":"john@somedomain.com",
+  "level":1,
+  "active":true,
+  <span class="hl">"_class":"com.manning.javapersistence.springdatamongodb.model.User"</span>
+}</code></pre>
+
+<div class="tip"><b>两个自动生成的字段</b><p><code>_id</code> 是 MongoDB 的主键，类型是 <code>ObjectId</code>（<code>$oid</code>），所以 Java 侧的 <code>@Id</code> 字段类型是 <code>String</code> 而不是 <code>Long</code>。<code>_class</code> 是 <b>Spring Data MongoDB 自己加的</b>——它记录了这个文档对应哪个 Java 类，反序列化时用来还原正确的类型。</p></div>
+
+<p>在 Compass 的 Filter 输入框里填查询过滤器就能筛选文档，比如 <code>{"username":"john"}</code>。</p>
+
+<h2 id="s2"><span class="num">17.2</span> Spring Data MongoDB 简介</h2>
+
+<p>Spring Data MongoDB 遵循 Spring Data 的一贯路数：<b>仓库、自定义对象映射抽象、注解、基于仓库方法名的动态查询创建、与其他 Spring 项目及 Spring Boot 的集成</b>。这意味着你在第 4 章、第 15 章学到的东西，绝大部分能直接迁移过来。</p>
+
+<h3 id="s21">依赖与配置</h3>
+
+<p>在 Spring Initializr 建项目，artifact 叫 <code>springdatamongodb</code>，加两个依赖：</p>
+
+<div class="filename">Ch17/springdatamongodb/pom.xml</div>
+<pre><code>&lt;dependency&gt;
+    &lt;groupId&gt;org.springframework.boot&lt;/groupId&gt;
+    <span class="hl">&lt;artifactId&gt;spring-boot-starter-data-mongodb&lt;/artifactId&gt;</span>   <span class="cmt">&lt;!-- A --&gt;</span>
+&lt;/dependency&gt;
+&lt;dependency&gt;
+    &lt;groupId&gt;org.projectlombok&lt;/groupId&gt;
+    &lt;artifactId&gt;lombok&lt;/artifactId&gt;                              <span class="cmt">&lt;!-- B --&gt;</span>
+&lt;/dependency&gt;</code></pre>
+
+<div class="note"><b>关于 Lombok</b><p>Lombok 是一个 Java 库，能<b>通过注解自动创建构造器、getter 和 setter</b>，从而减少样板代码。它也有自己的缺点：</p>
+<ul>
+<li>需要 IDE 插件才能让 IDE 理解这些注解，否则会报「缺少构造器/getter/setter」</li>
+<li><b>不能在生成的方法里设断点调试</b>（虽然在这些方法里调试的情况很少见）</li>
+</ul></div>
+
+<div class="filename">Ch17/springdatamongodb/src/main/resources/application.properties</div>
+<pre><code>logging.level.org.springframework.data.mongodb.core.MongoTemplate=DEBUG   <span class="cmt"># A</span>
+spring.data.mongodb.auto-index-creation=true                             <span class="cmt"># B</span></code></pre>
+
+<div class="keyhint">
+<div><span class="k">A</span> Spring Data MongoDB 应用<b>在 DEBUG 级别记录查询</b>。所以要看到查询日志，就得把日志级别设成 DEBUG。</div>
+<div><span class="k">B</span> Spring Data MongoDB <b>默认禁用索引创建</b>。把 <code>spring.data.mongodb.auto-index-creation</code> 设为 <code>true</code> 才会启用（否则你写的 <code>@Indexed</code> / <code>@CompoundIndex</code> 全是摆设）。</div>
+</div>
+
+<h3 id="s22">注解总览</h3>
+
+<div class="cols">
+<div class="card"><h4>表 17.2　Spring Data MongoDB 专有</h4>
+<p>包 <code>org.springframework.data.mongodb.core.mapping</code>（<code>@Document</code>）与 <code>...core.index</code>（索引相关）</p>
+<div class="tablewrap"><table>
+<tbody>
+<tr><td><code>@Document</code></td><td>要持久化到 MongoDB 的领域对象</td></tr>
+<tr><td><code>@Indexed</code></td><td>被 MongoDB 建索引的字段</td></tr>
+<tr><td><code>@CompoundIndexes</code></td><td>复合索引的<b>容器注解</b>，装多个 <code>@CompoundIndex</code></td></tr>
+<tr><td><code>@CompoundIndex</code></td><td>在类上使用，为<b>多个字段</b>建复合索引</td></tr>
+<tr><td><code>IndexDirection</code></td><td>枚举，决定索引方向：<code>ASCENDING</code>（默认）或 <code>DESCENDING</code></td></tr>
+</tbody>
+</table></div>
+</div>
+<div class="card"><h4>表 17.3 / 17.4　通用注解</h4>
+<p><code>org.springframework.data.annotation</code> 包：</p>
+<div class="tablewrap"><table>
+<tbody>
+<tr><td><code>@Id</code></td><td>标记该字段为标识符</td></tr>
+<tr><td><code>@Transient</code></td><td>瞬时字段，<b>不会被持久化</b>，也不会被持久化框架检查</td></tr>
+<tr><td><code>@PersistenceConstructor</code></td><td>标记<b>从数据库取回信息时</b>持久化框架优先使用的构造器</td></tr>
+</tbody>
+</table></div>
+<p><code>lombok</code> 包：</p>
+<div class="tablewrap"><table>
+<tbody>
+<tr><td><code>@NoArgsConstructor</code></td><td>自动生成 public 无参构造器</td></tr>
+<tr><td><code>@Getter</code> / <code>@Setter</code></td><td>为被注解的字段自动生成 public getter / setter</td></tr>
+</tbody>
+</table></div>
+</div>
+</div>
+
+<h3 id="s23">User 文档类</h3>
+
+<div class="filename">Ch17/springdatamongodb/.../model/User.java</div>
+<pre><code><span class="ann">@NoArgsConstructor</span>
+<span class="hl">@Document</span>
+<span class="ann">@CompoundIndexes</span>({
+        <span class="ann">@CompoundIndex</span>(name = <span class="str">"username_email"</span>,
+                       def = <span class="str">"{'username' : 1, 'email': 1}"</span>),
+        <span class="ann">@CompoundIndex</span>(name = <span class="str">"lastName_firstName"</span>,
+                       def = <span class="str">"{'lastName' : 1, 'firstName': 1}"</span>)
+})
+<span class="kw">public class</span> User {
+
+    <span class="ann">@Id</span>
+    <span class="ann">@Getter</span>
+    <span class="kw">private</span> String id;                 <span class="cmt">// 注意是 String，对应 MongoDB 的 ObjectId</span>
+
+    <span class="ann">@Getter</span> <span class="ann">@Setter</span>
+    <span class="ann">@Indexed</span>(direction = IndexDirection.ASCENDING)
+    <span class="kw">private</span> String username;
+
+    <span class="cmt">// 其他带 @Getter / @Setter 的字段</span>
+
+    <span class="ann">@Getter</span> <span class="ann">@Setter</span>
+    <span class="hl">@Transient</span>
+    <span class="kw">private</span> String password;           <span class="cmt">// 密码不会被存进数据库</span>
+
+    <span class="cmt">// 另一个构造器</span>
+
+    <span class="hl">@PersistenceConstructor</span>
+    <span class="kw">public</span> User(String username, String firstName, String lastName,
+                <span class="hl">@Value("#root.ip ?: '192.168.1.100'")</span> String ip) {
+        <span class="kw">this</span>.username = username;
+        <span class="kw">this</span>.firstName = firstName;
+        <span class="kw">this</span>.lastName  = lastName;
+        <span class="kw">this</span>.ip = ip;
+    }
+}</code></pre>
+
+<div class="keyhint">
+<div><span class="k">@Transient</span> <code>password</code> 字段<b>不会被保存到 MongoDB</b>。很多场景下你都希望密码这类机密信息不被持久化。</div>
+<div><span class="k">@PersistenceConstructor</span> Spring Data MongoDB <b>从数据库取回信息时</b>会用这个构造器。</div>
+<div><span class="k">@Value("#root.ip ?: '192.168.1.100'")</span> 这是 SpEL 的<b>猫王运算符（Elvis operator）</b>：从数据库取文档时如果 <code>ip</code> 值缺失，就自动采用这个默认值。这正是「动态模式」的现实应对——老文档可能压根没有这个字段。</div>
+</div>
+
+<h2 id="s3"><span class="num">17.3</span> 用 MongoRepository 访问数据库</h2>
+
+<figure>
+<div class="fig-box">
+<svg viewBox="0 0 820 250" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Spring Data 仓库接口体系里的 MongoRepository">
+  <defs><marker id="ext17" markerWidth="12" markerHeight="10" refX="11" refY="5" orient="auto"><path d="M0 0 L12 5 L0 10 z" fill="none" stroke="var(--ink-faint)" stroke-width="1.2"/></marker></defs>
+
+  <rect x="310" y="20" width="200" height="40" rx="6" fill="var(--panel)" stroke="var(--line-strong)"/>
+  <text x="410" y="45" text-anchor="middle" font-size="12" font-family="var(--mono)" fill="var(--ink)">Repository&lt;T, ID&gt;</text>
+
+  <path d="M410 92 L410 64" stroke="var(--ink-faint)" stroke-width="1.4" marker-end="url(#ext17)"/>
+  <rect x="310" y="92" width="200" height="40" rx="6" fill="var(--panel)" stroke="var(--line-strong)"/>
+  <text x="410" y="117" text-anchor="middle" font-size="12" font-family="var(--mono)" fill="var(--ink)">CrudRepository</text>
+
+  <path d="M410 164 L410 136" stroke="var(--ink-faint)" stroke-width="1.4" marker-end="url(#ext17)"/>
+  <rect x="290" y="164" width="240" height="40" rx="6" fill="var(--panel)" stroke="var(--line-strong)"/>
+  <text x="410" y="189" text-anchor="middle" font-size="12" font-family="var(--mono)" fill="var(--ink)">PagingAndSortingRepository</text>
+
+  <path d="M180 186 L286 186" stroke="var(--java)" stroke-width="1.4" marker-end="url(#ext17)"/>
+  <rect x="30" y="164" width="150" height="40" rx="6" fill="var(--java-soft)" stroke="var(--java)"/>
+  <text x="105" y="189" text-anchor="middle" font-size="12" font-family="var(--mono)" fill="var(--ink)">JpaRepository</text>
+  <text x="105" y="222" text-anchor="middle" font-size="10.5" fill="var(--ink-soft)">第 4、16 章</text>
+
+  <path d="M640 186 L534 186" stroke="var(--accent)" stroke-width="1.8" marker-end="url(#ext17)"/>
+  <rect x="640" y="164" width="160" height="40" rx="6" fill="var(--accent-soft)" stroke="var(--accent)" stroke-width="2"/>
+  <text x="720" y="189" text-anchor="middle" font-size="12" font-family="var(--mono)" fill="var(--ink)">MongoRepository</text>
+  <text x="720" y="222" text-anchor="middle" font-size="10.5" font-weight="700" fill="var(--accent)">本章</text>
+
+  <text x="410" y="240" text-anchor="middle" font-size="11.5" fill="var(--ink-soft)">同一棵树的两个兄弟：<tspan font-weight="700">查询派生、Pageable、Sort、Streamable 的用法完全一致</tspan>，换的只是最底下的存储。</text>
+</svg>
+</div>
+<figcaption>图 17-B　<code>MongoRepository</code> 在 Spring Data 仓库层次里的位置。这就是为什么第 4 / 15 章学的东西能直接迁移。</figcaption>
+</figure>
+
+<div class="filename">Ch17/springdatamongodb/.../repositories/UserRepository.java</div>
+<pre><code><span class="kw">public interface</span> UserRepository <span class="kw">extends</span> <span class="hl">MongoRepository&lt;User, String&gt;</span> {
+}</code></pre>
+
+<p>它继承 <code>MongoRepository&lt;User, String&gt;</code>：继承了 MongoDB 相关的方法，管理 <code>User</code> 文档，<b>标识符类型是 <code>String</code></b>。</p>
+
+<h3 id="s31">17.3.1 定义查询方法</h3>
+
+<p>Spring Data MongoDB 提供了和 Spring Data JPA 类似的<b>查询构建器机制</b>——根据方法名创建仓库方法的行为。同样地：查询机制会剥掉 <code>find...By</code>、<code>get...By</code>、<code>query...By</code>、<code>read...By</code>、<code>count...By</code> 这样的前后缀，然后解析剩下的部分；同样地，它会看方法的返回类型来决定包装成 <code>Optional</code> 还是 <code>List</code>。</p>
+
+<div class="filename">Ch17/springdatamongodb/.../repositories/UserRepository.java</div>
+<pre><code><span class="kw">public interface</span> UserRepository <span class="kw">extends</span> MongoRepository&lt;User, String&gt; {
+   Optional&lt;User&gt; findByUsername(String username);
+   List&lt;User&gt; findByLastName(String lastName);
+   List&lt;User&gt; findAllByOrderByUsernameAsc();
+   List&lt;User&gt; findByRegistrationDateBetween(LocalDate start, LocalDate end);
+   List&lt;User&gt; findByUsernameAndEmail(String username, String email);
+   List&lt;User&gt; findByUsernameOrEmail(String username, String email);
+   List&lt;User&gt; findByUsernameIgnoreCase(String username);
+   List&lt;User&gt; findByLevelOrderByUsernameDesc(<span class="kw">int</span> level);
+   List&lt;User&gt; findByLevelGreaterThanEqual(<span class="kw">int</span> level);
+   List&lt;User&gt; findByUsernameContaining(String text);
+   List&lt;User&gt; findByUsernameLike(String text);
+   List&lt;User&gt; findByUsernameStartingWith(String start);
+   List&lt;User&gt; findByUsernameEndingWith(String end);
+   List&lt;User&gt; findByActive(<span class="kw">boolean</span> active);
+   List&lt;User&gt; findByRegistrationDateIn(Collection&lt;LocalDate&gt; dates);
+   List&lt;User&gt; findByRegistrationDateNotIn(Collection&lt;LocalDate&gt; dates);
+}</code></pre>
+
+<div class="tablewrap">
+<table>
+<caption>表 17.5　Spring Data MongoDB 关键字与生成的查询过滤器</caption>
+<thead><tr><th>关键字</th><th>示例</th><th>生成的条件（MongoDB 查询过滤器）</th></tr></thead>
+<tbody>
+<tr><td><code>Is</code>, <code>Equals</code></td><td><code>findByUsername(name)</code></td><td><code>{"username":"name"}</code></td></tr>
+<tr><td><code>And</code></td><td><code>findByUsernameAndEmail(u, e)</code></td><td><code>{"username":"u", "email":"e"}</code></td></tr>
+<tr><td><code>Or</code></td><td><code>findByUsernameOrEmail(u, e)</code></td><td><code>{"$or":[{"username":"u"},{"email":"e"}]}</code></td></tr>
+<tr><td><code>LessThan</code></td><td><code>findByRegistrationDateLessThan(d)</code></td><td><code>{"registrationDate":{"$lt":{"$date":"d"}}}</code></td></tr>
+<tr><td><code>LessThanEqual</code></td><td><code>...LessThanEqual(d)</code></td><td><code>{"registrationDate":{"$lte":{"$date":"d"}}}</code></td></tr>
+<tr><td><code>GreaterThan</code></td><td><code>...GreaterThan(d)</code></td><td><code>{"registrationDate":{"$gt":{"$date":"d"}}}</code></td></tr>
+<tr><td><code>GreaterThanEqual</code></td><td><code>...GreaterThanEqual(d)</code></td><td><code>{"registrationDate":{"$gte":{"$date":"d"}}}</code></td></tr>
+<tr><td><code>Between</code></td><td><code>...Between(from, to)</code></td><td><code>{"registrationDate":{"$gte":{"$date":"from"},"$lte":{"$date":"to"}}}</code></td></tr>
+<tr><td><code>Like</code></td><td><code>findByUsernameLike(name)</code></td><td><code>{"username":{"$regularExpression":{"pattern":"name","options":""}}}</code></td></tr>
+<tr><td><code>NotLike</code></td><td><code>findByUsernameNotLike(name)</code></td><td><code>{"username":{"$not":{"$regularExpression":{...}}}}</code></td></tr>
+<tr><td><code>Before</code> / <code>After</code></td><td><code>...Before(d)</code> / <code>...After(d)</code></td><td><code>{"$lt":...}</code> / <code>{"$gt":...}</code></td></tr>
+<tr><td><code>Null</code>, <code>IsNull</code></td><td><code>findByRegistrationDate(Is)Null()</code></td><td><code>{"registrationDate":null}</code></td></tr>
+<tr><td><code>NotNull</code>, <code>IsNotNull</code></td><td><code>findByRegistrationDate(Is)NotNull()</code></td><td><code>{"registrationDate":{"$ne":null}}</code></td></tr>
+<tr><td><code>Not</code></td><td><code>findByUsernameNot(name)</code></td><td><code>{"username":{"$ne":"name"}}</code></td></tr>
+</tbody>
+</table>
+</div>
+
+<div class="tip"><b>同一个方法名，三种产物</b><p>把这张表和第 15 章的表 15.1、第 4 章的 JPA 表并排看，你会发现<b>方法名的规则完全一样，只是被翻译成了不同的目标语言</b>：JPQL（Spring Data JPA）、原生 SQL（Spring Data JDBC）、JSON 查询过滤器（Spring Data MongoDB）。这就是 Spring Data 抽象的价值所在。</p></div>
+
+<div class="filename">Ch17/springdatamongodb/src/test/.../SpringDataMongoDBApplicationTests.java</div>
+<pre><code><span class="ann">@SpringBootTest</span>
+<span class="ann">@TestInstance</span>(TestInstance.Lifecycle.PER_CLASS)
+<span class="kw">abstract class</span> SpringDataJdbcApplicationTests {
+
+    <span class="ann">@Autowired</span>
+    UserRepository userRepository;
+
+    <span class="ann">@BeforeAll</span>
+    <span class="kw">void</span> beforeAll() { userRepository.saveAll(generateUsers()); }
+
+    <span class="kw">private static</span> List&lt;User&gt; generateUsers() {
+        List&lt;User&gt; users = <span class="kw">new</span> ArrayList&lt;&gt;();
+        User john = <span class="kw">new</span> User(<span class="str">"john"</span>, <span class="str">"John"</span>, <span class="str">"Smith"</span>);
+        john.setRegistrationDate(LocalDate.of(<span class="str">2020</span>, Month.APRIL, <span class="str">13</span>));
+        john.setEmail(<span class="str">"john@somedomain.com"</span>);
+        john.setLevel(<span class="str">1</span>);
+        john.setActive(<span class="kw">true</span>);
+        john.setPassword(<span class="str">"password1"</span>);       <span class="cmt">// @Transient —— 存不进去</span>
+        <span class="cmt">// 一共创建 10 个用户</span>
+        users.add(john);
+        <span class="kw">return</span> users;
+    }
+
+    <span class="ann">@AfterAll</span>
+    <span class="kw">void</span> afterAll() { userRepository.deleteAll(); }
+}</code></pre>
+
+<div class="note"><b>JUnit 5 的一个细节</b><p>在 JUnit 5 里，<b>测试类和测试方法是包级私有（package private）就够了</b>，不要求是 public。所以你会看到 <code>class FindUsersTest extends ...</code> 而不是 <code>public class</code>。</p></div>
+
+<pre><code><span class="kw">class</span> FindUsersTest <span class="kw">extends</span> SpringDataJdbcApplicationTests {
+
+    <span class="ann">@Test</span>
+    <span class="kw">void</span> testFindAll() {
+        List&lt;User&gt; users = userRepository.findAll();
+        assertEquals(<span class="str">10</span>, users.size());
+    }
+
+    <span class="ann">@Test</span>
+    <span class="kw">void</span> testFindUser() {
+        User beth = userRepository.findByUsername(<span class="str">"beth"</span>).get();
+        assertAll(
+            () -&gt; assertNotNull(beth.getId()),
+            () -&gt; assertEquals(<span class="str">"beth"</span>, beth.getUsername()));
+    }
+
+    <span class="ann">@Test</span>
+    <span class="kw">void</span> testFindAllByOrderByUsernameAsc() {
+        List&lt;User&gt; users = userRepository.findAllByOrderByUsernameAsc();
+        assertAll(() -&gt; assertEquals(<span class="str">10</span>, users.size()),
+                  () -&gt; assertEquals(<span class="str">"beth"</span>, users.get(<span class="str">0</span>).getUsername()),
+                  () -&gt; assertEquals(<span class="str">"stephanie"</span>,
+                          users.get(users.size() - <span class="str">1</span>).getUsername()));
+    }
+
+    <span class="ann">@Test</span>
+    <span class="kw">void</span> testFindByRegistrationDateBetween() {
+        List&lt;User&gt; users = userRepository.findByRegistrationDateBetween(
+                LocalDate.of(<span class="str">2020</span>, Month.JULY, <span class="str">1</span>),
+                LocalDate.of(<span class="str">2020</span>, Month.DECEMBER, <span class="str">31</span>));
+        assertEquals(<span class="str">4</span>, users.size());
+    }
+}</code></pre>
+
+<h3 id="s32">17.3.2 限制结果、排序与分页</h3>
+
+<p>和 Spring Data JPA、Spring Data JDBC 一样：<code>first</code> 和 <code>top</code> 关键字（等价）限制结果条数，后跟可选数字，不写则为 1。<code>Pageable</code> 是分页信息接口，实践中用 <code>PageRequest</code>，可指定页号、页大小和排序条件。<b>写法一字不差。</b></p>
+
+<div class="filename">Ch17/springdatamongodb/.../repositories/UserRepository.java</div>
+<pre><code>Optional&lt;User&gt; findFirstByOrderByUsernameAsc();
+Optional&lt;User&gt; findTopByOrderByRegistrationDateDesc();
+Page&lt;User&gt;     findAll(Pageable pageable);
+List&lt;User&gt;     findFirst2ByLevel(<span class="kw">int</span> level, Sort sort);
+List&lt;User&gt;     findByLevel(<span class="kw">int</span> level, Sort sort);
+List&lt;User&gt;     findByActive(<span class="kw">boolean</span> active, Pageable pageable);</code></pre>
+
+<pre><code><span class="kw">class</span> FindUsersSortingAndPagingTest <span class="kw">extends</span> SpringDataJdbcApplicationTests {
+
+    <span class="ann">@Test</span>
+    <span class="kw">void</span> testOrder() {
+        User user1 = userRepository.findFirstByOrderByUsernameAsc().get();          <span class="cmt">// A</span>
+        User user2 = userRepository.findTopByOrderByRegistrationDateDesc().get();
+        Page&lt;User&gt; userPage = userRepository.findAll(PageRequest.of(<span class="str">1</span>, <span class="str">3</span>));         <span class="cmt">// B 页号从 0 开始</span>
+        List&lt;User&gt; users = userRepository.findFirst2ByLevel(<span class="str">2</span>,                       <span class="cmt">// C</span>
+                                          Sort.by(<span class="str">"registrationDate"</span>));
+        assertAll(
+            () -&gt; assertEquals(<span class="str">"beth"</span>,   user1.getUsername()),
+            () -&gt; assertEquals(<span class="str">"julius"</span>, user2.getUsername()),
+            () -&gt; assertEquals(<span class="str">2</span>, users.size()),
+            () -&gt; assertEquals(<span class="str">3</span>, userPage.getSize()),
+            () -&gt; assertEquals(<span class="str">"beth"</span>,   users.get(<span class="str">0</span>).getUsername()),
+            () -&gt; assertEquals(<span class="str">"marion"</span>, users.get(<span class="str">1</span>).getUsername()));
+    }
+
+    <span class="ann">@Test</span>
+    <span class="kw">void</span> testFindByLevel() {
+        Sort.TypedSort&lt;User&gt; user = Sort.sort(User.class);                          <span class="cmt">// D 类型安全排序</span>
+        List&lt;User&gt; users = userRepository.findByLevel(<span class="str">3</span>,                           <span class="cmt">// E</span>
+                   user.by(User::getRegistrationDate).descending());
+        assertAll(
+            () -&gt; assertEquals(<span class="str">2</span>, users.size()),
+            () -&gt; assertEquals(<span class="str">"james"</span>, users.get(<span class="str">0</span>).getUsername()));
+    }
+
+    <span class="ann">@Test</span>
+    <span class="kw">void</span> testFindByActive() {
+        List&lt;User&gt; users = userRepository.findByActive(<span class="kw">true</span>,                        <span class="cmt">// F</span>
+                   PageRequest.of(<span class="str">1</span>, <span class="str">4</span>, Sort.by(<span class="str">"registrationDate"</span>)));
+        assertAll(
+            () -&gt; assertEquals(<span class="str">4</span>, users.size()),
+            () -&gt; assertEquals(<span class="str">"burk"</span>, users.get(<span class="str">0</span>).getUsername()));
+    }
+}</code></pre>
+
+<h3 id="s33">17.3.3 流式结果</h3>
+
+<pre><code><span class="cmt">// UserRepository 里加两个方法</span>
+Streamable&lt;User&gt; findByEmailContaining(String text);
+Streamable&lt;User&gt; findByLevel(<span class="kw">int</span> level);</code></pre>
+
+<div class="filename">Ch17/springdatamongodb/src/test/.../QueryResultsTest.java</div>
+<pre><code><span class="ann">@Test</span>
+<span class="kw">void</span> testStreamable() {
+    <span class="kw">try</span> (Stream&lt;User&gt; result =
+             userRepository.findByEmailContaining(<span class="str">"someother"</span>)      <span class="cmt">// A</span>
+                 .and(userRepository.findByLevel(<span class="str">2</span>))                 <span class="cmt">// B 拼接两个 Streamable</span>
+                 .stream().distinct()) {                              <span class="cmt">// C 转成流并去重</span>
+        assertEquals(<span class="str">7</span>, result.count());                            <span class="cmt">// D</span>
+    }
+}</code></pre>
+
+<div class="pit"><b>流必须关闭</b><p>流放在 try-with-resources 里自动关闭，或者显式调 <code>close()</code>。<b>否则这个流会一直占着底层的数据库连接。</b>（和 15.2.3 节完全一样的坑。）</p></div>
+
+<h3 id="s34">17.3.4 <code>@Query</code> 注解</h3>
+
+<p>用 <code>@org.springframework.data.mongodb.repository.Query</code> 可以指定自定义查询，方法名不必遵循任何约定。<b>自定义查询的参数是一个 MongoDB 查询过滤器</b>，可以参数化。两个关键属性：</p>
+
+<div class="cols">
+<div class="card"><h4><code>value</code></h4><p>指明要执行的<b>查询过滤器</b>。占位符 <code>?0</code> 引用方法的第一个参数，<code>?1</code> 引用第二个，以此类推。</p></div>
+<div class="card"><h4><code>fields</code></h4><p>指明结果中要<b>包含或排除</b>哪些字段。<code>{field : 1}</code> 表示只包含，<code>{field : 0}</code> 表示排除。</p></div>
+</div>
+
+<div class="tablewrap">
+<table>
+<caption>表 17.6　查询操作与对应的 <code>@Query</code> 参数</caption>
+<thead><tr><th>操作</th><th><code>@Query</code> 参数</th></tr></thead>
+<tbody>
+<tr><td>按某个字段取数据</td><td><code>value = { 'field' : ?0 }</code></td></tr>
+<tr><td>按正则表达式取数据</td><td><code>value = { 'lastName' : { $regex: ?0 } }</code></td></tr>
+<tr><td>字段大于某参数</td><td><code>value = { 'field' : { $gt: ?0 } }</code></td></tr>
+<tr><td>字段大于等于某参数</td><td><code>value = { 'field' : { $gte: ?0 } }</code></td></tr>
+<tr><td>字段小于某参数</td><td><code>value = { 'field' : { $lt: ?0 } }</code></td></tr>
+<tr><td>字段小于等于某参数</td><td><code>value = { 'field' : { $lte: ?0 } }</code></td></tr>
+<tr><td>查询中<b>只包含</b>某个字段</td><td><code>fields = "{field : 1}"</code></td></tr>
+<tr><td>查询中<b>排除</b>某个字段</td><td><code>fields = "{field : 0}"</code></td></tr>
+</tbody>
+</table>
+</div>
+
+<div class="filename">Ch17/springdatamongodb/.../repositories/UserRepository.java</div>
+<pre><code><span class="ann">@Query</span>(<span class="str">"{ 'active' : ?0 }"</span>)                                    <span class="cmt">// A</span>
+List&lt;User&gt; findUsersByActive(<span class="kw">boolean</span> active);
+
+<span class="ann">@Query</span>(<span class="str">"{ 'lastName' : ?0 }"</span>)                                  <span class="cmt">// B</span>
+List&lt;User&gt; findUsersByLastName(String lastName);
+
+<span class="ann">@Query</span>(<span class="str">"{ 'lastName' : { $regex: ?0 } }"</span>)                       <span class="cmt">// C 正则匹配</span>
+List&lt;User&gt; findUsersByRegexpLastName(String regexp);
+
+<span class="ann">@Query</span>(<span class="str">"{ 'level' : { $gte: ?0, $lte: ?1 } }"</span>)                  <span class="cmt">// D 两个占位符</span>
+List&lt;User&gt; findUsersByLevelBetween(<span class="kw">int</span> minLevel, <span class="kw">int</span> maxLevel);
+
+<span class="ann">@Query</span>(value = <span class="str">"{}"</span>, <span class="hl">fields = "{username : 1}"</span>)               <span class="cmt">// E 只返回 id 和 username</span>
+List&lt;User&gt; findUsernameAndId();
+
+<span class="ann">@Query</span>(value = <span class="str">"{}"</span>, <span class="hl">fields = "{_id : 0}"</span>)                     <span class="cmt">// F 排除 id</span>
+List&lt;User&gt; findUsersExcludeId();
+
+<span class="ann">@Query</span>(value = <span class="str">"{'lastName' : { $regex: ?0 }}"</span>, fields = <span class="str">"{_id : 0}"</span>)   <span class="cmt">// G 两者结合</span>
+List&lt;User&gt; findUsersByRegexpLastNameExcludeId(String regexp);</code></pre>
+
+<div class="keyhint">
+<div><span class="k">E</span> <code>value</code> 是 <code>{}</code> 所以选中所有用户；<code>fields</code> 是 <code>{username : 1}</code> 所以只返回 <code>id</code> 和 <code>username</code> 字段。<b>注意 <code>_id</code> 默认总是返回的，除非显式排除。</b></div>
+<div><span class="k">F</span> 选中所有用户，并把 <code>id</code> 从返回字段中排除。</div>
+</div>
+
+<h2 id="s4"><span class="num">17.4</span> Query by Example（QBE）</h2>
+
+<p>QBE 在第 4 章讲 Spring Data JPA 时讨论过。它是一种<b>不需要写传统查询</b>来包含实体和属性的查询技术，支持动态创建查询，由三部分组成：</p>
+
+<figure>
+<div class="fig-box">
+<svg viewBox="0 0 820 300" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="QBE 的三个组成部分">
+  <defs><marker id="a17q" markerWidth="9" markerHeight="9" refX="8" refY="4.5" orient="auto"><path d="M0 0 L9 4.5 L0 9 z" fill="var(--accent)"/></marker></defs>
+
+  <rect x="30" y="40" width="220" height="110" rx="8" fill="var(--java-soft)" stroke="var(--java)"/>
+  <text x="140" y="64" text-anchor="middle" font-size="12.5" font-weight="700" fill="var(--ink)">① probe（探针）</text>
+  <text x="140" y="84" text-anchor="middle" font-size="11" fill="var(--ink-soft)">一个已经设好属性的领域对象</text>
+  <g font-size="10.5" font-family="var(--mono)" fill="var(--ink)">
+    <text x="44" y="108">User probe = new User();</text>
+    <text x="44" y="126">probe.setLastName("Smith");</text>
+  </g>
+  <text x="140" y="144" text-anchor="middle" font-size="10" fill="var(--ink-faint)">null 的属性会被忽略</text>
+
+  <rect x="300" y="40" width="220" height="110" rx="8" fill="var(--warn-soft)" stroke="var(--warn)"/>
+  <text x="410" y="64" text-anchor="middle" font-size="12.5" font-weight="700" fill="var(--ink)">② ExampleMatcher</text>
+  <text x="410" y="84" text-anchor="middle" font-size="11" fill="var(--ink-soft)">匹配特定属性的规则</text>
+  <g font-size="10" font-family="var(--mono)" fill="var(--ink)">
+    <text x="314" y="106">ExampleMatcher.matching()</text>
+    <text x="314" y="122">  .withIgnorePaths("level")</text>
+    <text x="314" y="138">  .withIgnorePaths("active")</text>
+  </g>
+
+  <rect x="570" y="40" width="220" height="110" rx="8" fill="var(--accent-soft)" stroke="var(--accent)"/>
+  <text x="680" y="64" text-anchor="middle" font-size="12.5" font-weight="700" fill="var(--ink)">③ Example</text>
+  <text x="680" y="84" text-anchor="middle" font-size="11" fill="var(--ink-soft)">把探针和匹配器合起来生成查询</text>
+  <g font-size="10.5" font-family="var(--mono)" fill="var(--ink)">
+    <text x="584" y="110">Example.of(probe, matcher)</text>
+  </g>
+  <text x="680" y="138" text-anchor="middle" font-size="10" fill="var(--ink-faint)">多个 Example 可复用同一个 Matcher</text>
+
+  <path d="M254 95 L296 95" stroke="var(--accent)" stroke-width="1.6" marker-end="url(#a17q)"/>
+  <path d="M524 95 L566 95" stroke="var(--accent)" stroke-width="1.6" marker-end="url(#a17q)"/>
+
+  <rect x="30" y="176" width="370" height="112" rx="8" fill="var(--sql-soft)" stroke="var(--sql)"/>
+  <text x="215" y="198" text-anchor="middle" font-size="12" font-weight="700" fill="var(--ink)">✓ 适合的场景</text>
+  <text x="44" y="220" font-size="11" fill="var(--ink-soft)">· 想把代码与底层数据存储 API 解耦</text>
+  <text x="44" y="240" font-size="11" fill="var(--ink-soft)">· 领域对象内部结构频繁变化，又不想</text>
+  <text x="44" y="256" font-size="11" fill="var(--ink-soft)">　把变化传播到已有查询上</text>
+  <text x="44" y="276" font-size="11" fill="var(--ink-soft)">· 正在构建一组静态或动态的查询约束</text>
+
+  <rect x="420" y="176" width="370" height="112" rx="8" fill="var(--danger-soft)" stroke="var(--danger)"/>
+  <text x="605" y="198" text-anchor="middle" font-size="12" font-weight="700" fill="var(--ink)">✗ 局限</text>
+  <text x="434" y="220" font-size="11" fill="var(--ink-soft)">· String 属性只支持 starting / ending /</text>
+  <text x="434" y="236" font-size="11" fill="var(--ink-soft)">　containing / regex 匹配；<tspan font-weight="700">其他类型只能精确匹配</tspan></text>
+  <text x="434" y="258" font-size="11" fill="var(--ink-soft)">· 不支持嵌套或分组的属性约束，例如</text>
+  <text x="434" y="276" font-size="10" font-family="var(--mono)" fill="var(--ink-faint)">{"$or":[{"username":..},{"lastName":..,"email":..}]}</text>
+</svg>
+</div>
+<figcaption>图 17-C　QBE 的三件套。这和第 4 章 Spring Data JPA 的 QBE 是同一套 API——又一处「换存储不换用法」。</figcaption>
+</figure>
+
+<div class="filename">Ch17/springdatamongodb/src/test/.../QueryByExampleTest.java</div>
+<pre><code>User probe = <span class="kw">new</span> User(<span class="kw">null</span>, <span class="kw">null</span>, <span class="str">"Smith"</span>);                <span class="cmt">// A：只设了 lastName</span>
+List&lt;User&gt; result = userRepository.findAll(Example.of(probe));   <span class="cmt">// B</span>
+assertThat(result).hasSize(<span class="str">2</span>)                                    <span class="cmt">// C</span>
+        .extracting(<span class="str">"username"</span>).contains(<span class="str">"john"</span>, <span class="str">"burk"</span>);</code></pre>
+
+<div class="filename">Ch17/springdatamongodb/src/test/.../QueryByMatcherTest.java</div>
+<pre><code>ExampleMatcher matcher = ExampleMatcher.matching()
+                                       <span class="hl">.withIgnorePaths("level")</span>       <span class="cmt">// A</span>
+                                       <span class="hl">.withIgnorePaths("active")</span>;
+
+User probe = <span class="kw">new</span> User();                                      <span class="cmt">// B</span>
+probe.setLastName(<span class="str">"Smith"</span>);
+List&lt;User&gt; result = userRepository.findAll(Example.of(probe, matcher));   <span class="cmt">// C</span>
+
+assertThat(result).hasSize(<span class="str">2</span>)                                  <span class="cmt">// D</span>
+        .extracting(<span class="str">"username"</span>).contains(<span class="str">"john"</span>, <span class="str">"burk"</span>);</code></pre>
+
+<div class="pit"><b>基本类型（primitive）必须显式忽略</b><p>匹配器会<b>自动忽略任何 null 引用属性</b>，但基本类型没有 null。如果不显式忽略 <code>level</code>（<code>int</code>）和 <code>active</code>（<code>boolean</code>），它们会带着<b>默认值 0 和 false</b> 进入匹配器，<b>改变生成的查询</b>——你会莫名其妙地只查到 level 为 0 且未激活的用户。</p></div>
+
+<h2 id="s5"><span class="num">17.5</span> 引用其他 MongoDB 文档</h2>
+
+<div class="warn"><b>先说清楚 Spring Data MongoDB 不支持什么</b><p>Spring Data MongoDB <b>不支持</b>我们在关系数据库里考察的那种一对一、一对多、多对多关系。这个框架<b>也不支持把一个文档嵌入另一个文档</b>。</p><p>但是——<b>一个文档可以通过 DBRef 引用另一个文档</b>。DBRef 会包含集合名和另一个文档的 ID 字段值，可选地还能带另一个数据库名。</p></div>
+
+<div class="filename">Ch17/springdatamongodb2/.../model/Address.java 与 AddressRepository.java</div>
+<pre><code><span class="ann">@Document</span>
+<span class="kw">public class</span> Address {
+    <span class="ann">@Id</span> <span class="ann">@Getter</span> <span class="kw">private</span> String id;
+    <span class="ann">@Getter</span> <span class="kw">private</span> String street, zipCode, city, state;
+}
+
+<span class="kw">public interface</span> AddressRepository <span class="kw">extends</span> MongoRepository&lt;Address, String&gt; {
+}</code></pre>
+
+<div class="filename">Ch17/springdatamongodb2/.../model/User.java（修改后）</div>
+<pre><code><span class="kw">public class</span> User {
+    <span class="cmt">// . . .</span>
+    <span class="hl">@DBRef</span>
+    <span class="hl">@Field("address")</span>          <span class="cmt">// @Field 可以给文档里的字段起自定义名字</span>
+    <span class="ann">@Getter</span> <span class="ann">@Setter</span>
+    <span class="kw">private</span> Address address;
+    <span class="cmt">// . . .</span>
+}</code></pre>
+
+<figure>
+<div class="fig-box">
+<svg viewBox="0 0 820 340" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="DBRef 如何在两个文档之间建立引用">
+  <defs><marker id="a17d" markerWidth="9" markerHeight="9" refX="8" refY="4.5" orient="auto"><path d="M0 0 L9 4.5 L0 9 z" fill="var(--accent)"/></marker></defs>
+
+  <text x="200" y="24" text-anchor="middle" font-size="12.5" font-weight="700" fill="var(--java)">user 集合里的文档</text>
+  <rect x="20" y="34" width="360" height="238" rx="8" fill="var(--java-soft)" stroke="var(--java)"/>
+  <g font-size="10.5" font-family="var(--mono)" fill="var(--ink-soft)">
+    <text x="34" y="56">{</text>
+    <text x="34" y="72">  "_id": { "$oid": "61cb2fcfff98d570824fef66" },</text>
+    <text x="34" y="88">  "username": "john",</text>
+    <text x="34" y="104">  "firstName": "John",</text>
+    <text x="34" y="120">  "lastName": "Smith",</text>
+    <text x="34" y="136">  "registrationDate": { "$date": "2020-04-12..." },</text>
+    <text x="34" y="152">  "email": "john@somedomain.com",</text>
+    <text x="34" y="168">  "level": 1,  "active": true,</text>
+  </g>
+  <rect x="30" y="176" width="340" height="58" rx="5" fill="var(--accent-soft)" stroke="var(--accent)"/>
+  <g font-size="10.5" font-family="var(--mono)" fill="var(--ink)">
+    <text x="40" y="194">  "address": {</text>
+    <text x="40" y="210">      "$ref": "address",</text>
+    <text x="40" y="226">      "$id": { "$oid": "61cb2fcbff98d570824fef30" } }</text>
+  </g>
+  <g font-size="10.5" font-family="var(--mono)" fill="var(--ink-soft)">
+    <text x="34" y="252">  "_class": "...model.User"</text>
+    <text x="34" y="266">}</text>
+  </g>
+
+  <path d="M384 205 L436 205" stroke="var(--accent)" stroke-width="2" marker-end="url(#a17d)"/>
+  <text x="410" y="196" text-anchor="middle" font-size="10" fill="var(--accent)">DBRef</text>
+
+  <text x="620" y="24" text-anchor="middle" font-size="12.5" font-weight="700" fill="var(--sql)">address 集合里的文档</text>
+  <rect x="440" y="140" width="360" height="132" rx="8" fill="var(--sql-soft)" stroke="var(--sql)"/>
+  <g font-size="10.5" font-family="var(--mono)" fill="var(--ink-soft)">
+    <text x="454" y="162">{</text>
+  </g>
+  <rect x="450" y="168" width="340" height="22" rx="4" fill="var(--accent-soft)" stroke="var(--accent)"/>
+  <text x="458" y="184" font-size="10.5" font-family="var(--mono)" fill="var(--ink)">  "_id": { "$oid": "61cb2fcbff98d570824fef30" },</text>
+  <g font-size="10.5" font-family="var(--mono)" fill="var(--ink-soft)">
+    <text x="454" y="208">  "street": "Flowers Street",</text>
+    <text x="454" y="224">  "zipCode": "1234567",</text>
+    <text x="454" y="240">  "city": "Boston",  "state": "MA",</text>
+    <text x="454" y="256">  "_class": "...model.Address"</text>
+    <text x="454" y="268">}</text>
+  </g>
+
+  <rect x="20" y="288" width="780" height="42" rx="8" fill="var(--danger-soft)" stroke="var(--danger)"/>
+  <text x="410" y="308" text-anchor="middle" font-size="12" font-weight="700" fill="var(--ink)">重要：save 和 delete 这类操作<tspan fill="var(--danger)">不会在文档之间级联</tspan>。</text>
+  <text x="410" y="324" text-anchor="middle" font-size="11.5" fill="var(--ink)">保存或删除一个文档时，必须<tspan font-weight="700">显式地</tspan>保存或删除被引用的文档。</text>
+</svg>
+</div>
+<figcaption>图 17-D　DBRef 的实际存储形态：<code>$ref</code>（集合名）+ <code>$id</code>（目标文档 ID）。这是「手工外键」，没有 JPA 那样的级联语义。</figcaption>
+</figure>
+
+<h2 id="s6"><span class="num">17.6</span> 用 MongoTemplate 访问数据库</h2>
+
+<p><code>MongoTemplate</code> 是一个提供针对 MongoDB 数据库的 CRUD 操作访问的类，它实现了 <code>MongoOperations</code> 接口。<b><code>MongoOperations</code> 里的方法命名与 MongoDB 驱动的 <code>Collection</code> 对象方法类似</b>，以便于理解和使用这套 API。</p>
+
+<h3 id="s61">17.6.1 配置</h3>
+
+<p>要把 Spring Boot 应用连到 MongoDB，我们继承 <code>AbstractMongoClientConfiguration</code> 类——它为 Spring Data MongoDB 提供了 Java 配置支持。这个抽象类已经提供了两个可用的 bean：</p>
+
+<pre><code><span class="ann">@Bean</span>
+<span class="kw">public</span> MongoTemplate mongoTemplate(MongoDatabaseFactory databaseFactory,
+                                   MappingMongoConverter converter) {
+    <span class="kw">return new</span> MongoTemplate(databaseFactory, converter);
+}
+
+<span class="ann">@Bean</span>
+<span class="kw">public</span> MongoDatabaseFactory mongoDbFactory() {
+    <span class="kw">return new</span> SimpleMongoClientDatabaseFactory(<span class="kw">this</span>.mongoClient(),
+                                                <span class="kw">this</span>.getDatabaseName());
+}</code></pre>
+
+<p>所以我们<b>只需要覆写 <code>getDatabaseName()</code></b>：</p>
+
+<div class="filename">Ch17/springdatamongodb3/.../configuration/MongoDBConfig.java</div>
+<pre><code><span class="ann">@Configuration</span>
+<span class="kw">public class</span> MongoDBConfig <span class="kw">extends</span> AbstractMongoClientConfiguration {
+    <span class="ann">@Override</span>
+    <span class="kw">public</span> String getDatabaseName() {
+        <span class="kw">return</span> <span class="str">"test"</span>;
+    }
+}</code></pre>
+
+<h3 id="s62">17.6.2 用 MongoTemplate 执行 CRUD</h3>
+
+<figure>
+<div class="fig-box">
+<svg viewBox="0 0 820 430" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="MongoTemplate 的主要方法">
+  <text x="410" y="24" text-anchor="middle" font-size="13.5" font-weight="700" fill="var(--ink)">MongoTemplate 的方法家族</text>
+
+  <!-- insert / save -->
+  <rect x="20" y="40" width="380" height="110" rx="8" fill="var(--sql-soft)" stroke="var(--sql)"/>
+  <text x="210" y="62" text-anchor="middle" font-size="12" font-weight="700" fill="var(--ink)">写入</text>
+  <text x="34" y="86" font-size="11" font-family="var(--mono)" fill="var(--sql)">insert(obj)</text>
+  <text x="180" y="86" font-size="11" fill="var(--ink-soft)">总是插入新文档</text>
+  <text x="34" y="110" font-size="11" font-family="var(--mono)" fill="var(--sql)">save(obj, "user")</text>
+  <text x="180" y="110" font-size="11" fill="var(--ink-soft)">id 已存在 → 更新；否则 → 插入</text>
+  <text x="34" y="136" font-size="10.5" fill="var(--ink-faint)">两者都有重载版本：接受对象、集合 + 类、或集合名</text>
+
+  <!-- query -->
+  <rect x="420" y="40" width="380" height="110" rx="8" fill="var(--java-soft)" stroke="var(--java)"/>
+  <text x="610" y="62" text-anchor="middle" font-size="12" font-weight="700" fill="var(--ink)">查询条件：Query + Criteria</text>
+  <g font-size="10.5" font-family="var(--mono)" fill="var(--ink)">
+    <text x="434" y="84">Query query = new Query();  // 默认构造 = 集合中全部文档</text>
+    <text x="434" y="102">query.addCriteria(Criteria.where("level").is(1));</text>
+    <text x="434" y="122">Criteria.where("username").is("mike")</text>
+    <text x="434" y="138">        .andOperator(Criteria.where("email").is("..."));</text>
+  </g>
+
+  <!-- update family -->
+  <text x="410" y="180" text-anchor="middle" font-size="12.5" font-weight="700" fill="var(--accent)">四个更新方法的区别（都配合一个 Update 对象）</text>
+
+  <rect x="20" y="192" width="188" height="118" rx="8" fill="var(--accent-soft)" stroke="var(--accent)"/>
+  <text x="114" y="214" text-anchor="middle" font-size="11.5" font-weight="700" font-family="var(--mono)" fill="var(--ink)">updateFirst</text>
+  <text x="114" y="238" text-anchor="middle" font-size="10.5" fill="var(--ink-soft)">更新<tspan font-weight="700">匹配到的第一个</tspan></text>
+  <text x="114" y="256" text-anchor="middle" font-size="10.5" fill="var(--ink-soft)">文档</text>
+  <text x="114" y="284" text-anchor="middle" font-size="10.5" fill="var(--ink-faint)">返回 UpdateResult</text>
+
+  <rect x="218" y="192" width="188" height="118" rx="8" fill="var(--accent-soft)" stroke="var(--accent)"/>
+  <text x="312" y="214" text-anchor="middle" font-size="11.5" font-weight="700" font-family="var(--mono)" fill="var(--ink)">updateMulti</text>
+  <text x="312" y="238" text-anchor="middle" font-size="10.5" fill="var(--ink-soft)">更新<tspan font-weight="700">所有匹配到的</tspan></text>
+  <text x="312" y="256" text-anchor="middle" font-size="10.5" fill="var(--ink-soft)">文档</text>
+  <text x="312" y="284" text-anchor="middle" font-size="10.5" fill="var(--ink-faint)">返回 UpdateResult</text>
+
+  <rect x="416" y="192" width="188" height="118" rx="8" fill="var(--warn-soft)" stroke="var(--warn)"/>
+  <text x="510" y="214" text-anchor="middle" font-size="11.5" font-weight="700" font-family="var(--mono)" fill="var(--ink)">findAndModify</text>
+  <text x="510" y="238" text-anchor="middle" font-size="10.5" fill="var(--ink-soft)">类似 updateMulti，但</text>
+  <text x="510" y="256" text-anchor="middle" font-size="10.5" fill="var(--ink-soft)"><tspan font-weight="700">返回修改前的对象</tspan></text>
+  <text x="510" y="284" text-anchor="middle" font-size="10.5" fill="var(--warn)">断言拿到的是旧 level</text>
+
+  <rect x="614" y="192" width="186" height="118" rx="8" fill="var(--sql-soft)" stroke="var(--sql)"/>
+  <text x="707" y="214" text-anchor="middle" font-size="11.5" font-weight="700" font-family="var(--mono)" fill="var(--ink)">upsert</text>
+  <text x="707" y="238" text-anchor="middle" font-size="10.5" fill="var(--ink-soft)">找到就更新，找不到</text>
+  <text x="707" y="256" text-anchor="middle" font-size="10.5" fill="var(--ink-soft)">就<tspan font-weight="700">合并 query + update</tspan></text>
+  <text x="707" y="272" text-anchor="middle" font-size="10.5" fill="var(--ink-soft)">建一个新文档</text>
+  <text x="707" y="292" text-anchor="middle" font-size="10" fill="var(--ink-faint)">名字 = update + insert</text>
+
+  <rect x="20" y="330" width="780" height="88" rx="8" fill="var(--panel)" stroke="var(--line-strong)"/>
+  <text x="410" y="352" text-anchor="middle" font-size="12" font-weight="700" fill="var(--ink)">为什么这些方法重要：它们是<tspan fill="var(--accent)">原子操作</tspan></text>
+  <text x="410" y="374" text-anchor="middle" font-size="11.5" fill="var(--ink-soft)">用 MongoRepository 改一个字段，你得走三步：find → 改字段 → save。</text>
+  <text x="410" y="392" text-anchor="middle" font-size="11.5" fill="var(--ink-soft)">这三步之间别的线程可以插进来 —— 这就是第 11 章讲的<tspan font-weight="700">丢失更新</tspan>。</text>
+  <text x="410" y="410" text-anchor="middle" font-size="11.5" fill="var(--accent)">updateFirst / findAndModify / upsert 在数据库端一步完成，<tspan font-weight="700">并发场景下更安全</tspan>。</text>
+</svg>
+</div>
+<figcaption>图 17-E　<code>MongoTemplate</code> 的方法家族。它比仓库啰嗦，但换来了原子性和「只更新指定字段」的能力。</figcaption>
+</figure>
+
+<p><b>插入</b>——<code>insert</code> 方法是重载的，下面用的是接受一个对象、或接受对象集合加它们的类的版本：</p>
+
+<pre><code>mongoTemplate.insert(GenerateUsers.address);
+mongoTemplate.insert(generateUsers(), User.class);</code></pre>
+
+<p><b>保存</b>——<code>save</code> 的行为不同：<b>如果 id 已经存在于数据库中，它执行更新；否则执行插入。</b></p>
+
+<pre><code>mongoTemplate.save(user, <span class="str">"user"</span>);</code></pre>
+
+<p><b>删除</b>——我们用 <code>org.springframework.data.mongodb.core.query.Query</code> 对象来定义取回文档时的条件、投影和排序。<b>用默认构造器创建的 <code>Query</code> 对应集合中的所有文档</b>：</p>
+
+<pre><code>mongoTemplate.remove(<span class="kw">new</span> Query(), User.class);
+mongoTemplate.remove(<span class="kw">new</span> Query(), Address.class);</code></pre>
+
+<p><b>构造条件</b>——可以用不同的条件修改 <code>Query</code> 对象：</p>
+
+<pre><code><span class="cmt">// 查 level 为 1 的用户</span>
+Query query = <span class="kw">new</span> Query();
+query.addCriteria(Criteria.where(<span class="str">"level"</span>).is(<span class="str">1</span>));
+
+<span class="cmt">// 查指定 username 且（AND）指定 email 的用户</span>
+Query query1 = <span class="kw">new</span> Query();
+query1.addCriteria(Criteria.where(<span class="str">"username"</span>).is(<span class="str">"mike"</span>)
+      .<span class="hl">andOperator</span>(Criteria.where(<span class="str">"email"</span>).is(<span class="str">"mike@somedomain.com"</span>)));
+
+<span class="cmt">// 查指定 username 或（OR）指定 email 的用户</span>
+Query query2 = <span class="kw">new</span> Query(<span class="kw">new</span> Criteria().
+               <span class="hl">orOperator</span>(Criteria.where(<span class="str">"username"</span>).is(<span class="str">"mike"</span>),
+                          Criteria.where(<span class="str">"email"</span>).is(<span class="str">"beth@somedomain.com"</span>)));</code></pre>
+
+<p><b>更新</b>——用 <code>org.springframework.data.mongodb.core.query.Update</code> 类的对象，<b>设上要替换旧值的新值</b>：</p>
+
+<div class="cols">
+<div class="card"><h4><code>updateFirst</code>：更新第一个</h4>
+<pre><code>Query query = <span class="kw">new</span> Query();
+query.addCriteria(Criteria.where(<span class="str">"level"</span>).is(<span class="str">1</span>));
+
+Update update = <span class="kw">new</span> Update();
+update.set(<span class="str">"level"</span>, <span class="str">2</span>);
+mongoTemplate.updateFirst(query, update, User.class);
+
+List&lt;User&gt; users = mongoTemplate.find(query, User.class);</code></pre>
+<p>找到 <code>User</code> 类中 level 为 1 的第一个文档并改成 level 2，然后可以用 <code>find</code> 拿到剩下的 level 1 用户。</p></div>
+<div class="card"><h4><code>updateMulti</code>：更新全部</h4>
+<pre><code>Query query = <span class="kw">new</span> Query();
+query.addCriteria(Criteria.where(<span class="str">"level"</span>).is(<span class="str">1</span>));
+
+Update update = <span class="kw">new</span> Update();
+update.set(<span class="str">"level"</span>, <span class="str">2</span>);
+mongoTemplate.updateMulti(query, update, User.class);</code></pre>
+<p>找到 <b>所有</b> level 为 1 的文档并全部改成 level 2。</p></div>
+</div>
+
+<div class="cols">
+<div class="card"><h4><code>findAndModify</code>：返回旧值</h4>
+<pre><code>Query query = <span class="kw">new</span> Query();
+query.addCriteria(Criteria.where(<span class="str">"level"</span>).is(<span class="str">1</span>));
+
+Update update = <span class="kw">new</span> Update();
+update.set(<span class="str">"level"</span>, <span class="str">2</span>);
+User user = mongoTemplate.findAndModify(query, update, User.class);
+
+<span class="hl">assertEquals(1, user.getLevel());</span>   <span class="cmt">// 拿到的是「修改前」的对象</span></code></pre></div>
+<div class="card"><h4><code>upsert</code>：更新或插入</h4>
+<pre><code>Query query = <span class="kw">new</span> Query();
+query.addCriteria(Criteria.where(<span class="str">"level"</span>).is(<span class="str">1</span>));
+
+Update update = <span class="kw">new</span> Update();
+update.set(<span class="str">"level"</span>, <span class="str">2</span>);
+UpdateResult result = mongoTemplate.upsert(query, update, User.class);
+
+assertAll(
+    () -&gt; assertEquals(<span class="str">1</span>, result.<span class="hl">getMatchedCount()</span>),   <span class="cmt">// 1 个文档匹配了查询</span>
+    () -&gt; assertEquals(<span class="str">1</span>, result.<span class="hl">getModifiedCount()</span>));  <span class="cmt">// 1 个文档被更新</span></code></pre>
+<p>找到就更新，找不到就<b>合并 query 和 update 对象</b>创建一个新文档。名字就是 <b>up</b>date + in<b>sert</b>，由 MongoDB 决定该做哪一个。</p></div>
+</div>
+
+<h2 id="s7"><span class="num">17.7</span> 两种途径的对比</h2>
+
+<div class="tablewrap">
+<table>
+<caption>表 17.7　MongoRepository 与 MongoTemplate 对比</caption>
+<thead><tr><th></th><th>优点</th><th>缺点</th></tr></thead>
+<tbody>
+<tr>
+<td><b>MongoRepository</b></td>
+<td>
+<ul>
+<li>沿用 Spring Data JPA 和 Spring Data JDBC 仓库的路数，<b>学习成本几乎为零</b></li>
+<li>能用查询构建器机制<b>快速创建方法</b>，靠方法名定义行为</li>
+</ul>
+</td>
+<td>
+<ul>
+<li>提供的方法执行基本 CRUD 操作，<b>作用于文档的所有字段</b></li>
+<li>更新一个文档必须<b>分步执行</b>（find、改相关字段、save），或者用 <code>@Query</code> 注解的方法</li>
+</ul>
+</td>
+</tr>
+<tr>
+<td><b>MongoTemplate</b></td>
+<td>
+<ul>
+<li>提供 <code>updateFirst</code>、<code>updateMulti</code>、<code>findAndModify</code>、<code>upsert</code> 这样的<b>原子操作</b></li>
+<li>原子操作<b>有利于并发应用</b>中的工作</li>
+<li><code>Update</code> 对象允许我们<b>只挑选要更新的字段</b></li>
+</ul>
+</td>
+<td>
+<ul>
+<li><b>更啰嗦、要写更多代码</b>，简单操作尤其如此</li>
+</ul>
+</td>
+</tr>
+</tbody>
+</table>
+</div>
+
+<div class="tip"><b>实践建议</b><p>两者<b>可以在同一个应用里共存</b>。默认用 <code>MongoRepository</code> 处理绝大多数读取和简单写入；遇到「只想改一个字段」或「并发下必须原子」的场景，就注入 <code>MongoTemplate</code> 用 <code>updateFirst</code> / <code>findAndModify</code>。</p></div>
+
+<div class="summary" id="s8">
+<h3>本章小结</h3>
+<ul>
+<li>可以用 Spring Boot <b>创建并配置一个 Spring Data MongoDB 项目</b>。别忘了两条配置：把 <code>MongoTemplate</code> 日志级别设为 DEBUG 才看得到查询；把 <code>auto-index-creation</code> 设为 <code>true</code> 索引注解才生效。</li>
+<li>可以创建<b>文档类</b>并使用 Spring Data MongoDB 注解来定义<b>简单索引和复合索引</b>（<code>@Indexed</code> / <code>@CompoundIndex</code>）、把字段标记为 <b>瞬时</b>（<code>@Transient</code>，如密码），以及定义<b>持久化构造器</b>（<code>@PersistenceConstructor</code>，可配合 SpEL 提供默认值）。</li>
+<li>可以构建继承 <code>MongoRepository</code> 的自定义接口，按<b>查询构建器机制</b>创建自定义方法来与 MongoDB 交互。方法命名规则与 Spring Data JPA / JDBC 完全一致，只是被翻译成 JSON 查询过滤器。</li>
+<li>可以使用 Spring Data MongoDB 在<b>限制查询结果、排序、分页和流式返回结果</b>方面的能力——用法与前两章一模一样。</li>
+<li>可以用 <code>@Query</code> 注解定义自定义查询（<code>value</code> 定过滤器、<code>fields</code> 定投影、<code>?0</code> 占位符），也可以使用 <b>Query by Example（QBE）</b>查询技术——注意基本类型属性必须显式 <code>withIgnorePaths</code>。</li>
+<li>文档之间用 <b><code>@DBRef</code></b> 建立引用（<code>$ref</code> + <code>$id</code>），但<b>没有嵌入文档，也没有级联</b>——保存和删除被引用的文档必须显式进行。</li>
+<li>可以配置应用使用 <code>MongoTemplate</code> 执行 CRUD：它更啰嗦，但提供 <b>原子的 <code>updateFirst</code> / <code>updateMulti</code> / <code>findAndModify</code> / <code>upsert</code></b>，并且能只更新指定字段。</li>
+</ul>
+</div>
+
+<div class="pager">
+  <a href="ch16.html">← 第 16 章　使用 Spring Data REST</a>
+  <a href="ch18.html">第 18 章　使用 Hibernate OGM →</a>
+</div>
+</main>
+</div>
+</body>
+</html>

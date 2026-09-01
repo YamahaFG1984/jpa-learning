@@ -1,0 +1,544 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>第 5 章 · 映射持久化类</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="topbar"><div class="topbar-inner">
+  <a class="brand" href="index.html">Java Persistence 讲义</a>
+  <span class="spacer"></span>
+  <a href="ch04.html">← 上一章</a>
+  <a href="index.html">目录</a>
+  <a href="ch06.html">下一章 →</a>
+</div></div>
+
+<div class="wrap">
+<nav class="toc">
+  <h4>本章目录</h4>
+  <a href="#s1">5.1 实体与值类型</a>
+  <a class="sub" href="#s11">细粒度领域模型</a>
+  <a class="sub" href="#s12">定义应用概念</a>
+  <a class="sub" href="#s13">如何区分二者</a>
+  <a href="#s2">5.2 带标识的实体映射</a>
+  <a class="sub" href="#s21">三种「同一性」</a>
+  <a class="sub" href="#s22">第一个实体类</a>
+  <a class="sub" href="#s23">选择主键</a>
+  <a class="sub" href="#s24">配置主键生成器</a>
+  <a class="sub" href="#s25">生成器策略全表</a>
+  <a href="#s3">5.3 实体映射选项</a>
+  <a class="sub" href="#s31">控制名字</a>
+  <a class="sub" href="#s32">动态 SQL 生成</a>
+  <a class="sub" href="#s33">不可变实体</a>
+  <a class="sub" href="#s34">映射到子查询</a>
+  <a href="#s4">本章小结</a>
+</nav>
+
+<main>
+<div class="hero">
+  <div class="eyebrow">Part 2 · 映射策略</div>
+  <h1>第 5 章　映射持久化类</h1>
+  <p>Part 2 开始进入 ORM 的正题：从类和属性到表和列。本章打地基 —— <b>实体 vs 值类型</b>的根本区分，以及<b>数据库标识与主键</b>该怎么设计。所有映射示例都用 JPA 注解，因此 Hibernate 和 Spring Data JPA <b>两边都能用</b>。</p>
+</div>
+
+<div class="note"><b>工程师的角色</b><p>把<b>应用域</b>（问题所在的环境，由「应用领域模型」表示，即现实中的实体）与<b>解域</b>（构建系统的软件与技术，由「系统模型」表示，即软件里的对象）连接起来。本章讲的就是这条连线上最基础的一段。</p></div>
+
+<h2 id="s1"><span class="num">5.1</span>理解实体与值类型</h2>
+
+<h3 id="s11">5.1.1　细粒度领域模型</h3>
+<p><b>细粒度（fine-grained）</b>直白地说就是：<b>类比表多</b>。数据库里 <code>USERS</code> 表有 <code>HOME_STREET</code>、<code>HOME_CITY</code>、<code>HOME_ZIPCODE</code> 三列；领域模型里你当然可以照抄三个 String 属性，但<b>更好的做法</b>是建一个 <code>Address</code> 类，让 <code>User</code> 有个 <code>homeAddress</code> 属性 —— 内聚更好、复用更多，也比 SQL 那套僵硬的类型系统更易理解。</p>
+
+<div class="tip"><b>细粒度还带来类型安全与行为</b><p>很多人把 email 建模成 <code>User</code> 的一个 String 属性。更成熟的做法是定义 <code>EmailAddress</code> 类，加入更高层的语义与行为。它可以提供 <code>prepareMail()</code>，<b>但不该有 <code>sendMail()</code></b> —— 你不希望领域模型类依赖邮件子系统（回顾第 3 章的「关注点泄漏」）。</p></div>
+
+<h3 id="s12">5.1.2　定义应用概念：John 和 Jane 住在同一间房</h3>
+<p>两个人住同一栋房子，各自在 CaveatEmptor 注册了账号。<code>User</code> 显然是实体（能独立加载、保存、删除）。那 <code>homeAddress</code> 呢？</p>
+
+<figure><div class="fig-box">
+<svg viewBox="0 0 840 380" xmlns="http://www.w3.org/2000/svg" font-family="Inter,system-ui,sans-serif">
+  <defs><marker id="c5a" markerWidth="9" markerHeight="9" refX="8" refY="4.5" orient="auto"><path d="M0 0 L9 4.5 L0 9 z" fill="var(--java)"/></marker></defs>
+
+  <!-- left: shared -->
+  <rect x="14" y="14" width="400" height="352" rx="10" fill="var(--java-soft)" stroke="var(--java)" stroke-width="1.6"/>
+  <text x="214" y="40" text-anchor="middle" font-size="14" font-weight="700" fill="var(--java)">方案 A：共享同一个 Address 实例</text>
+  <text x="214" y="60" text-anchor="middle" font-size="12" fill="var(--ink)">→ Address 必须是 <tspan font-weight="700">实体类型 Entity type</tspan></text>
+
+  <rect x="40" y="80" width="150" height="76" rx="7" fill="var(--panel)" stroke="var(--line-strong)"/>
+  <text x="115" y="100" text-anchor="middle" font-family="monospace" font-size="12" font-weight="700" fill="var(--ink)">jd</text>
+  <text x="52" y="120" font-family="monospace" font-size="10.5" fill="var(--ink-soft)">username="johndoe"</text>
+  <text x="52" y="136" font-family="monospace" font-size="10.5" fill="var(--ink-soft)">firstname="John"</text>
+  <text x="52" y="150" font-family="monospace" font-size="10.5" fill="var(--ink-soft)">lastname="Doe"</text>
+
+  <rect x="40" y="220" width="150" height="76" rx="7" fill="var(--panel)" stroke="var(--line-strong)"/>
+  <text x="115" y="240" text-anchor="middle" font-family="monospace" font-size="12" font-weight="700" fill="var(--ink)">jr</text>
+  <text x="52" y="260" font-family="monospace" font-size="10.5" fill="var(--ink-soft)">username="janeroe"</text>
+  <text x="52" y="276" font-family="monospace" font-size="10.5" fill="var(--ink-soft)">firstname="Jane"</text>
+  <text x="52" y="290" font-family="monospace" font-size="10.5" fill="var(--ink-soft)">lastname="Roe"</text>
+
+  <rect x="248" y="148" width="150" height="80" rx="7" fill="var(--accent-soft)" stroke="var(--accent)" stroke-width="1.8"/>
+  <text x="323" y="168" text-anchor="middle" font-family="monospace" font-size="12" font-weight="700" fill="var(--accent)">home</text>
+  <text x="260" y="188" font-family="monospace" font-size="10.5" fill="var(--ink-soft)">street="Some Street"</text>
+  <text x="260" y="204" font-family="monospace" font-size="10.5" fill="var(--ink-soft)">zipCode=12345</text>
+  <text x="260" y="220" font-family="monospace" font-size="10.5" fill="var(--ink-soft)">city="Some City"</text>
+
+  <path d="M192 130 L244 168" stroke="var(--java)" stroke-width="1.6" marker-end="url(#c5a)"/>
+  <path d="M192 250 L244 212" stroke="var(--java)" stroke-width="1.6" marker-end="url(#c5a)"/>
+  <text x="196" y="146" font-size="10" fill="var(--ink-faint)">homeAddress</text>
+  <text x="196" y="242" font-size="10" fill="var(--ink-faint)">homeAddress</text>
+
+  <rect x="36" y="312" width="362" height="42" rx="7" fill="var(--warn-soft)" stroke="var(--warn)"/>
+  <text x="217" y="330" text-anchor="middle" font-size="11.5" fill="var(--ink)">Address 有<tspan font-weight="700">自己的生命</tspan>：John 注销账号时</text>
+  <text x="217" y="346" text-anchor="middle" font-size="11.5" fill="var(--ink)"><tspan font-weight="700">不能删掉它</tspan> —— Jane 可能还持有引用</text>
+
+  <!-- right: own -->
+  <rect x="426" y="14" width="400" height="352" rx="10" fill="var(--sql-soft)" stroke="var(--sql)" stroke-width="1.6"/>
+  <text x="626" y="40" text-anchor="middle" font-size="14" font-weight="700" fill="var(--sql)">方案 B：各自拥有独立的 Address</text>
+  <text x="626" y="60" text-anchor="middle" font-size="12" fill="var(--ink)">→ Address 可以是 <tspan font-weight="700">值类型 Value type</tspan></text>
+
+  <rect x="450" y="86" width="150" height="76" rx="7" fill="var(--panel)" stroke="var(--line-strong)"/>
+  <text x="525" y="106" text-anchor="middle" font-family="monospace" font-size="12" font-weight="700" fill="var(--ink)">jd</text>
+  <text x="462" y="126" font-family="monospace" font-size="10.5" fill="var(--ink-soft)">username="johndoe"</text>
+  <text x="462" y="142" font-family="monospace" font-size="10.5" fill="var(--ink-soft)">firstname="John"</text>
+  <text x="462" y="156" font-family="monospace" font-size="10.5" fill="var(--ink-soft)">lastname="Doe"</text>
+  <rect x="650" y="86" width="150" height="76" rx="7" fill="var(--accent-soft)" stroke="var(--accent)"/>
+  <text x="725" y="106" text-anchor="middle" font-family="monospace" font-size="12" font-weight="700" fill="var(--accent)">home1</text>
+  <text x="662" y="126" font-family="monospace" font-size="10.5" fill="var(--ink-soft)">street="Some Street"</text>
+  <text x="662" y="142" font-family="monospace" font-size="10.5" fill="var(--ink-soft)">zipCode=12345</text>
+  <text x="662" y="156" font-family="monospace" font-size="10.5" fill="var(--ink-soft)">city="Some City"</text>
+  <path d="M602 124 L646 124" stroke="var(--sql)" stroke-width="1.6" marker-end="url(#c5a)"/>
+
+  <rect x="450" y="196" width="150" height="76" rx="7" fill="var(--panel)" stroke="var(--line-strong)"/>
+  <text x="525" y="216" text-anchor="middle" font-family="monospace" font-size="12" font-weight="700" fill="var(--ink)">jr</text>
+  <text x="462" y="236" font-family="monospace" font-size="10.5" fill="var(--ink-soft)">username="janeroe"</text>
+  <text x="462" y="252" font-family="monospace" font-size="10.5" fill="var(--ink-soft)">firstname="Jane"</text>
+  <text x="462" y="266" font-family="monospace" font-size="10.5" fill="var(--ink-soft)">lastname="Roe"</text>
+  <rect x="650" y="196" width="150" height="76" rx="7" fill="var(--accent-soft)" stroke="var(--accent)"/>
+  <text x="725" y="216" text-anchor="middle" font-family="monospace" font-size="12" font-weight="700" fill="var(--accent)">home2</text>
+  <text x="662" y="236" font-family="monospace" font-size="10.5" fill="var(--ink-soft)">street="Some Street"</text>
+  <text x="662" y="252" font-family="monospace" font-size="10.5" fill="var(--ink-soft)">zipCode=12345</text>
+  <text x="662" y="266" font-family="monospace" font-size="10.5" fill="var(--ink-soft)">city="Some City"</text>
+  <path d="M602 234 L646 234" stroke="var(--sql)" stroke-width="1.6" marker-end="url(#c5a)"/>
+
+  <rect x="448" y="312" width="362" height="42" rx="7" fill="var(--sql-soft)" stroke="var(--sql)"/>
+  <text x="629" y="330" text-anchor="middle" font-size="11.5" fill="var(--ink)">Address 实例<tspan font-weight="700">依附于</tspan> User 实例</text>
+  <text x="629" y="346" text-anchor="middle" font-size="11.5" fill="var(--ink)">John 注销时可以<tspan font-weight="700">安全删除</tspan>他的 Address</text>
+</svg>
+</div><figcaption>图 5-2/5-3　同一个建模问题的两种答案，决定了 Address 是实体还是值类型</figcaption></figure>
+
+<div class="tablewrap"><table>
+<thead><tr><th style="width:130px"></th><th>实体类型 Entity type</th><th>值类型 Value type</th></tr></thead>
+<tbody>
+<tr><td><b>如何取回</b></td><td>用它的<b>持久化标识</b>取回（<code>User</code>、<code>Item</code>、<code>Category</code>）</td><td>没有标识符属性；它<b>属于某个实体实例</b></td></tr>
+<tr><td><b>引用如何持久化</b></td><td>JVM 里的指针 → 数据库里的<b>外键约束值</b></td><td><b>不支持共享引用</b></td></tr>
+<tr><td><b>生命周期</b></td><td><b>独立</b>，可脱离任何其他实体存在</td><td><b>绑定</b>在拥有它的实体实例上</td></tr>
+<tr><td><b>JPA 里的叫法</b></td><td>entity</td><td><b>basic property types</b> 或 <b>embeddable classes</b>（第 6 章）</td></tr>
+</tbody></table></div>
+
+<h3 id="s13">5.1.3　区分实体与值类型：给 UML 加构造型</h3>
+
+<figure><div class="fig-box">
+<svg viewBox="0 0 840 220" xmlns="http://www.w3.org/2000/svg" font-family="Inter,system-ui,sans-serif">
+  <rect x="300" y="20" width="180" height="58" rx="7" fill="var(--java-soft)" stroke="var(--java)" stroke-width="1.6"/>
+  <text x="390" y="40" text-anchor="middle" font-size="11.5" font-style="italic" fill="var(--accent)">« Entity »</text>
+  <text x="390" y="62" text-anchor="middle" font-size="14" font-weight="700" fill="var(--ink)">Bid</text>
+
+  <rect x="30" y="130" width="180" height="58" rx="7" fill="var(--java-soft)" stroke="var(--java)" stroke-width="1.6"/>
+  <text x="120" y="150" text-anchor="middle" font-size="11.5" font-style="italic" fill="var(--accent)">« Entity »</text>
+  <text x="120" y="172" text-anchor="middle" font-size="14" font-weight="700" fill="var(--ink)">Item</text>
+
+  <rect x="330" y="130" width="180" height="58" rx="7" fill="var(--java-soft)" stroke="var(--java)" stroke-width="1.6"/>
+  <text x="420" y="150" text-anchor="middle" font-size="11.5" font-style="italic" fill="var(--accent)">« Entity »</text>
+  <text x="420" y="172" text-anchor="middle" font-size="14" font-weight="700" fill="var(--ink)">User</text>
+
+  <rect x="630" y="130" width="180" height="58" rx="7" fill="var(--sql-soft)" stroke="var(--sql)" stroke-width="1.8"/>
+  <text x="720" y="150" text-anchor="middle" font-size="11.5" font-style="italic" fill="var(--sql)">« Value type »</text>
+  <text x="720" y="172" text-anchor="middle" font-size="14" font-weight="700" fill="var(--ink)">Address</text>
+
+  <line x1="210" y1="152" x2="328" y2="152" stroke="var(--java)" stroke-width="1.4"/>
+  <text x="240" y="146" font-size="10" fill="var(--ink-faint)">0..*</text>
+  <text x="285" y="146" font-size="10.5" font-weight="700" fill="var(--accent)">seller</text>
+  <line x1="510" y1="152" x2="628" y2="152" stroke="var(--sql)" stroke-width="1.4"/>
+  <text x="560" y="146" font-size="10.5" font-weight="700" fill="var(--accent)">home</text>
+
+  <line x1="140" y1="128" x2="330" y2="66" stroke="var(--java)" stroke-width="1.4"/>
+  <text x="180" y="106" font-size="10" fill="var(--ink-faint)">0..*</text>
+  <line x1="470" y1="66" x2="420" y2="128" stroke="var(--java)" stroke-width="1.4"/>
+  <text x="472" y="106" font-size="10" fill="var(--ink-faint)">0..*</text>
+  <text x="490" y="92" font-size="10.5" font-weight="700" fill="var(--accent)">bidder</text>
+</svg>
+</div><figcaption>图 5-4　用 UML 构造型（双尖括号）标注实体与值类型 —— 这个动作会<b>强迫</b>你对每个类做出判断</figcaption></figure>
+
+<div class="warn"><b>Bid 是个难题（也是最有教学价值的例子）</b>
+<p>面向对象建模里 <code>Item</code>—<code>Bid</code> 被标为<b>组合</b>（实心菱形）：容器销毁，被包含对象也销毁。看起来 <code>Bid</code> 该是值类型。</p>
+<p style="margin-top:6px"><b>但是</b>：如果将来领域模型需要 <code>User#bids</code> 集合（某用户的全部出价）呢？现在 <code>Bid</code>→<code>User</code> 是单向的（只有 <code>bidder</code> 引用）；一旦双向，就要面对<b>对 Bid 的共享引用</b>，<code>Bid</code> 就必须是实体 —— 它生命周期依赖别人，却<b>必须有自己的标识</b>来支持共享引用。</p>
+<p style="margin-top:6px"><b>作者的判断法则：先把一切都当值类型，只在绝对必要时才提升为实体。</b>这里把 <code>Bid</code> 定为值类型（它的标识由 <code>Item</code> 和 <code>User</code> 定义），<b>这并不意味着它不会有自己的表</b>。同时<b>简化关联</b>：与其映射 <code>Item#bids</code> 和 <code>User#bids</code> 两个持久化集合（常常只增加复杂度而无好处），不如写查询去拿某 Item 的全部出价、某 User 的全部出价。</p></div>
+
+<h4>把领域模型落成 POJO 时要处理的三件事</h4>
+<div class="keyhint"><span class="k">共享引用 Shared references</span><span><b>避免</b>对值类型实例的共享引用。比如确保只有一个 <code>User</code> 能引用某个 <code>Address</code>：把 <code>Address</code> 做成不可变、不提供 <code>setUser()</code>，用一个带 <code>User</code> 参数的公有构造器强制这层关系。当然仍需一个（大概是 protected 的）无参构造器，好让框架也能创建实例。</span></div>
+<div class="keyhint"><span class="k">生命周期依赖</span><span><code>User</code> 被删除时，它依赖的 <code>Address</code> 也必须删掉。持久化元数据里会为这类依赖写<b>级联规则</b>（第 13 章）。你的应用流程和 UI 也必须<b>预期并尊重</b>这种依赖。</span></div>
+<div class="keyhint"><span class="k">标识 Identity</span><span>实体类几乎总是需要标识符属性；值类型（以及 <code>String</code>、<code>Integer</code> 这样的 JDK 类）没有 —— 它们通过<b>拥有者实体</b>来被识别。</span></div>
+
+<h2 id="s2"><span class="num">5.2</span>映射带标识的实体</h2>
+
+<h3 id="s21">5.2.1　三种「同一性」，务必分清</h3>
+<div class="tablewrap"><table>
+<thead><tr><th style="width:150px">概念</th><th>判定方式</th><th>由谁定义</th></tr></thead>
+<tbody>
+<tr><td><b>对象同一性</b><br>object identity</td><td><code>a == b</code>：占据 JVM 中<b>同一内存位置</b></td><td>Java 虚拟机</td></tr>
+<tr><td><b>对象相等性</b><br>object equality</td><td><code>a.equals(b)</code>：<b>状态相同</b>。不重写就继承 <code>Object</code> 的实现（即用 <code>==</code>）。须满足<b>自反、对称、传递</b>；这意味着若 <code>a == b</code>，则 <code>a.equals(b)</code> 与 <code>b.equals(a)</code> 都应为 true</td><td>类的 <code>equals()</code> 方法</td></tr>
+<tr><td><b>数据库标识</b><br>database identity</td><td>存于关系数据库的对象，若<b>同表且主键值相同</b>则是同一个</td><td>关系数据库</td></tr>
+</tbody></table></div>
+
+<h3 id="s22">5.2.2　第一个实体类与它的映射</h3>
+
+<div class="filename">Ch05/generator/src/main/java/…/ch05/model/Item.java</div>
+<pre><code><span class="ann">@Entity</span>
+<span class="kw">public class</span> Item {
+    <span class="ann">@Id</span>
+    <span class="ann">@GeneratedValue</span>(generator = <span class="str">"ID_GENERATOR"</span>)
+    <span class="kw">private</span> Long id;
+
+    <span class="kw">public</span> Long getId() { <span class="kw">return</span> id; }   <span class="cmt">// 只有 getter，没有 setter</span>
+}</code></pre>
+
+<div class="pit"><b>四条必须记住的规则</b>
+<ol style="margin-bottom:0">
+<li><b>每个实体类都必须有 <code>@Id</code> 属性</b> —— 这是 JPA 把数据库标识暴露给应用的方式。<b>好实践：所有实体类都把它命名为 <code>id</code></b>；不额外指定的话，它映射到表中名为 <code>ID</code> 的主键列。</li>
+<li><b>访问方式由 <code>@Id</code> 的位置决定</b>：<code>@Id</code> 在<b>字段</b>上 ⇒ JPA 提供者<b>直接访问字段</b>，并默认把<b>所有字段</b>都当作持久化状态的一部分。作者的经验是：<b>字段访问往往优于访问器访问</b>，因为它给了你设计访问器方法的自由。</li>
+<li><b>应该有公有 getter 吗？</b>应该。应用常把数据库标识符当作方便的「句柄」，即便在持久化层之外 —— 比如 Web 应用列出搜索结果摘要，用户点选某项时按标识符查回来。</li>
+<li><b>应该有 setter 吗？绝对不要。</b>主键值<b>永不改变</b>。Hibernate 不会更新主键列，你也不应在实体上暴露公有的标识符 setter。</li>
+</ol></div>
+
+<h3 id="s23">5.2.3　选择主键</h3>
+
+<figure><div class="fig-box">
+<svg viewBox="0 0 840 400" xmlns="http://www.w3.org/2000/svg" font-family="Inter,system-ui,sans-serif">
+  <rect x="20" y="20" width="800" height="106" rx="9" fill="var(--panel)" stroke="var(--line-strong)"/>
+  <text x="420" y="44" text-anchor="middle" font-size="14" font-weight="700" fill="var(--ink)">候选键（candidate key）要成为主键，必须满足三条</text>
+  <rect x="46" y="58" width="240" height="52" rx="6" fill="var(--sql-soft)" stroke="var(--sql)"/>
+  <text x="166" y="80" text-anchor="middle" font-size="12.5" font-weight="700" fill="var(--sql)">① 永不为 NULL</text>
+  <text x="166" y="98" text-anchor="middle" font-size="11" fill="var(--ink)">不能用未知数据来标识事物</text>
+  <rect x="300" y="58" width="240" height="52" rx="6" fill="var(--sql-soft)" stroke="var(--sql)"/>
+  <text x="420" y="80" text-anchor="middle" font-size="12.5" font-weight="700" fill="var(--sql)">② 对任何行都唯一</text>
+  <text x="420" y="98" text-anchor="middle" font-size="11" fill="var(--ink)">且不可约（无更小的唯一子集）</text>
+  <rect x="554" y="58" width="240" height="52" rx="6" fill="var(--sql-soft)" stroke="var(--sql)"/>
+  <text x="674" y="80" text-anchor="middle" font-size="12.5" font-weight="700" fill="var(--sql)">③ 永不改变（不可变）</text>
+  <text x="674" y="98" text-anchor="middle" font-size="11" fill="var(--ink)">Hibernate 硬性期待这一点</text>
+
+  <rect x="20" y="146" width="390" height="240" rx="9" fill="var(--danger-soft)" stroke="var(--danger)" stroke-width="1.6"/>
+  <text x="215" y="170" text-anchor="middle" font-size="14" font-weight="700" fill="var(--danger)">自然键 Natural key</text>
+  <text x="215" y="192" text-anchor="middle" font-size="11.5" fill="var(--ink)">凭<tspan font-weight="700">业务语义</tspan>而唯一的属性或属性组合</text>
+  <text x="215" y="212" text-anchor="middle" font-size="11.5" fill="var(--ink-soft)">例：社会安全号、澳大利亚税号</text>
+  <rect x="44" y="224" width="342" height="34" rx="5" fill="var(--panel)" stroke="var(--line-strong)"/>
+  <text x="215" y="245" text-anchor="middle" font-size="11.5" fill="var(--ink)"><tspan font-weight="700">识别法</tspan>：键属性在数据库之外<tspan font-weight="700">有意义</tspan>吗？</text>
+  <text x="215" y="278" text-anchor="middle" font-size="11" fill="var(--ink-soft)">用户会不会这样说话：「把 item #A23-abc 的图发我」</text>
+  <text x="215" y="296" text-anchor="middle" font-size="11" fill="var(--ink-soft)">会 → 它就是自然键（不管是否自动生成）</text>
+  <text x="215" y="326" text-anchor="middle" font-size="11.5" font-weight="700" fill="var(--danger)">经验表明：自然主键最终总会带来麻烦</text>
+  <text x="44" y="348" font-size="11" fill="var(--ink)">• 满足三条要求的实体属性极少</text>
+  <text x="44" y="366" font-size="11" fill="var(--ink)">• 改主键值（乃至改定义）和所有引用它的外键 = 噩梦</text>
+  <text x="44" y="380" font-size="11" fill="var(--ink)">• 常常只能拼成<tspan font-weight="700">复合自然键</tspan> → 维护、临时查询、schema 演进都更难</text>
+
+  <rect x="430" y="146" width="390" height="240" rx="9" fill="var(--sql-soft)" stroke="var(--sql)" stroke-width="1.8"/>
+  <text x="625" y="170" text-anchor="middle" font-size="14" font-weight="700" fill="var(--sql)">代理键 Surrogate key　✓ 强烈推荐</text>
+  <text x="625" y="192" text-anchor="middle" font-size="11.5" fill="var(--ink)">也叫合成标识符（synthetic identifier）</text>
+  <text x="625" y="214" text-anchor="middle" font-size="11.5" fill="var(--ink)"><tspan font-weight="700">没有业务含义</tspan>，由数据库或应用生成唯一值</text>
+  <text x="625" y="236" text-anchor="middle" font-size="11.5" fill="var(--ink)">理想情况下用户<tspan font-weight="700">看不到也不会引用</tspan>它 —— 属于系统内部</text>
+  <rect x="454" y="250" width="342" height="52" rx="5" fill="var(--panel)" stroke="var(--sql)"/>
+  <text x="625" y="272" text-anchor="middle" font-size="12" font-weight="700" fill="var(--sql)">结论</text>
+  <text x="625" y="292" text-anchor="middle" font-size="11.5" fill="var(--ink)"><tspan font-weight="700">schema 里几乎每张表都该有一个专职的代理主键列</tspan></text>
+  <text x="625" y="326" text-anchor="middle" font-size="11" fill="var(--ink-soft)">没有候选键时更是唯一选择</text>
+  <text x="625" y="350" text-anchor="middle" font-size="11" fill="var(--ink-soft)">未被选为主键但值确实唯一的候选键，</text>
+  <text x="625" y="366" text-anchor="middle" font-size="11" fill="var(--ink-soft)">应在数据库里声明为 <tspan font-family="monospace">UNIQUE</tspan> 键（哪怕它可变）</text>
+</svg>
+</div><figcaption>图 5-A　主键选择：为什么本书强烈推荐代理键</figcaption></figure>
+
+<div class="pit"><b>主键必须不可变吗？</b><p>关系模型只要求候选键<b>唯一且不可约</b>；选哪个当主键是品味问题。<b>但 Hibernate 与 Spring Data 期待作为主键的候选键是不可变的</b> —— 它们的 API 不支持更新主键值；硬绕的话会撞上 Hibernate 的<b>缓存与脏检查引擎</b>。如果你的 schema 依赖可更新主键（甚至用了 <code>ON UPDATE CASCADE</code>），<b>必须先改 schema</b>。「期望你的数据库 schema 存活几十年，即便应用不会。」</p></div>
+
+<h3 id="s24">5.2.4　配置主键生成器</h3>
+
+<p><code>@Id</code> 只标记标识符属性。<b>不加 <code>@GeneratedValue</code></b>，JPA 提供者就假定<b>由你</b>在保存前创建并赋值 —— 称为<b>应用赋值标识符</b>，处理遗留数据库或自然主键时才需要。通常你会希望系统在保存时生成主键值。</p>
+
+<h4>JPA 标准化的四种策略</h4>
+<div class="tablewrap"><table>
+<thead><tr><th style="width:180px"><code>GenerationType</code></th><th>行为</th></tr></thead>
+<tbody>
+<tr><td><code>AUTO</code></td><td>Hibernate 询问你配置的数据库方言，<b>自行挑一个合适策略</b>。等价于不带参数的 <code>@GeneratedValue()</code></td></tr>
+<tr><td><code>SEQUENCE</code></td><td>期待（用工具的话会创建）数据库里有名为 <code>HIBERNATE_SEQUENCE</code> 的序列。<b>每次 INSERT 之前</b>单独调用它，产生递增数值</td></tr>
+<tr><td><code>IDENTITY</code></td><td>期待（并在建表 DDL 中创建）一个特殊的<b>自增主键列</b>，在数据库 INSERT 时自动生成数值</td></tr>
+<tr><td><code>TABLE</code></td><td>用一张额外的表保存下一个主键值，每个实体类一行。INSERT 前先读再更新这张表。默认表名 <code>HIBERNATE_SEQUENCES</code>，列为 <code>SEQUENCE_NAME</code> 与 <code>NEXT_VALUE</code></td></tr>
+</tbody></table></div>
+
+<div class="warn"><b>为什么本书不用 AUTO，而用具名生成器</b>
+<p><code>AUTO</code> 看着方便，但你常常需要更多控制。多数应用用数据库序列，而你可能想自定义序列名和其他设置。于是把标识符映射成 <code>@GeneratedValue(generator = "ID_GENERATOR")</code> —— 一个<b>具名标识符生成器</b>，这样 <code>ID_GENERATOR</code> 的配置就<b>独立于实体类</b>了。</p>
+<p style="margin-top:6px">JPA 内置 <code>@SequenceGenerator</code> 与 <code>@TableGenerator</code> 两个注解可以配置具名生成器，但<b>只能放在类顶部</b>（哪怕那是个空类），<b>不能放在 <code>package-info.java</code> 里</b>，而且给不到 Hibernate 的全部能力。因此作者<b>偏爱原生的 <code>@org.hibernate.annotations.GenericGenerator</code></b>。</p></div>
+
+<div class="filename">Ch05/generator/src/main/java/…/ch05/package-info.java　—— 推荐配置</div>
+<pre><code><span class="ann">@org.hibernate.annotations.GenericGenerator</span>(
+   name = <span class="str">"ID_GENERATOR"</span>,
+   strategy = <span class="str">"enhanced-sequence"</span>,                    <span class="cmt">❶ 产生递增数值</span>
+   parameters = {
+      <span class="ann">@org.hibernate.annotations.Parameter</span>(
+         name = <span class="str">"sequence_name"</span>, value = <span class="str">"JPWHSD_SEQUENCE"</span>),   <span class="cmt">❷ 自定义序列名</span>
+      <span class="ann">@org.hibernate.annotations.Parameter</span>(
+         name = <span class="str">"initial_value"</span>, value = <span class="str">"1000"</span>)               <span class="cmt">❸ 给测试数据留出空间</span>
+})</code></pre>
+
+<div class="keyhint"><span class="k">❶ enhanced-sequence</span><span>方言支持序列 → 用真正的数据库序列；DBMS 不支持 → Hibernate <b>自己管理一张「序列表」</b>模拟序列行为。这带来<b>真正的可移植性</b>：生成器总能在 INSERT <b>之前</b>被调用；而自增标识列是在 INSERT <b>时</b>产生值、之后才返回给应用。</span></div>
+<div class="keyhint"><span class="k">❸ initial_value=1000</span><span>集成测试跑起来时，测试代码新插入的数据 id 都 &gt; 1000；测试前想导入的种子数据可以用 1–999，于是你能在测试里引用<b>稳定的标识符值</b>：「加载 id 为 123 的 item 并对它做些测试」。这是<b>生成 schema 时的 DDL 选项</b>。</span></div>
+
+<div class="tip"><b>可以全局共享一个序列</b><p>所有领域模型类都写 <code>@GeneratedValue(generator = "ID_GENERATOR")</code> 是<b>无害的</b>。某个实体的主键值不连续没关系 —— 只要在<b>一张表内</b>唯一即可。</p></div>
+
+<div class="cols">
+<div>
+<div class="filename">Hibernate JPA 侧（HelloWorldJPATest）</div>
+<pre><code>em.getTransaction().begin();
+Item item = <span class="kw">new</span> Item();
+item.setName(<span class="str">"Some Item"</span>);
+item.setAuctionEnd(Helper.tomorrow());
+em.persist(item);
+em.getTransaction().commit();</code></pre>
+</div>
+<div>
+<div class="filename">Spring Data JPA 侧（HelloWorldSpringDataJPATest）</div>
+<pre><code>Item item = <span class="kw">new</span> Item();
+item.setName(<span class="str">"Some Item"</span>);
+item.setAuctionEnd(Helper.tomorrow());
+itemRepository.save(item);</code></pre>
+</div>
+</div>
+<p><b>两种写法运行后结果一样</b>：<code>ITEM</code> 表插入一行，<code>id = 1000</code>（生成器指定的第一个值），下一次要生成的值保存在 <code>JPWHSD_SEQUENCE</code> 里。<b>主键值由框架层管理，程序员从不去碰它。</b></p>
+
+<h4>标识符的 Java 类型该选什么</h4>
+<div class="keyhint"><span class="k">Long vs long</span><span>都能完美对应数值序列生成器。区别在于：对一个<b>尚未存库</b>的新 item 调 <code>getId()</code>，前者返回 <code>null</code>，后者返回 <code>0</code>。要判断「是不是新对象」，<b><code>null</code> 检查对读代码的人更易懂</b>。</span></div>
+<div class="keyhint"><span class="k">不要用 int / short</span><span>它们能撑一段时间（也许好几年），但随着数据库变大你会撞上取值范围上限。作者的算法：<b>每毫秒生成一个 id 且不留空隙，<code>Integer</code> 撑约两个月，<code>Long</code> 能撑约 3 亿年。</b></span></div>
+
+<h3 id="s25">5.2.5　标识符生成器策略全表</h3>
+
+<div class="tip"><b>不想读完整列表？三句话版本</b>
+<ol style="margin-bottom:0">
+<li>打开 <code>GenerationType.AUTO</code>，看看 Hibernate 对你的方言默认选了什么 —— 多半是 <code>sequence</code> 或 <code>identity</code>，都是不错的选择，但未必最高效或最可移植。</li>
+<li><b>总体上，优先选「预插入」生成策略</b>：在 INSERT <b>之前独立</b>产生标识符值。常见做法是用一个共享、可并发访问的数据库序列。</li>
+<li>若要<b>一致、可移植、且 INSERT 前就能拿到标识符值</b>，就用 <code>enhanced-sequence</code>。</li>
+</ol></div>
+
+<div class="warn"><b>INSERT 前生成 vs INSERT 后生成，差别在哪？</b>
+<p>ORM 会优化 INSERT（比如在 JDBC 层做批处理），所以 SQL 执行发生在工作单元中<b>尽可能晚</b>的时刻，<b>而不是你调 <code>entityManager.persist(someItem)</code> 的那一刻</b> —— 这只是把插入排进队列，并<b>在可能的情况下</b>赋上标识符值。因此如果引擎没能在 INSERT 前生成标识符，你此时调 <code>someItem.getId()</code> 可能拿到 <code>null</code>。<b>自增列、列默认值、触发器生成的键，都只有在 INSERT 之后才可用。</b></p></div>
+
+<div class="tablewrap"><table>
+<thead><tr><th style="width:150px">策略</th><th>说明</th><th>对应的 JPA 策略</th></tr></thead>
+<tbody>
+<tr><td><code>native</code></td><td>按配置的 SQL 方言自动选择（如 sequence 或 identity）。要确定选了哪个，得去看方言的 Javadoc 甚至源码</td><td><code>AUTO</code>（<b>旧</b>映射）</td></tr>
+<tr><td><code>sequence</code></td><td>使用名为 <code>HIBERNATE_SEQUENCE</code> 的原生数据库序列，每次插入新行前调用。可自定义序列名与额外 DDL 设置（见 <code>org.hibernate.id.SequenceGenerator</code>）</td><td>—</td></tr>
+<tr><td><b><code>enhanced-sequence</code></b><br><span class="badge new">推荐</span></td><td>支持序列就用原生序列，否则<b>退化为一张单列单行的表来模拟序列</b>（默认表名 <code>HIBERNATE_SEQUENCE</code>）。无论 DBMS 是否支持真序列，<b>行为一致</b>：总在 INSERT 前调用。还支持 <code>org.hibernate.id.enhanced.Optimizer</code> 来避免每次 INSERT 都打数据库（默认不优化）</td><td><code>SEQUENCE</code>，以及新映射下的 <code>AUTO</code></td></tr>
+<tr><td><code>enhanced-table</code></td><td>用一张名为 <code>HIBERNATE_SEQUENCES</code> 的额外表，默认一行代表序列并保存下一个值；需要生成时 select 再 update。可配置成多行（每个生成器一行）。替代了过时的 <code>MultipleHiLoPerTableGenerator</code></td><td><code>TABLE</code>（新映射）</td></tr>
+<tr><td><code>identity</code></td><td>支持 DB2、MySQL、MS SQL Server、Sybase 的 IDENTITY / 自增列，值在 INSERT 行时生成。<b>无选项</b>。由于 Hibernate 代码的一个怪癖，<b>无法用 <code>@GenericGenerator</code> 配置它</b>（那样 DDL 不会带上自增选项）—— 唯一用法是 <code>GenerationType.IDENTITY</code></td><td><code>IDENTITY</code>（新旧皆是）</td></tr>
+<tr><td><code>increment</code></td><td>启动时读取每个实体表的最大数值主键，之后每插一行加一。<b>仅当非集群的 Hibernate 应用独占数据库时高效，其他场景一律别用</b></td><td>—</td></tr>
+<tr><td><code>select</code></td><td>Hibernate 不生成键值、INSERT 也不含主键列，指望 DBMS 自己赋值（schema 默认值或触发器），插入后再用 SELECT 取回主键。必填参数 <code>key</code>。<b>效率不高，只适合无法直接返回生成键的老 JDBC 驱动</b></td><td>—</td></tr>
+<tr><td><code>uuid2</code></td><td>在<b>应用层</b>产生 128 位 UUID。适合需要<b>跨数据库全局唯一</b>的场景（如每晚把多个生产库的数据合并进归档库）。可编码为 <code>String</code>、<code>byte[16]</code> 或 <code>java.util.UUID</code>。取代了遗留的 <code>uuid</code> / <code>uuid.hex</code></td><td>—</td></tr>
+<tr><td><code>guid</code></td><td>由<b>数据库</b>产生全局唯一标识符，用 Oracle、Ingres、MS SQL Server、MySQL 上的 SQL 函数；Hibernate 在 INSERT 前调用该函数，值映射到 <code>String</code> 属性</td><td>—</td></tr>
+</tbody></table></div>
+
+<div class="note"><b>两套映射：old 与 new</b><p>Hibernate 是有机生长起来的，标准策略与原生策略之间<b>存在两套映射关系</b>。用 <code>persistence.xml</code> 里的 <code>hibernate.id.new_generator_mappings</code> 切换，<b>默认 true</b>（用新映射）。作者的吐槽：「软件的陈化，可没有葡萄酒那么优雅。」</p>
+<p style="margin-top:6px">想要完全掌控生成？把 <code>@GenericGenerator</code> 的 <code>strategy</code> 设成实现 <code>org.hibernate.id.IdentityGenerator</code> 接口的类的<b>全限定名</b>。</p></div>
+
+<div class="pit"><b>别把标识符暴露到业务逻辑之外</b><p>比如不要通过 API 对外暴露它 —— 这个标识符<b>没有任何业务含义</b>，只与持久化相关。</p></div>
+
+<h2 id="s3"><span class="num">5.3</span>实体映射选项</h2>
+<p>以下都是<b>可选项</b>，可以先跳过，遇到具体问题再回来查。</p>
+
+<h3 id="s31">5.3.1　控制名字</h3>
+
+<h4>默认表名与 @Table</h4>
+<div class="keyhint"><span class="k">默认规则</span><span>只写 <code>@Entity</code> 时，表名 = 类名。<code>Item</code> → <code>ITEM</code>；<b>驼峰会转成蛇形</b>：<code>BidItem</code> → <code>BID_ITEM</code>。</span></div>
+
+<div class="filename">Ch05/mapping/src/main/java/…/ch05/model/User.java</div>
+<pre><code><span class="ann">@Entity</span>
+<span class="ann">@Table</span>(name = <span class="str">"USERS"</span>)      <span class="cmt">// USER 在多数 SQL DBMS 中是保留字</span>
+<span class="kw">public class</span> User { … }</code></pre>
+<p><code>@javax.persistence.Table</code> 还有 <code>catalog</code> 与 <code>schema</code> 选项，用作命名前缀。</p>
+
+<h4>给 SQL 标识符加引号</h4>
+<figure><div class="fig-box">
+<svg viewBox="0 0 820 250" xmlns="http://www.w3.org/2000/svg" font-family="Inter,system-ui,sans-serif">
+  <defs><marker id="q5" markerWidth="9" markerHeight="9" refX="8" refY="4.5" orient="auto"><path d="M0 0 L9 4.5 L0 9 z" fill="var(--accent)"/></marker></defs>
+  <rect x="20" y="20" width="360" height="106" rx="8" fill="var(--java-soft)" stroke="var(--java)"/>
+  <text x="200" y="44" text-anchor="middle" font-size="13" font-weight="700" fill="var(--java)">三种写法</text>
+  <text x="40" y="68" font-family="monospace" font-size="12" fill="var(--ink)">hibernate.auto_quote_keyword=true</text>
+  <text x="40" y="84" font-size="10.5" fill="var(--ink-faint)">全局自动：靠方言识别保留字并自动加引号</text>
+  <text x="40" y="106" font-family="monospace" font-size="12" fill="var(--ink)">@Table(name = "`USER`")　<tspan fill="var(--ink-faint)">Hibernate 反引号</tspan></text>
+  <text x="40" y="122" font-family="monospace" font-size="12" fill="var(--ink)">@Table(name = "\"USER\"")　<tspan fill="var(--ink-faint)">JPA 2.0 标准</tspan></text>
+
+  <path d="M386 72 L446 72" stroke="var(--accent)" stroke-width="1.6" marker-end="url(#q5)"/>
+  <text x="416" y="64" text-anchor="middle" font-size="10.5" fill="var(--accent)">方言</text>
+
+  <rect x="452" y="20" width="348" height="106" rx="8" fill="var(--sql-soft)" stroke="var(--sql)"/>
+  <text x="626" y="44" text-anchor="middle" font-size="13" font-weight="700" fill="var(--sql)">生成的 SQL 因方言而异</text>
+  <text x="472" y="68" font-family="monospace" font-size="12" fill="var(--ink)">[USER]　　MS SQL Server</text>
+  <text x="472" y="88" font-family="monospace" font-size="12" fill="var(--ink)">'USER'　　MySQL</text>
+  <text x="472" y="108" font-family="monospace" font-size="12" fill="var(--ink)">"USER"　　H2</text>
+
+  <rect x="20" y="140" width="780" height="44" rx="7" fill="var(--panel)" stroke="var(--line-strong)"/>
+  <text x="410" y="158" text-anchor="middle" font-size="12" fill="var(--ink)">要给<tspan font-weight="700">所有</tspan>标识符加引号：在 <tspan font-family="monospace">orm.xml</tspan> 的 <tspan font-family="monospace">&lt;persistence-unit-defaults&gt;</tspan> 里加 <tspan font-family="monospace">&lt;delimited-identifiers/&gt;</tspan>（见 §3.3.3）</text>
+  <text x="410" y="176" text-anchor="middle" font-size="12" fill="var(--ink-soft)">Hibernate 会在所有地方强制使用带引号的标识符</text>
+
+  <rect x="20" y="196" width="780" height="46" rx="7" fill="var(--danger-soft)" stroke="var(--danger)"/>
+  <text x="410" y="216" text-anchor="middle" font-size="12" font-weight="700" fill="var(--danger)">但请尽量重命名，而不是加引号</text>
+  <text x="410" y="234" text-anchor="middle" font-size="11.5" fill="var(--ink)">在 SQL 控制台里手工正确转义每个标识符写临时查询极其痛苦；数据库若还被报表等其他方式访问，痛苦加倍</text>
+</svg>
+</div><figcaption>图 5-B　保留字与加引号：能改名就改名</figcaption></figure>
+
+<h4>实现命名约定：PhysicalNamingStrategy</h4>
+<p>假设 CaveatEmptor 要求所有表名遵循 <code>CE_&lt;table name&gt;</code> 模式。给每个实体类手写 <code>@Table</code> 既耗时又容易漏 —— 用命名策略一次搞定：</p>
+
+<div class="filename">Ch05/mapping/src/main/java/…/ch05/CENamingStrategy.java</div>
+<pre><code><span class="kw">public class</span> CENamingStrategy <span class="kw">extends</span> PhysicalNamingStrategyStandardImpl {
+    <span class="ann">@Override</span>
+    <span class="kw">public</span> Identifier toPhysicalTableName(Identifier name, JdbcEnvironment context) {
+        <span class="kw">return new</span> Identifier(<span class="str">"CE_"</span> + name.getText(), name.isQuoted());
+    }
+}</code></pre>
+<p><code>PhysicalNamingStrategy</code> 接口还提供了自定义<b>列名、序列名</b>等构件的方法。启用方式两边不同：</p>
+
+<div class="cols">
+<div>
+<div class="filename">Hibernate JPA：persistence.xml</div>
+<pre><code>&lt;persistence-unit name=<span class="str">"ch05.mapping"</span>&gt;
+  &lt;properties&gt;
+    &lt;property
+      name=<span class="str">"hibernate.physical_naming_strategy"</span>
+      value=<span class="str">"com.manning…ch05.CENamingStrategy"</span>/&gt;
+  &lt;/properties&gt;
+&lt;/persistence-unit&gt;</code></pre>
+</div>
+<div>
+<div class="filename">Spring Data JPA：SpringDataConfiguration</div>
+<pre><code>properties.put(
+    <span class="str">"hibernate.physical_naming_strategy"</span>,
+    CENamingStrategy.class.getName());</code></pre>
+</div>
+</div>
+
+<h4>为查询命名实体</h4>
+<p>默认所有实体名都被自动导入查询引擎的命名空间，所以 JPQL 里能用<b>不带包前缀的短类名</b>：</p>
+<pre><code>List&lt;Item&gt; items = em.createQuery(<span class="str">"select i from Item i"</span>, Item.class).getResultList();</code></pre>
+<p>但这<b>只在持久化单元里只有一个 <code>Item</code> 类时成立</b>。若另一个包里也有 <code>Item</code>，就得改名：</p>
+<pre><code><span class="kw">package</span> my.other.model;
+
+<span class="ann">@javax.persistence.Entity</span>(name = <span class="str">"AuctionItem"</span>)
+<span class="kw">public class</span> Item { … }
+
+<span class="cmt">// 现在这个类的短查询形式变成：select i from AuctionItem i
+// 当然，你也可以永远用带包前缀的全限定长名</span></code></pre>
+
+<h3 id="s32">5.3.2　动态 SQL 生成</h3>
+
+<figure><div class="fig-box">
+<svg viewBox="0 0 820 300" xmlns="http://www.w3.org/2000/svg" font-family="Inter,system-ui,sans-serif">
+  <rect x="20" y="20" width="380" height="260" rx="9" fill="var(--sql-soft)" stroke="var(--sql)" stroke-width="1.6"/>
+  <text x="210" y="44" text-anchor="middle" font-size="14" font-weight="700" fill="var(--sql)">默认：启动时生成并缓存 SQL</text>
+  <text x="210" y="66" text-anchor="middle" font-size="11.5" fill="var(--ink)">持久化单元创建时，为每个持久化类生成</text>
+  <text x="210" y="82" text-anchor="middle" font-size="11.5" fill="var(--ink)">简单的 CRUD 语句（读一行、删一行…）</text>
+  <rect x="44" y="96" width="332" height="52" rx="6" fill="var(--panel)" stroke="var(--line-strong)"/>
+  <text x="210" y="116" text-anchor="middle" font-size="11.5" font-weight="700" fill="var(--ink)">为什么值得？</text>
+  <text x="210" y="134" text-anchor="middle" font-size="11" fill="var(--ink)">比运行时每次拼字符串便宜；语句种类越少，</text>
+  <text x="210" y="152" text-anchor="middle" font-size="11" fill="var(--ink)">JDBC 层的 <tspan font-family="monospace">PreparedStatement</tspan> 缓存效率越高</text>
+  <rect x="44" y="176" width="332" height="90" rx="6" fill="var(--warn-soft)" stroke="var(--warn)"/>
+  <text x="210" y="196" text-anchor="middle" font-size="11.5" font-weight="700" fill="var(--warn)">可是启动时怎么知道要更新哪些列？</text>
+  <text x="210" y="216" text-anchor="middle" font-size="11" fill="var(--ink)">答案：生成的 UPDATE <tspan font-weight="700">更新所有列</tspan>；</text>
+  <text x="210" y="234" text-anchor="middle" font-size="11" fill="var(--ink)">某列没被改动，就把它<tspan font-weight="700">设回旧值</tspan></text>
+  <text x="210" y="256" text-anchor="middle" font-size="11" fill="var(--ink-soft)">大多数情况下这完全没问题</text>
+
+  <rect x="420" y="20" width="380" height="260" rx="9" fill="var(--accent-soft)" stroke="var(--accent)" stroke-width="1.8"/>
+  <text x="610" y="44" text-anchor="middle" font-size="14" font-weight="700" fill="var(--accent)">什么时候该改成运行期动态生成</text>
+  <text x="440" y="70" font-size="11.5" fill="var(--ink)">• 遗留表有<tspan font-weight="700">几百列</tspan>：哪怕只改一列，语句也巨大</text>
+  <text x="440" y="94" font-size="11.5" fill="var(--ink)">• 实体<tspan font-weight="700">数量极多</tspan>：启动时要预生成全部 CRUD，拖慢启动</text>
+  <text x="440" y="118" font-size="11.5" fill="var(--ink)">• 上千个实体 × 每个十几条语句 → <tspan font-weight="700">缓存内存占用高</tspan></text>
+  <text x="440" y="140" font-size="11.5" fill="var(--ink-soft)">　（内存受限的虚拟环境或低功耗设备上尤其要紧）</text>
+  <rect x="444" y="156" width="332" height="112" rx="6" fill="var(--panel)" stroke="var(--accent)"/>
+  <text x="610" y="176" text-anchor="middle" font-size="11.5" font-weight="700" fill="var(--accent)">需要使用<tspan font-weight="700">原生 Hibernate 注解</tspan></text>
+  <text x="462" y="200" font-family="monospace" font-size="11.5" fill="var(--ink)">@Entity</text>
+  <text x="462" y="218" font-family="monospace" font-size="11.5" fill="var(--accent)">@org.hibernate.annotations.DynamicInsert</text>
+  <text x="462" y="236" font-family="monospace" font-size="11.5" fill="var(--accent)">@org.hibernate.annotations.DynamicUpdate</text>
+  <text x="462" y="254" font-family="monospace" font-size="11.5" fill="var(--ink)">public class Item { … }</text>
+</svg>
+</div><figcaption>图 5-C　启动期预生成 SQL vs 运行期动态生成</figcaption></figure>
+
+<p>开启后：<b>UPDATE 只包含被改动的列，INSERT 只包含非空列</b>。</p>
+
+<h3 id="s33">5.3.3　让实体不可变</h3>
+<p>CaveatEmptor 里，对某商品的一次 <code>Bid</code> 是<b>不可变</b>的，因此永远不需要对 <code>BID</code> 表执行 UPDATE。Hibernate 还能做额外优化，比如<b>跳过脏检查</b>：</p>
+<pre><code><span class="ann">@Entity</span>
+<span class="ann">@org.hibernate.annotations.Immutable</span>
+<span class="kw">public class</span> Bid { … }</code></pre>
+
+<div class="tip"><b>POJO 何时算不可变</b><p>不暴露任何属性的公有 setter，<b>所有值都在构造器里设置</b>。Hibernate 加载和存储实例时应<b>直接访问字段</b> —— 这正是本章前面说的：<code>@Id</code> 放在字段上，Hibernate 就走字段访问，你可以自由设计 getter/setter。<b>注意：并非所有框架都能处理没有 setter 的 POJO。</b></p></div>
+
+<h3 id="s34">5.3.4　把实体映射到子查询</h3>
+<p>DBA 不让你改 schema，甚至连加视图都不行。你想要一个「商品 id + 该商品的出价数」的视图 —— 用 Hibernate 注解创建一个<b>应用级视图</b>：映射到 SQL SELECT 的只读实体类。</p>
+
+<div class="filename">Ch05/subselect/src/main/java/…/ch05/model/ItemBidSummary.java</div>
+<pre><code><span class="ann">@Entity</span>
+<span class="ann">@org.hibernate.annotations.Immutable</span>
+<span class="ann">@org.hibernate.annotations.Subselect</span>(
+    value = <span class="str">"select i.ID as ITEMID, i.NAME as NAME, "</span> +
+            <span class="str">"count(b.ID) as NUMBEROFBIDS "</span> +
+            <span class="str">"from ITEM i left outer join BID b on i.ID = b.ITEM_ID "</span> +
+            <span class="str">"group by i.ID, i.NAME"</span>
+)
+<span class="ann">@org.hibernate.annotations.Synchronize</span>({<span class="str">"ITEM"</span>, <span class="str">"BID"</span>})   <span class="cmt">← 关键！</span>
+<span class="kw">public class</span> ItemBidSummary {
+    <span class="ann">@Id</span>
+    <span class="kw">private</span> Long itemId;
+    <span class="kw">private</span> String name;
+    <span class="kw">private long</span> numberOfBids;
+
+    <span class="kw">public</span> ItemBidSummary() { }
+    <span class="cmt">// 只有 getter</span>
+}</code></pre>
+
+<div class="pit"><b>为什么必须写 <code>@Synchronize</code></b>
+<p>你要把 SELECT 里引用的<b>所有表名</b>列进 <code>@Synchronize</code>。这样框架才知道：在对 <code>ItemBidSummary</code> 执行查询之前，必须先<b>刷新（flush）</b><code>Item</code> 和 <code>Bid</code> 实例的修改。如果内存里有尚未持久化、却会影响该查询的改动，Hibernate 会检测到并在执行查询前刷新；<b>否则结果会是陈旧状态</b>。</p>
+<p style="margin-top:6px">根因：<code>ItemBidSummary</code> 类上<b>没有 <code>@Table</code> 注解</b>，框架无从知道执行查询前该自动刷新哪些表。</p></div>
+
+<div class="cols">
+<div>
+<div class="filename">Hibernate JPA 用法（ItemBidSummaryTest）</div>
+<pre><code>TypedQuery&lt;ItemBidSummary&gt; query = em.createQuery(
+    <span class="str">"select ibs from ItemBidSummary ibs where ibs.itemId = :id"</span>,
+    ItemBidSummary.class);
+ItemBidSummary s = query.setParameter(<span class="str">"id"</span>, 1000L)
+                        .getSingleResult();</code></pre>
+</div>
+<div>
+<div class="filename">Spring Data JPA 用法：先加一个 repository</div>
+<pre><code><span class="kw">public interface</span> ItemBidSummaryRepository
+        <span class="kw">extends</span> CrudRepository&lt;ItemBidSummary, Long&gt; { }
+
+<span class="cmt">// ItemBidSummarySpringDataTest</span>
+Optional&lt;ItemBidSummary&gt; s =
+        itemBidSummaryRepository.findById(1000L);</code></pre>
+</div>
+</div>
+
+<div class="summary" id="s4">
+<h3>本章小结</h3>
+<ul>
+<li><b>实体</b>是系统中较粗粒度的类：实例有<b>独立生命周期和自己的标识</b>，可被许多其他实例引用。</li>
+<li><b>值类型</b>依附于某个特定实体类：实例绑定在拥有它的实体上，<b>只能被一个实体实例引用</b>，没有独立标识。</li>
+<li><b>Java 同一性、对象相等性、数据库标识是三个不同概念</b>：前两个属于面向对象世界，最后一个属于关系数据库世界。</li>
+<li><b>好的主键：永不为 null、唯一、永不改变。</b>优先使用<b>代理键</b>而非自然键。</li>
+<li>主键生成器可用不同策略配置。推荐 <code>@GenericGenerator</code> + <code>enhanced-sequence</code> 写在 <code>package-info.java</code> 里，全局共享。<b>优先「预插入」生成</b>。</li>
+<li>实体、映射选项与命名策略<b>在 Hibernate JPA 和 Spring Data JPA 两边都能用</b>。</li>
+<li>其他实体级选项：<code>@Table</code> 改名与加引号、<code>PhysicalNamingStrategy</code> 统一约定、<code>@DynamicInsert/@DynamicUpdate</code> 动态 SQL、<code>@Immutable</code> 不可变实体、<code>@Subselect</code>+<code>@Synchronize</code> 应用级视图。</li>
+</ul>
+</div>
+
+<div class="pager">
+  <a href="ch04.html">← 第 4 章　使用 Spring Data JPA</a>
+  <a href="ch06.html">第 6 章　映射值类型 →</a>
+</div>
+</main>
+</div>
+</body>
+</html>

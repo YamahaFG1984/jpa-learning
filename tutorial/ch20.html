@@ -1,0 +1,772 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>第 20 章 · 测试 Java 持久化应用</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="topbar"><div class="topbar-inner">
+  <a class="brand" href="index.html">Java Persistence 讲义</a>
+  <span class="spacer"></span>
+  <a href="ch19.html">← 上一章</a>
+  <a href="index.html">目录</a>
+  <a href="index.html">全书完 ✓</a>
+</div></div>
+
+<div class="wrap">
+<nav class="toc">
+  <h4>本章目录</h4>
+  <a href="#s1">20.1 测试金字塔</a>
+  <a href="#s2">20.2 被测应用</a>
+  <a href="#s3">20.3 TestContext 框架</a>
+  <a class="sub" href="#s31">脏数据库问题</a>
+  <a href="#s4">20.4 @DirtiesContext</a>
+  <a href="#s5">20.5 @Transactional</a>
+  <a class="sub" href="#s51">REQUIRES_NEW 陷阱</a>
+  <a class="sub" href="#s52">性能对比</a>
+  <a href="#s6">20.6 事务前后钩子</a>
+  <a href="#s7">20.7 Spring profiles</a>
+  <a href="#s8">20.8 测试执行监听器</a>
+  <a href="#s9">注解速查表</a>
+  <a href="#s10">本章小结</a>
+</nav>
+
+<main>
+<div class="hero">
+  <div class="eyebrow">Part 6 · 编写查询与测试 Java 持久化应用</div>
+  <h1>第 20 章　测试 Java 持久化应用</h1>
+  <p>所有代码都需要测试。开发时我们写代码、编译、运行；运行时有时会测一下代码工作得如何。<b>但测试持久化应用不止于此</b>——我们的代码要和外部数据库交互，程序的行为可能依赖于它。本章的核心问题只有一个：<b>怎样让每次测试跑完之后，数据库的内容和跑之前一模一样。</b></p>
+</div>
+
+<div class="note"><b>本章的三个源码工程</b><p><code>Ch20/1 spring testing</code>（TestContext 框架、@DirtiesContext、@Transactional）、<code>Ch20/2 spring profiles</code>（配置文件切换）、<code>Ch20/3 spring listeners</code>（测试执行监听器）。运行前先执行 <code>Ch20/Ch20.sql</code>。</p></div>
+
+<h2 id="s1"><span class="num">20.1</span> 测试金字塔</h2>
+
+<p>前面的章节我们专注于编写与数据库交互的代码。现在需要确保程序是<b>安全的、没有 bug 的</b>：能引入改动而不制造 bug，能添加新特性而不影响旧特性，能重构代码而不破坏既有功能。</p>
+
+<figure>
+<div class="fig-box">
+<svg viewBox="0 0 820 400" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="测试金字塔">
+  <!-- pyramid -->
+  <path d="M410 40 L490 118 L330 118 Z" fill="var(--danger-soft)" stroke="var(--danger)" stroke-width="1.6"/>
+  <text x="410" y="94" text-anchor="middle" font-size="11.5" font-weight="700" fill="var(--ink)">验收测试</text>
+
+  <path d="M330 122 L490 122 L560 200 L260 200 Z" fill="var(--warn-soft)" stroke="var(--warn)" stroke-width="1.6"/>
+  <text x="410" y="170" text-anchor="middle" font-size="11.5" font-weight="700" fill="var(--ink)">系统测试</text>
+
+  <path d="M260 204 L560 204 L630 282 L190 282 Z" fill="var(--accent-soft)" stroke="var(--accent)" stroke-width="2.4"/>
+  <text x="410" y="248" text-anchor="middle" font-size="12.5" font-weight="700" fill="var(--accent)">集成测试　← 持久化测试在这一层</text>
+
+  <path d="M190 286 L630 286 L700 364 L120 364 Z" fill="var(--sql-soft)" stroke="var(--sql)" stroke-width="1.6"/>
+  <text x="410" y="330" text-anchor="middle" font-size="11.5" font-weight="700" fill="var(--ink)">单元测试</text>
+
+  <!-- descriptions on the right -->
+  <g font-size="10.5" fill="var(--ink-soft)">
+    <path d="M494 80 L700 80" stroke="var(--line)" stroke-width="1" stroke-dasharray="3 3"/>
+    <text x="706" y="70" font-size="10.5" fill="var(--ink)">用场景和测试用例检查应用</text>
+    <text x="706" y="84" font-size="10.5" fill="var(--ink-soft)">是否满足最终用户的期望</text>
+
+    <path d="M564 162 L700 162" stroke="var(--line)" stroke-width="1" stroke-dasharray="3 3"/>
+    <text x="706" y="152" font-size="10.5" fill="var(--ink)">在完整系统上测试，评估其</text>
+    <text x="706" y="166" font-size="10.5" fill="var(--ink-soft)">对规格的符合性。不需要了解</text>
+    <text x="706" y="180" font-size="10.5" fill="var(--ink-soft)">设计或代码</text>
+
+    <path d="M634 242 L700 242" stroke="var(--line)" stroke-width="1" stroke-dasharray="3 3"/>
+    <text x="706" y="236" font-size="10.5" fill="var(--ink)">把已验证的独立组件组合成</text>
+    <text x="706" y="250" font-size="10.5" fill="var(--ink-soft)">更大的聚合体，一起测试</text>
+
+    <path d="M704 324 L740 324" stroke="var(--line)" stroke-width="1" stroke-dasharray="3 3"/>
+    <text x="706" y="308" font-size="10.5" fill="var(--ink)">金字塔的地基。</text>
+    <text x="706" y="340" font-size="10.5" fill="var(--ink-soft)">隔离地测每个方法/类，</text>
+    <text x="706" y="354" font-size="10.5" fill="var(--ink-soft)">看它是否符合预期</text>
+  </g>
+
+  <text x="150" y="42" font-size="11" fill="var(--ink-faint)">数量少</text>
+  <text x="150" y="60" font-size="10" fill="var(--ink-faint)">慢、贵</text>
+  <text x="150" y="352" font-size="11" fill="var(--ink-faint)">数量多</text>
+  <text x="150" y="370" font-size="10" fill="var(--ink-faint)">快、便宜</text>
+  <path d="M170 70 L170 340" stroke="var(--line-strong)" stroke-width="1.4"/>
+  <path d="M166 336 L170 344 L174 336" stroke="var(--line-strong)" stroke-width="1.4" fill="none"/>
+</svg>
+</div>
+<figcaption>图 20-A　测试金字塔。底层（单元测试）最大，越往上越小：从检查独立单元开始，一直到验证软件是否满足用户需求。</figcaption>
+</figure>
+
+<div class="note"><b>为什么持久化测试属于集成层</b><p>因为<b>我们把自己的代码与数据库交互组合在了一起，并且依赖于数据库如何工作</b>。由此产生本章要解决的两个目标：</p>
+<ul>
+<li>让测试的行为<b>在重复执行之间保持一致</b></li>
+<li>让数据库的内容<b>在跑测试前后保持相同</b></li>
+</ul></div>
+
+<h2 id="s2"><span class="num">20.2</span> 创建被测的持久化应用</h2>
+
+<p>用 Spring Initializr 建项目（artifact 为 <code>testing</code>），依赖：<b>Spring Data JPA</b>、<b>MySQL Driver</b>、<b>Lombok</b>、<b>Bean Validation with Hibernate validator</b>（加入 <code>spring-boot-starter-validation</code>）。<code>spring-boot-starter-test</code> 会自动加上，它是<b>测试 Spring Boot 应用的 starter，包含 JUnit 5 等库</b>。</p>
+
+<div class="filename">Ch20/1 spring testing/src/main/resources/application.properties</div>
+<pre><code>spring.datasource.url=jdbc:mysql://localhost:3306/CH20_TESTING?serverTimezone=UTC
+spring.datasource.username=root
+spring.datasource.password=
+spring.jpa.properties.hibernate.dialect=org.hibernate.dialect.MySQL8Dialect
+spring.jpa.show-sql=true
+<span class="hl">spring.jpa.hibernate.ddl-auto=create</span>       <span class="cmt"># 每次运行应用都重建表</span></code></pre>
+
+<div class="cols">
+<div class="card"><h4>User 实体</h4>
+<pre><code><span class="ann">@Entity</span>
+<span class="ann">@NoArgsConstructor</span>
+<span class="kw">public class</span> User {
+    <span class="ann">@Id</span> <span class="ann">@GeneratedValue</span> <span class="ann">@Getter</span>
+    <span class="kw">private</span> Long id;
+
+    <span class="ann">@NotNull</span>
+    <span class="ann">@Size</span>(min = <span class="str">2</span>, max = <span class="str">255</span>,
+           message = <span class="str">"Name is required, maximum 255 characters."</span>)
+    <span class="ann">@Getter</span> <span class="ann">@Setter</span>
+    <span class="kw">private</span> String name;
+
+    <span class="kw">public</span> User(String name) { <span class="kw">this</span>.name = name; }
+}</code></pre></div>
+<div class="card"><h4>Log 实体</h4>
+<pre><code><span class="ann">@Entity</span>
+<span class="ann">@NoArgsConstructor</span>
+<span class="kw">public class</span> Log {
+    <span class="ann">@Id</span> <span class="ann">@GeneratedValue</span> <span class="ann">@Getter</span>
+    <span class="kw">private</span> Long id;
+
+    <span class="ann">@NotNull</span>
+    <span class="ann">@Size</span>(min = <span class="str">2</span>, max = <span class="str">255</span>,
+           message = <span class="str">"Info is required, maximum 255 characters."</span>)
+    <span class="ann">@Getter</span> <span class="ann">@Setter</span>
+    <span class="kw">private</span> String info;
+
+    <span class="kw">public</span> Log(String info) { <span class="kw">this</span>.info = info; }
+}</code></pre></div>
+</div>
+
+<pre><code><span class="kw">public interface</span> UserRepository <span class="kw">extends</span> JpaRepository&lt;User, Long&gt; { }
+<span class="kw">public interface</span> LogRepository  <span class="kw">extends</span> JpaRepository&lt;Log, Long&gt; { }</code></pre>
+
+<h2 id="s3"><span class="num">20.3</span> 使用 Spring TestContext 框架</h2>
+
+<p><b>Spring TestContext 框架</b>专为提供<b>集成测试支持</b>而设计，因此非常适合测试持久化层。它<b>与你使用的测试框架无关</b>（我们用 JUnit 5）。它的核心类和注解属于 <code>org.springframework.test.context</code> 包。</p>
+
+<p>框架的<b>入口点是 <code>TestContextManager</code> 类</b>，其目标是管理单个 <code>TestContext</code> 并向注册的监听器发送事件。</p>
+
+<h3 id="s31">脏数据库问题：一个会「第二次才失败」的测试</h3>
+
+<div class="filename">Ch20/1 spring testing/src/test/.../SaveRetrieveUserTest.java</div>
+<pre><code><span class="ann">@SpringBootTest</span>
+<span class="kw">class</span> SaveRetrieveUserTest {
+
+    <span class="ann">@Autowired</span>
+    <span class="kw">private</span> UserRepository userRepository;
+
+    <span class="hl">@RepeatedTest(2)</span>                       <span class="cmt">// 在一次类执行中跑两遍</span>
+    <span class="kw">void</span> saveRetrieve() {
+        userRepository.save(<span class="kw">new</span> User(<span class="str">"User1"</span>));
+        List&lt;User&gt; users = userRepository.findAll();
+
+        assertAll(
+            () -&gt; assertEquals(<span class="str">1</span>, users.size()),
+            () -&gt; assertEquals(<span class="str">"User1"</span>, users.get(<span class="str">0</span>).getName()));
+    }
+}</code></pre>
+
+<div class="pit"><b>结果：第一次成功，第二次失败</b><p>从数据库拿到了<b>两个</b> User 而不是一个。因为<b>第一次测试插入的那一行没有被删掉</b>，第二次测试在表里发现了它，又加了一行。</p></div>
+
+<figure>
+<div class="fig-box">
+<svg viewBox="0 0 820 320" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="脏数据库导致的测试失败">
+  <defs><marker id="a20" markerWidth="9" markerHeight="9" refX="8" refY="4.5" orient="auto"><path d="M0 0 L9 4.5 L0 9 z" fill="var(--ink-faint)"/></marker></defs>
+
+  <text x="410" y="24" text-anchor="middle" font-size="13" font-weight="700" fill="var(--ink)">跟踪实际执行的 SQL</text>
+
+  <rect x="20" y="40" width="240" height="112" rx="8" fill="var(--sql-soft)" stroke="var(--sql)"/>
+  <text x="140" y="62" text-anchor="middle" font-size="11.5" font-weight="700" fill="var(--ink)">类执行前（只一次）</text>
+  <g font-size="9.5" font-family="var(--mono)" fill="var(--ink-soft)">
+    <text x="30" y="82">drop table if exists hibernate_sequence</text>
+    <text x="30" y="96">drop table if exists log</text>
+    <text x="30" y="110">drop table if exists user</text>
+    <text x="30" y="124">create table hibernate_sequence ...</text>
+    <text x="30" y="138">create table log / create table user</text>
+  </g>
+
+  <path d="M266 96 L306 96" stroke="var(--ink-faint)" stroke-width="1.5" marker-end="url(#a20)"/>
+
+  <rect x="310" y="40" width="230" height="112" rx="8" fill="var(--java-soft)" stroke="var(--java)"/>
+  <text x="425" y="62" text-anchor="middle" font-size="11.5" font-weight="700" fill="var(--ink)">第 1 次测试</text>
+  <g font-size="9.5" font-family="var(--mono)" fill="var(--ink-soft)">
+    <text x="320" y="84">select next_val ... for update</text>
+    <text x="320" y="100">update hibernate_sequence ...</text>
+    <text x="320" y="116">insert into user (name, id) ...</text>
+    <text x="320" y="132">select ... from user user0_</text>
+  </g>
+  <text x="425" y="146" text-anchor="middle" font-size="10" fill="var(--sql)">✓ 找到 1 行 —— 通过</text>
+
+  <path d="M546 96 L586 96" stroke="var(--ink-faint)" stroke-width="1.5" marker-end="url(#a20)"/>
+
+  <rect x="590" y="40" width="210" height="112" rx="8" fill="var(--danger-soft)" stroke="var(--danger)"/>
+  <text x="695" y="62" text-anchor="middle" font-size="11.5" font-weight="700" fill="var(--ink)">第 2 次测试</text>
+  <g font-size="9.5" font-family="var(--mono)" fill="var(--ink-soft)">
+    <text x="600" y="84">（表没有被重建！）</text>
+    <text x="600" y="102">insert into user ...</text>
+    <text x="600" y="120">select ... from user</text>
+  </g>
+  <text x="695" y="140" text-anchor="middle" font-size="10" font-weight="700" fill="var(--danger)">✗ 找到 2 行 —— 失败</text>
+
+  <!-- table state -->
+  <text x="410" y="184" text-anchor="middle" font-size="12" font-weight="700" fill="var(--ink)">user 表的状态</text>
+  <rect x="180" y="196" width="140" height="56" rx="6" fill="var(--panel)" stroke="var(--line-strong)"/>
+  <text x="250" y="216" text-anchor="middle" font-size="10.5" fill="var(--ink-faint)">测试 1 之前：空</text>
+  <text x="250" y="238" text-anchor="middle" font-size="10.5" fill="var(--ink-faint)">（0 行）</text>
+
+  <path d="M326 224 L366 224" stroke="var(--ink-faint)" stroke-width="1.5" marker-end="url(#a20)"/>
+
+  <rect x="370" y="196" width="140" height="56" rx="6" fill="var(--warn-soft)" stroke="var(--warn)"/>
+  <text x="440" y="216" text-anchor="middle" font-size="10.5" fill="var(--ink)">测试 1 之后</text>
+  <text x="440" y="238" text-anchor="middle" font-size="10.5" font-weight="700" fill="var(--warn)">1 行 —— 脏了</text>
+
+  <path d="M516 224 L556 224" stroke="var(--ink-faint)" stroke-width="1.5" marker-end="url(#a20)"/>
+
+  <rect x="560" y="196" width="140" height="56" rx="6" fill="var(--danger-soft)" stroke="var(--danger)"/>
+  <text x="630" y="216" text-anchor="middle" font-size="10.5" fill="var(--ink)">测试 2 之后</text>
+  <text x="630" y="238" text-anchor="middle" font-size="10.5" font-weight="700" fill="var(--danger)">2 行 —— 断言崩了</text>
+
+  <rect x="20" y="270" width="780" height="42" rx="8" fill="var(--accent-soft)" stroke="var(--accent)"/>
+  <text x="410" y="290" text-anchor="middle" font-size="12" fill="var(--ink)">要点：<tspan font-weight="700">ddl-auto=create 只在应用启动时执行一次</tspan>，而不是每个测试方法前执行一次。</text>
+  <text x="410" y="306" text-anchor="middle" font-size="11.5" fill="var(--ink-soft)">接下来的 20.4 和 20.5 节就是解决这个问题的两条路线。</text>
+</svg>
+</div>
+<figcaption>图 20-B　脏数据库是怎么产生的。这是持久化测试最典型的失败模式：<b>单跑一个测试永远是绿的，一起跑就红。</b></figcaption>
+</figure>
+
+<h2 id="s4"><span class="num">20.4</span> 方案一：<code>@DirtiesContext</code> 注解</h2>
+
+<p><code>@DirtiesContext</code> 的意思是<b>「承认这个测试方法或测试类改动了 Spring 上下文」</b>，于是 Spring TestContext 框架会<b>从头重建上下文</b>并提供给下一个测试。这个注解可以加在方法或类上，其效果可以作用于每个测试方法执行的前/后，或整个测试类执行的前/后。</p>
+
+<div class="filename">Ch20/1 spring testing/src/test/.../SaveRetrieveUserTest.java</div>
+<pre><code><span class="ann">@SpringBootTest</span>
+<span class="hl">@DirtiesContext(classMode = DirtiesContext.ClassMode.AFTER_EACH_TEST_METHOD)</span>
+<span class="kw">class</span> SaveRetrieveUserTest {
+
+    <span class="ann">@Autowired</span>
+    <span class="kw">private</span> UserRepository userRepository;
+
+    <span class="ann">@RepeatedTest</span>(<span class="str">2</span>)
+    <span class="kw">void</span> saveRetrieve() { <span class="cmt">/* . . . 同上 */</span> }
+}</code></pre>
+
+<p>现在两次都通过了。因为<b>每个测试之前都会执行「建表 + 插入」全套 SQL</b>——连 Spring Boot 的横幅都会打印两次，因为应用被启动了两次。</p>
+
+<figure>
+<div class="fig-box">
+<svg viewBox="0 0 820 340" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="@DirtiesContext 在方法级别的执行流程">
+  <defs><marker id="a20b" markerWidth="9" markerHeight="9" refX="8" refY="4.5" orient="auto"><path d="M0 0 L9 4.5 L0 9 z" fill="var(--ink-faint)"/></marker></defs>
+
+  <text x="410" y="24" text-anchor="middle" font-size="13" font-weight="700" fill="var(--ink)">方法级 @DirtiesContext 的执行循环</text>
+
+  <rect x="90" y="60" width="240" height="240" rx="10" fill="none" stroke="var(--accent)" stroke-width="1.6" stroke-dasharray="6 4"/>
+  <text x="70" y="184" font-size="11" font-weight="700" fill="var(--accent)" transform="rotate(-90 70 184)">每个测试重复一遍</text>
+
+  <rect x="110" y="42" width="200" height="34" rx="6" fill="var(--sql-soft)" stroke="var(--sql)"/>
+  <text x="210" y="64" text-anchor="middle" font-size="11.5" fill="var(--ink)">创建上下文并缓存</text>
+  <path d="M210 78 L210 94" stroke="var(--ink-faint)" stroke-width="1.4" marker-end="url(#a20b)"/>
+
+  <rect x="110" y="96" width="200" height="34" rx="6" fill="var(--java-soft)" stroke="var(--java)"/>
+  <text x="210" y="118" text-anchor="middle" font-size="11.5" fill="var(--ink)">注入依赖</text>
+  <path d="M210 132 L210 148" stroke="var(--ink-faint)" stroke-width="1.4" marker-end="url(#a20b)"/>
+
+  <rect x="110" y="150" width="200" height="34" rx="6" fill="var(--panel)" stroke="var(--line-strong)"/>
+  <text x="210" y="172" text-anchor="middle" font-size="11.5" fill="var(--ink)">执行 @BeforeEach</text>
+  <path d="M210 186 L210 202" stroke="var(--ink-faint)" stroke-width="1.4" marker-end="url(#a20b)"/>
+
+  <rect x="110" y="204" width="200" height="34" rx="6" fill="var(--accent-soft)" stroke="var(--accent)"/>
+  <text x="210" y="226" text-anchor="middle" font-size="11.5" font-weight="700" fill="var(--ink)">执行测试方法</text>
+  <path d="M210 240 L210 256" stroke="var(--ink-faint)" stroke-width="1.4" marker-end="url(#a20b)"/>
+
+  <rect x="110" y="258" width="200" height="34" rx="6" fill="var(--panel)" stroke="var(--line-strong)"/>
+  <text x="210" y="280" text-anchor="middle" font-size="11.5" fill="var(--ink)">执行 @AfterEach</text>
+  <path d="M210 296 L210 306" stroke="var(--danger)" stroke-width="1.4" marker-end="url(#a20b)"/>
+
+  <rect x="110" y="308" width="200" height="30" rx="6" fill="var(--danger-soft)" stroke="var(--danger)"/>
+  <text x="210" y="328" text-anchor="middle" font-size="11.5" font-weight="700" fill="var(--danger)">移除缓存的上下文</text>
+
+  <rect x="380" y="60" width="420" height="120" rx="8" fill="var(--sql-soft)" stroke="var(--sql)"/>
+  <text x="590" y="82" text-anchor="middle" font-size="12" font-weight="700" fill="var(--sql)">✓ 优点</text>
+  <text x="396" y="106" font-size="11" fill="var(--ink)">· 每个测试都拿到<tspan font-weight="700">全新的数据库和全新的上下文</tspan></text>
+  <text x="396" y="128" font-size="11" fill="var(--ink)">· 测试之间<tspan font-weight="700">彻底隔离</tspan>，不可能互相污染</text>
+  <text x="396" y="150" font-size="11" fill="var(--ink)">· 概念简单，行为可预测</text>
+  <text x="396" y="170" font-size="11" fill="var(--ink-soft)">· 适合少数确实会改动 Spring 上下文本身的测试</text>
+
+  <rect x="380" y="192" width="420" height="146" rx="8" fill="var(--danger-soft)" stroke="var(--danger)"/>
+  <text x="590" y="214" text-anchor="middle" font-size="12" font-weight="700" fill="var(--danger)">✗ 代价</text>
+  <text x="396" y="238" font-size="11" fill="var(--ink)">· <tspan font-weight="700">每个测试都要重建表、重新初始化整个应用</tspan></text>
+  <text x="396" y="260" font-size="11" fill="var(--ink)">· 开销<tspan font-weight="700">不取决于记录数，而取决于上下文被重新初始化的次数</tspan></text>
+  <text x="396" y="282" font-size="11" fill="var(--ink)">· 在 MySQL 和 H2 上实测，与 @Transactional 的差距</text>
+  <text x="408" y="298" font-size="11" fill="var(--ink)">  <tspan font-weight="700">近似恒定</tspan>（100 ~ 2000 条记录都一样）</text>
+  <text x="396" y="322" font-size="11.5" font-weight="700" fill="var(--danger)">结论：@DirtiesContext 要节制使用。</text>
+  <text x="396" y="336" font-size="10.5" fill="var(--ink-soft)">把带这个注解的测试推到 CI/CD 环境会严重拉长执行时间。</text>
+</svg>
+</div>
+<figcaption>图 20-C　方法级 <code>@DirtiesContext</code> 的执行流程与它的代价。它管用，但每个测试都付一次「重启应用」的钱。</figcaption>
+</figure>
+
+<h2 id="s5"><span class="num">20.5</span> 方案二：<code>@Transactional</code> 执行</h2>
+
+<p>第 11 章详细讲过事务：事务控制<b>要么全部成功、要么全部失败</b>的原子操作组。现在要应用的思路是：<b>让每个测试在事务中运行，并在执行结束时回滚事务。</b></p>
+
+<div class="note"><b>默认就会回滚</b><p>执行测试时，由于 <b><code>TransactionalTestExecutionListener</code></b> 的存在，事务会<b>自动回滚</b>（20.8 节详谈监听器）。这个默认行为可以用 <code>@Commit</code> 和 <code>@Rollback</code> 注解修改：想让测试在执行结束时提交，就标注 <code>@Commit</code> 或 <code>@Rollback(false)</code>。</p></div>
+
+<p>为了跟踪测试执行期间事务何时活跃，我们用 <code>TransactionSynchronizationManager</code> 类——它<b>为一个线程管理资源和事务同步</b>，其 <code>isActualTransactionActive()</code> 方法检查当前是否有 <code>Transaction</code> 对象处于活跃状态。</p>
+
+<div class="filename">Ch20/1 spring testing/src/test/.../TransactionalTest.java</div>
+<pre><code><span class="ann">@SpringBootTest</span>
+<span class="hl">@Transactional</span>
+<span class="kw">class</span> TransactionalTest {
+
+    <span class="ann">@BeforeAll</span>
+    <span class="kw">static void</span> beforeAll() {
+        System.out.println(<span class="str">"beforeAll, transaction active = "</span> +
+               TransactionSynchronizationManager.isActualTransactionActive());
+    }
+
+    <span class="ann">@BeforeEach</span>  <span class="kw">void</span> beforeEach() { <span class="cmt">/* 同样打印 */</span> }
+
+    <span class="ann">@RepeatedTest</span>(<span class="str">2</span>)
+    <span class="kw">void</span> storeRetrieve() { <span class="cmt">/* . . . 打印 end of method */</span> }
+
+    <span class="ann">@AfterEach</span>   <span class="kw">void</span> afterEach() { <span class="cmt">/* 同样打印 */</span> }
+
+    <span class="ann">@AfterAll</span>
+    <span class="kw">static void</span> afterAll() { <span class="cmt">/* 同样打印 */</span> }
+}</code></pre>
+
+<div class="cols">
+<div class="card"><h4>执行日志</h4>
+<pre><code>beforeAll,      transaction active = <span class="str">false</span>
+beforeEach,     transaction active = <span class="hl">true</span>
+end of method,  transaction active = <span class="hl">true</span>
+afterEach,      transaction active = <span class="hl">true</span>
+beforeEach,     transaction active = <span class="hl">true</span>
+end of method,  transaction active = <span class="hl">true</span>
+afterEach,      transaction active = <span class="hl">true</span>
+afterAll,       transaction active = <span class="str">false</span></code></pre></div>
+<div class="card"><h4>怎么读这份日志</h4>
+<p>事务在 <code>@BeforeAll</code> 和 <code>@AfterAll</code> 里<b>不活跃</b>，但在 <code>@BeforeEach</code>、<code>@AfterEach</code> 以及测试方法内部<b>是活跃的</b>。</p>
+<p>也就是说：<b>事务的边界正好包住「@BeforeEach → 测试方法 → @AfterEach」这一整段</b>。测试结束时事务被回滚，所以 <code>@RepeatedTest</code> 每一次都通过。</p></div>
+</div>
+
+<h3 id="s51">陷阱：在独立事务中启动的方法</h3>
+
+<p>引入一个带事务方法的 <code>UserService</code> 类：</p>
+
+<div class="filename">Ch20/1 spring testing/src/main/.../service/UserService.java</div>
+<pre><code><span class="ann">@Service</span>
+<span class="kw">public class</span> UserService {
+
+    <span class="ann">@Autowired</span>
+    <span class="kw">private</span> UserRepository userRepository;
+
+    <span class="ann">@Transactional</span>                       <span class="cmt">// 默认传播行为是 REQUIRED</span>
+    <span class="kw">public void</span> saveTransactionally(User user) {
+        userRepository.save(user);
+    }
+}</code></pre>
+
+<pre><code><span class="ann">@RepeatedTest</span>(<span class="str">2</span>)
+<span class="kw">void</span> storeRetrieve() {
+    List&lt;User&gt; users = buildUsersList();
+    userRepository.saveAll(users);
+    assertEquals(getIterations(), userRepository.findAll().size());
+
+    <span class="hl">userService.saveTransactionally(users.get(0));</span>
+
+    System.out.println(<span class="str">"end of method, transaction active = "</span> +
+           TransactionSynchronizationManager.isActualTransactionActive());
+}</code></pre>
+
+<figure>
+<div class="fig-box">
+<svg viewBox="0 0 820 400" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="REQUIRED 与 REQUIRES_NEW 的区别">
+  <defs><marker id="a20c" markerWidth="9" markerHeight="9" refX="8" refY="4.5" orient="auto"><path d="M0 0 L9 4.5 L0 9 z" fill="var(--ink-faint)"/></marker></defs>
+
+  <!-- REQUIRED -->
+  <text x="200" y="24" text-anchor="middle" font-size="12.5" font-weight="700" fill="var(--sql)">REQUIRED（默认）—— 安全</text>
+  <rect x="40" y="36" width="320" height="150" rx="8" fill="var(--sql-soft)" stroke="var(--sql)"/>
+  <text x="200" y="58" text-anchor="middle" font-size="11" fill="var(--ink-soft)">测试方法</text>
+  <rect x="60" y="66" width="280" height="104" rx="6" fill="var(--panel)" stroke="var(--sql)" stroke-width="2"/>
+  <text x="200" y="86" text-anchor="middle" font-size="11" font-weight="700" fill="var(--sql)">事务 1</text>
+  <rect x="90" y="96" width="220" height="42" rx="5" fill="var(--sql-soft)" stroke="var(--sql)" stroke-dasharray="4 3"/>
+  <text x="200" y="114" text-anchor="middle" font-size="10.5" fill="var(--ink)">saveTransactionally</text>
+  <text x="200" y="130" text-anchor="middle" font-size="10" fill="var(--ink-soft)">加入同一个事务，不新开</text>
+  <text x="200" y="158" text-anchor="middle" font-size="11" font-weight="700" fill="var(--sql)">回滚事务 1 → 一切撤销 ✓</text>
+
+  <!-- REQUIRES_NEW -->
+  <text x="620" y="24" text-anchor="middle" font-size="12.5" font-weight="700" fill="var(--danger)">REQUIRES_NEW —— 危险</text>
+  <rect x="420" y="36" width="360" height="240" rx="8" fill="var(--danger-soft)" stroke="var(--danger)"/>
+  <text x="600" y="58" text-anchor="middle" font-size="11" fill="var(--ink-soft)">测试方法</text>
+
+  <rect x="440" y="66" width="150" height="30" rx="5" fill="var(--panel)" stroke="var(--java)" stroke-width="2"/>
+  <text x="515" y="86" text-anchor="middle" font-size="10.5" font-weight="700" fill="var(--java)">事务 1</text>
+  <text x="612" y="86" font-size="10" fill="var(--ink-soft)">调用 saveTransactionally</text>
+
+  <rect x="440" y="104" width="150" height="46" rx="5" fill="var(--panel)" stroke="var(--line-strong)" stroke-dasharray="4 3"/>
+  <text x="515" y="124" text-anchor="middle" font-size="10.5" fill="var(--ink-faint)">事务 1</text>
+  <text x="515" y="140" text-anchor="middle" font-size="10.5" fill="var(--ink-faint)">被挂起</text>
+
+  <rect x="606" y="104" width="150" height="46" rx="5" fill="var(--panel)" stroke="var(--danger)" stroke-width="2"/>
+  <text x="681" y="124" text-anchor="middle" font-size="10.5" font-weight="700" fill="var(--danger)">事务 2</text>
+  <text x="681" y="140" text-anchor="middle" font-size="10" fill="var(--ink-soft)">全新的</text>
+  <path d="M594 127 L602 127" stroke="var(--ink-faint)" stroke-width="1.4" marker-end="url(#a20c)"/>
+
+  <rect x="606" y="158" width="150" height="30" rx="5" fill="var(--danger)" stroke="var(--danger)"/>
+  <text x="681" y="178" text-anchor="middle" font-size="10.5" font-weight="700" fill="#fff">提交事务 2</text>
+
+  <rect x="440" y="158" width="150" height="30" rx="5" fill="var(--panel)" stroke="var(--java)" stroke-width="2"/>
+  <text x="515" y="178" text-anchor="middle" font-size="10.5" fill="var(--java)">事务 1 继续</text>
+
+  <rect x="440" y="200" width="150" height="30" rx="5" fill="var(--java-soft)" stroke="var(--java)"/>
+  <text x="515" y="220" text-anchor="middle" font-size="10.5" fill="var(--ink)">回滚事务 1</text>
+
+  <text x="600" y="252" text-anchor="middle" font-size="11" font-weight="700" fill="var(--danger)">事务 2 的数据留在了数据库里！</text>
+  <text x="600" y="268" text-anchor="middle" font-size="10.5" fill="var(--ink-soft)">第二次跑测试时撞上这条已存在的记录 → 失败</text>
+
+  <rect x="40" y="298" width="740" height="86" rx="8" fill="var(--warn-soft)" stroke="var(--warn)"/>
+  <text x="410" y="320" text-anchor="middle" font-size="12.5" font-weight="700" fill="var(--ink)">结论</text>
+  <text x="410" y="342" text-anchor="middle" font-size="11.5" fill="var(--ink)">即便你用事务方式跑测试，也要<tspan font-weight="700">警惕「在独立事务中启动方法」这个陷阱</tspan>。</text>
+  <text x="410" y="362" text-anchor="middle" font-size="11.5" fill="var(--ink)">它会导致奇怪的 bug，而且这种情况下<tspan font-weight="700">调试可能很困难</tspan>。</text>
+  <text x="410" y="378" text-anchor="middle" font-size="10.5" fill="var(--ink-soft)">（传播行为的完整语义见第 11.4 节的七种 Propagation 枚举值）</text>
+</svg>
+</div>
+<figcaption>图 20-D　<code>REQUIRED</code> vs <code>REQUIRES_NEW</code> 在测试中的天壤之别。<code>saveTransactionally</code> 的事务被提交了，测试方法的事务被回滚了。</figcaption>
+</figure>
+
+<h3 id="s52">性能对比：两种方案该怎么选</h3>
+
+<p>为了对比 <code>@DirtiesContext</code> 和 <code>@Transactional</code> 的性能，书中执行了一系列 10 个测试，把记录数从 100 逐步增加到 2000，分别在 MySQL 和 H2（内存数据库）上测量。</p>
+
+<div class="tip"><b>结论（对两种数据库都成立）</b><p><b>用 <code>@DirtiesContext</code> 与用 <code>@Transactional</code> 的执行时间差近似恒定</b>。这个差值<b>不取决于记录数，而取决于上下文被重新初始化的次数</b>。</p>
+<p>所以：<b>要节制地使用 <code>@DirtiesContext</code>。</b>把带这个注解的测试推到 CI/CD（持续集成/持续交付）环境会<b>严重增加它们的执行时间</b>。</p>
+<p><b>默认用 <code>@Transactional</code>，只在测试确实修改了 Spring 上下文本身时才用 <code>@DirtiesContext</code>。</b></p></div>
+
+<h2 id="s6"><span class="num">20.6</span> <code>@BeforeTransaction</code> 与 <code>@AfterTransaction</code></h2>
+
+<p>顾名思义，这两个注解指明<b>要在事务执行前后运行的方法</b>。我们来验证：这样的方法内部确实<b>没有活跃事务</b>。</p>
+
+<div class="note"><b><code>assumeFalse</code> 与 <code>assertFalse</code> 的区别</b><p>用 JUnit 5 的 <code>Assumptions.assumeFalse</code> 表示「跑这些测试的<b>前提条件</b>是此刻没有活跃事务，否则测试就不跑」。</p>
+<ul>
+<li><b>假设（assumption）不成立 → 测试被中止（aborted）</b></li>
+<li><b>断言（assertion）不成立 → 测试失败（failed）</b></li>
+</ul></div>
+
+<div class="filename">Ch20/1 spring testing/src/test/.../TransactionsManagementTest.java</div>
+<pre><code><span class="ann">@SpringBootTest</span>
+<span class="ann">@Transactional</span>
+<span class="kw">class</span> TransactionsManagementTest {
+
+    <span class="ann">@Autowired</span> <span class="kw">private</span> UserRepository userRepository;
+    <span class="ann">@Autowired</span> <span class="kw">private</span> LogRepository  logRepository;
+
+    <span class="hl">@BeforeTransaction</span>
+    <span class="kw">void</span> beforeTransaction() {
+        Assumptions.assumeFalse(
+             TransactionSynchronizationManager.isActualTransactionActive());
+    }
+
+    <span class="cmt">// . . .</span>
+
+    <span class="hl">@AfterTransaction</span>
+    <span class="kw">void</span> afterTransaction() {
+        Assumptions.assumeFalse(
+             TransactionSynchronizationManager.isActualTransactionActive());
+    }
+}</code></pre>
+
+<div class="pit"><b>这里还有一个必须避开的陷阱</b><p>在 <code>@BeforeTransaction</code> 或 <code>@AfterTransaction</code> 方法里<b>持久化数据</b>。因为它们<b>在事务之外执行，数据不会被回滚</b>，会影响数据库的内容。</p>
+<p><b>更糟的是</b>：如果我们持久化的是测试中<b>不检查</b>的数据（比如测试验证的是 <code>User</code> 实体，而我们存的是 <code>Log</code> 实体），那么测试<b>永远都会正确执行，却在身后留下已提交的数据</b>——这是一种沉默的污染，比直接失败更难发现。</p>
+<pre><code><span class="ann">@BeforeTransaction</span>
+<span class="kw">void</span> beforeTransaction() {
+    Assumptions.assumeFalse(
+         TransactionSynchronizationManager.isActualTransactionActive());
+    <span class="hl">logRepository.save(new Log("@BeforeTransaction"));</span>   <span class="cmt">// ← 这行数据永远留下</span>
+}</code></pre></div>
+
+<h2 id="s7"><span class="num">20.7</span> 使用 Spring profiles</h2>
+
+<p>Spring Boot 默认创建 <code>main/resources/application.properties</code> 保存应用配置。但经常需要<b>根据用户的 profile 区分不同的属性</b>。Spring Boot 允许把属性分离到默认命名为 <code>main/resources/application-<i>profilename</i>.properties</code> 的文件里，并在 profile 之间切换。</p>
+
+<p><b>一个真实场景</b>：开发人员有一个 profile，开发期间使用<b>内嵌数据库</b>；生产有另一个 profile，使用<b>真实数据库</b>。程序员希望能快速执行他们的测试，而在生产环境测试会跑在真实环境里。</p>
+
+<figure>
+<div class="fig-box">
+<svg viewBox="0 0 820 340" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="dev 与 prod 两个 profile 的对比">
+  <text x="410" y="24" text-anchor="middle" font-size="13" font-weight="700" fill="var(--ink)">同一份测试代码，两套配置</text>
+
+  <rect x="290" y="40" width="240" height="52" rx="8" fill="var(--accent-soft)" stroke="var(--accent)" stroke-width="2"/>
+  <text x="410" y="62" text-anchor="middle" font-size="11.5" font-weight="700" fill="var(--ink)">application.properties</text>
+  <text x="410" y="82" text-anchor="middle" font-size="11" font-family="var(--mono)" fill="var(--accent)">spring.profiles.active=dev</text>
+
+  <path d="M300 96 L200 128" stroke="var(--sql)" stroke-width="1.6"/>
+  <path d="M520 96 L620 128" stroke="var(--warn)" stroke-width="1.6"/>
+
+  <rect x="30" y="132" width="340" height="150" rx="8" fill="var(--sql-soft)" stroke="var(--sql)"/>
+  <text x="200" y="154" text-anchor="middle" font-size="12" font-weight="700" fill="var(--sql)">application-dev.properties</text>
+  <g font-size="9.5" font-family="var(--mono)" fill="var(--ink-soft)">
+    <text x="44" y="176">spring.datasource.url=jdbc:h2:mem:ch20_testing</text>
+    <text x="44" y="192">spring.datasource.username=sa</text>
+    <text x="44" y="208">spring.datasource.password=</text>
+    <text x="44" y="224">...dialect=org.hibernate.dialect.H2Dialect</text>
+    <text x="44" y="240" fill="var(--sql)">spring.jpa.show-sql=true</text>
+    <text x="44" y="256">spring.jpa.hibernate.ddl-auto=create</text>
+  </g>
+  <text x="200" y="274" text-anchor="middle" font-size="10.5" fill="var(--ink)">内存 H2 · 显示 SQL（程序员想看）</text>
+
+  <rect x="450" y="132" width="340" height="150" rx="8" fill="var(--warn-soft)" stroke="var(--warn)"/>
+  <text x="620" y="154" text-anchor="middle" font-size="12" font-weight="700" fill="var(--warn)">application-prod.properties</text>
+  <g font-size="9.5" font-family="var(--mono)" fill="var(--ink-soft)">
+    <text x="464" y="176">spring.datasource.url=jdbc:mysql://localhost:3306/</text>
+    <text x="464" y="190">  CH20_TESTING?serverTimezone=UTC</text>
+    <text x="464" y="208">spring.datasource.username=root</text>
+    <text x="464" y="224">...dialect=org.hibernate.dialect.MySQL8Dialect</text>
+    <text x="464" y="240" fill="var(--danger)">spring.jpa.show-sql=false</text>
+    <text x="464" y="256">spring.jpa.hibernate.ddl-auto=create</text>
+  </g>
+  <text x="620" y="274" text-anchor="middle" font-size="10.5" fill="var(--ink)">真实 MySQL · 不显示 SQL（生产不该浪费资源）</text>
+
+  <rect x="30" y="296" width="760" height="38" rx="8" fill="var(--panel)" stroke="var(--line-strong)"/>
+  <text x="410" y="312" text-anchor="middle" font-size="11.5" fill="var(--ink)">切换方式一：改 application.properties 里的 <tspan font-family="var(--mono)">spring.profiles.active</tspan>（不用改代码）</text>
+  <text x="410" y="328" text-anchor="middle" font-size="11.5" fill="var(--ink)">切换方式二：在测试类上加 <tspan font-family="var(--mono)">@ActiveProfiles("prod")</tspan>（会覆盖上面的设置，但<tspan font-weight="700">需要改代码并重新编译</tspan>）</text>
+</svg>
+</div>
+<figcaption>图 20-E　两个 profile 的属性文件与两种切换方式。这是「开发跑得快、生产测得真」的标准做法。</figcaption>
+</figure>
+
+<div class="filename">Ch20/2 spring profiles/src/test/.../SpringProfilesTest.java</div>
+<pre><code><span class="ann">@SpringBootTest</span>
+<span class="ann">@Transactional</span>
+<span class="hl">@ActiveProfiles("prod")</span>          <span class="cmt">// 覆盖 application.properties 里设置的 profile</span>
+<span class="kw">class</span> SpringProfilesTest {
+
+    <span class="ann">@Autowired</span>
+    <span class="kw">private</span> UserRepository userRepository;
+
+    <span class="ann">@Test</span>
+    <span class="kw">void</span> storeUpdateRetrieve() {
+        List&lt;User&gt; users = buildUsersList();
+        userRepository.saveAll(users);
+        assertEquals(getIterations(), userRepository.findAll().size());
+    }
+}</code></pre>
+
+<div class="warn"><b>别忘了驱动依赖</b><p>跑 <code>dev</code> 需要 <code>com.h2database:h2</code>（runtime），跑 <code>prod</code> 需要 <code>mysql:mysql-connector-java</code>（runtime）。<b>两个都要放在 <code>pom.xml</code> 里</b>，否则切过去就报找不到驱动。</p></div>
+
+<h2 id="s8"><span class="num">20.8</span> 使用测试执行监听器</h2>
+
+<p>控制测试执行生命周期的一种方式是用 JUnit 5 的注解：<code>@BeforeAll</code>、<code>@AfterAll</code>、<code>@BeforeEach</code>、<code>@AfterEach</code>。但某些情况下这不方便：<b>如果多个测试需要相同的 <code>@BeforeEach</code> 和 <code>@AfterEach</code> 行为，我们就得创建一个包含这些方法的基类，再创建多个子类去继承</b>——这样就把测试挂进了一个类层次结构里（又是熟悉的「继承位被占用」问题，参见 16.5 节的处理器 vs 监听器之争）。</p>
+
+<p>替代方案：使用<b>测试执行监听器</b>，即 <code>TestExecutionListener</code> 接口和 <code>@TestExecutionListeners</code> 注解，<b>把控制测试生命周期的行为分离出来</b>。</p>
+
+<div class="cols">
+<div class="card"><h4>Spring 默认提供的两个关键监听器</h4>
+<ul>
+<li><code>DependencyInjectionTestExecutionListener</code>——<b>为测试实例提供依赖注入</b></li>
+<li><code>TransactionalTestExecutionListener</code>——<b>支持测试的事务化执行与回滚</b></li>
+</ul>
+<p>20.5 节说的「事务默认会自动回滚」，正是第二个监听器的功劳。<b>这对于测试持久化、力求跑完后留下干净数据库来说是至关重要的。</b></p></div>
+<div class="card"><h4>表 20.1　接口的默认方法与执行顺序</h4>
+<div class="tablewrap"><table>
+<tbody>
+<tr><td><code>beforeTestClass</code></td><td>在 JUnit 5 的 <code>@BeforeAll</code> 方法<b>之前</b>执行</td></tr>
+<tr><td><code>prepareTestInstance</code></td><td>准备所提供测试上下文的测试实例</td></tr>
+<tr><td><code>beforeTestMethod</code></td><td>在 <code>@BeforeEach</code> 方法<b>之前</b>执行</td></tr>
+<tr><td><code>beforeTestExecution</code></td><td>在测试方法<b>之前</b>执行</td></tr>
+<tr><td><code>afterTestExecution</code></td><td>在测试方法<b>之后</b>执行</td></tr>
+<tr><td><code>afterTestMethod</code></td><td>在 <code>@AfterEach</code> 方法<b>之后</b>执行</td></tr>
+<tr><td><code>afterTestClass</code></td><td>在 <code>@AfterAll</code> 方法<b>之后</b>执行</td></tr>
+</tbody>
+</table></div>
+<p>它们<b>比 JUnit 5 的生命周期方法粒度更细</b>。</p></div>
+</div>
+
+<div class="filename">Ch20/3 spring listeners/src/test/.../listeners/DatabaseOperationsListener.java</div>
+<pre><code><span class="kw">public class</span> DatabaseOperationsListener <span class="kw">implements</span> TestExecutionListener {
+
+    <span class="ann">@Override</span>
+    <span class="kw">public void</span> beforeTestClass(TestContext testContext) {
+        System.out.println(<span class="str">"beforeTestClass, transaction active = "</span> +
+            TransactionSynchronizationManager.isActualTransactionActive());
+    }
+
+    <span class="ann">@Override</span>
+    <span class="kw">public void</span> prepareTestInstance(TestContext testContext) { <span class="cmt">/* 同样打印 */</span> }
+
+    <span class="ann">@Override</span>
+    <span class="kw">public void</span> beforeTestMethod(TestContext testContext)    { <span class="cmt">/* 同样打印 */</span> }
+
+    <span class="ann">@Override</span>
+    <span class="kw">public void</span> beforeTestExecution(TestContext testContext) { <span class="cmt">/* 同样打印 */</span> }
+
+    <span class="ann">@Override</span>
+    <span class="kw">public void</span> afterTestExecution(TestContext testContext)  { <span class="cmt">/* 同样打印 */</span> }
+
+    <span class="ann">@Override</span>
+    <span class="kw">public void</span> afterTestMethod(TestContext testContext)     { <span class="cmt">/* 同样打印 */</span> }
+
+    <span class="ann">@Override</span>
+    <span class="kw">public void</span> afterTestClass(TestContext testContext)      { <span class="cmt">/* 同样打印 */</span> }
+}</code></pre>
+
+<div class="pit"><b>第一次尝试会以 <code>NullPointerException</code> 失败</b><p>如果这样写测试：</p>
+<pre><code><span class="ann">@SpringBootTest</span>
+<span class="ann">@Transactional</span>
+<span class="ann">@TestExecutionListeners</span>(value = {DatabaseOperationsListener.class})
+<span class="kw">class</span> ListenersTest { <span class="cmt">/* . . . */</span> }</code></pre>
+<p>会发现 <code>userRepository</code> 引用是 <b><code>null</code></b>。控制台显示 <code>TestContextManager</code> 里<b>只注册了一个监听器</b>——我们自己的 <code>DatabaseOperationsListener</code>。之前所需的、为测试实例（以及 <code>userRepository</code>）提供依赖注入的 <code>DependencyInjectionTestExecutionListener</code> <b>不再被注册了</b>。</p>
+<p><b>原因：一旦引入我们自己的监听器，默认监听器就不再被自动注册。</b></p></div>
+
+<p>修复方法是用 <code>MERGE_WITH_DEFAULTS</code> 作为合并模式：</p>
+
+<div class="filename">Ch20/3 spring listeners/src/test/.../ListenersTest.java</div>
+<pre><code><span class="ann">@SpringBootTest</span>
+<span class="ann">@Transactional</span>
+<span class="ann">@TestExecutionListeners</span>(value = {DatabaseOperationsListener.class},
+        <span class="hl">mergeMode = TestExecutionListeners.MergeMode.MERGE_WITH_DEFAULTS</span>)
+<span class="kw">class</span> ListenersTest {
+
+    <span class="ann">@Autowired</span>
+    <span class="kw">private</span> UserRepository userRepository;
+
+    <span class="ann">@BeforeAll</span>  <span class="kw">static void</span> beforeAll()  { System.out.println(<span class="str">"@BeforeAll"</span>); }
+    <span class="ann">@BeforeEach</span> <span class="kw">void</span> beforeEach()        { System.out.println(<span class="str">"@BeforeEach"</span>); }
+
+    <span class="ann">@Test</span>
+    <span class="kw">void</span> storeUpdateRetrieve() {
+        TestContextManager testContextManager = <span class="kw">new</span> TestContextManager(getClass());
+        System.out.println(<span class="str">"testContextManager.getTestExecutionListeners().size() = "</span>
+              + testContextManager.getTestExecutionListeners().size());
+        List&lt;User&gt; users = buildUsersList();
+        userRepository.saveAll(users);
+        assertEquals(getIterations(), userRepository.findAll().size());
+    }
+
+    <span class="ann">@AfterEach</span>  <span class="kw">void</span> afterEach()        { System.out.println(<span class="str">"@AfterEach"</span>); }
+    <span class="ann">@AfterAll</span>   <span class="kw">static void</span> afterAll() { System.out.println(<span class="str">"@AfterAll"</span>); }
+}</code></pre>
+
+<figure>
+<div class="fig-box">
+<svg viewBox="0 0 820 400" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="监听器方法与 JUnit 5 生命周期方法的交错顺序">
+  <text x="410" y="24" text-anchor="middle" font-size="13" font-weight="700" fill="var(--ink)">监听器方法与 JUnit 5 生命周期方法的交错顺序</text>
+  <text x="200" y="46" text-anchor="middle" font-size="11" font-weight="700" fill="var(--accent)">TestExecutionListener</text>
+  <text x="470" y="46" text-anchor="middle" font-size="11" font-weight="700" fill="var(--java)">JUnit 5</text>
+  <text x="680" y="46" text-anchor="middle" font-size="11" font-weight="700" fill="var(--sql)">事务活跃？</text>
+
+  <g font-size="10.5" font-family="var(--mono)">
+    <rect x="60" y="56" width="280" height="24" rx="4" fill="var(--accent-soft)" stroke="var(--accent)"/>
+    <text x="70" y="72" fill="var(--ink)">beforeTestClass</text>
+    <text x="680" y="72" text-anchor="middle" font-family="var(--sans)" font-size="10.5" fill="var(--ink-faint)">false</text>
+
+    <rect x="360" y="84" width="220" height="24" rx="4" fill="var(--java-soft)" stroke="var(--java)"/>
+    <text x="370" y="100" fill="var(--ink)">@BeforeAll</text>
+
+    <rect x="60" y="112" width="280" height="24" rx="4" fill="var(--accent-soft)" stroke="var(--accent)"/>
+    <text x="70" y="128" fill="var(--ink)">prepareTestInstance</text>
+    <text x="680" y="128" text-anchor="middle" font-family="var(--sans)" font-size="10.5" fill="var(--ink-faint)">false</text>
+
+    <rect x="60" y="140" width="280" height="24" rx="4" fill="var(--accent-soft)" stroke="var(--accent)"/>
+    <text x="70" y="156" fill="var(--ink)">beforeTestMethod</text>
+    <text x="680" y="156" text-anchor="middle" font-family="var(--sans)" font-size="10.5" font-weight="700" fill="var(--sql)">true　← 事务在这里开始</text>
+
+    <rect x="360" y="168" width="220" height="24" rx="4" fill="var(--java-soft)" stroke="var(--java)"/>
+    <text x="370" y="184" fill="var(--ink)">@BeforeEach</text>
+
+    <rect x="60" y="196" width="280" height="24" rx="4" fill="var(--accent-soft)" stroke="var(--accent)"/>
+    <text x="70" y="212" fill="var(--ink)">beforeTestExecution</text>
+    <text x="680" y="212" text-anchor="middle" font-family="var(--sans)" font-size="10.5" font-weight="700" fill="var(--sql)">true</text>
+
+    <rect x="360" y="224" width="220" height="26" rx="4" fill="var(--warn-soft)" stroke="var(--warn)" stroke-width="2"/>
+    <text x="370" y="241" fill="var(--ink)">测试方法本体（15 个监听器）</text>
+
+    <rect x="60" y="254" width="280" height="24" rx="4" fill="var(--accent-soft)" stroke="var(--accent)"/>
+    <text x="70" y="270" fill="var(--ink)">afterTestExecution</text>
+    <text x="680" y="270" text-anchor="middle" font-family="var(--sans)" font-size="10.5" font-weight="700" fill="var(--sql)">true</text>
+
+    <rect x="360" y="282" width="220" height="24" rx="4" fill="var(--java-soft)" stroke="var(--java)"/>
+    <text x="370" y="298" fill="var(--ink)">@AfterEach</text>
+
+    <rect x="60" y="310" width="280" height="24" rx="4" fill="var(--accent-soft)" stroke="var(--accent)"/>
+    <text x="70" y="326" fill="var(--ink)">afterTestMethod</text>
+    <text x="680" y="326" text-anchor="middle" font-family="var(--sans)" font-size="10.5" font-weight="700" fill="var(--sql)">true　← 之后事务回滚</text>
+
+    <rect x="360" y="338" width="220" height="24" rx="4" fill="var(--java-soft)" stroke="var(--java)"/>
+    <text x="370" y="354" fill="var(--ink)">@AfterAll</text>
+
+    <rect x="60" y="366" width="280" height="24" rx="4" fill="var(--accent-soft)" stroke="var(--accent)"/>
+    <text x="70" y="382" fill="var(--ink)">afterTestClass</text>
+    <text x="680" y="382" text-anchor="middle" font-family="var(--sans)" font-size="10.5" fill="var(--ink-faint)">false</text>
+  </g>
+</svg>
+</div>
+<figcaption>图 20-F　监听器方法与 JUnit 5 生命周期方法完全交错。注册的监听器数量变成 <b>15</b>——14 个默认监听器加我们的自定义监听器。</figcaption>
+</figure>
+
+<pre><code><span class="cmt">// 实际控制台输出</span>
+beforeTestClass, transaction active = false
+@BeforeAll
+prepareTestInstance, transaction active = false
+beforeTestMethod, transaction active = true
+@BeforeEach
+beforeTestExecution, transaction active = true
+<span class="hl">testContextManager.getTestExecutionListeners().size() = 15</span>
+afterTestExecution, transaction active = true
+@AfterEach
+afterTestMethod, transaction active = true
+@AfterAll
+afterTestClass, transaction active = false</code></pre>
+
+<h2 id="s9"><span class="num">20.9</span> 注解速查表</h2>
+
+<div class="tablewrap">
+<table>
+<caption>表 20.2　测试持久化应用最重要的 Spring TestContext 框架注解</caption>
+<thead><tr><th>注解</th><th>说明</th></tr></thead>
+<tbody>
+<tr><td><code>@DirtiesContext</code></td><td>底层 Spring 上下文在测试执行期间被改动了，应该<b>重新初始化</b>。</td></tr>
+<tr><td><code>@BeforeTransaction</code></td><td>该 void 方法应在任何带 Spring <code>@Transactional</code> 注解的方法<b>之前</b>执行。</td></tr>
+<tr><td><code>@AfterTransaction</code></td><td>该 void 方法应在任何带 Spring <code>@Transactional</code> 注解的方法<b>之后</b>执行。</td></tr>
+<tr><td><code>@Rollback</code></td><td>事务型测试的事务在测试完成后<b>回滚</b>。<b>这是默认行为</b>，可以用 <code>@Rollback(false)</code> 或 <code>@Commit</code> 改变。</td></tr>
+<tr><td><code>@Commit</code></td><td>事务型测试的事务在测试完成后<b>提交</b>。</td></tr>
+<tr><td><code>@ActiveProfiles</code></td><td>指定 Spring 上下文中哪些配置 profile 处于激活状态。</td></tr>
+<tr><td><code>@TestExecutionListeners</code></td><td>配置要注册到 <code>TestContextManager</code> 的测试执行监听器。<b>记得配 <code>MERGE_WITH_DEFAULTS</code>。</b></td></tr>
+</tbody>
+</table>
+</div>
+
+<div class="tip"><b>本书作者的收尾寄语</b><p>「Spring TestContext 框架为集成测试提供了强有力的支持，而持久化应用测试正属于集成测试。在这个基础上，你可以继续构建系统测试和验收测试，就像本章开头介绍测试金字塔时展示的那样。」</p>
+<p>「<b>有了可预测的、安全的测试——只在你的代码有问题时才失败，而不是因为外部因素（比如脏数据库里不合适的内容）——你作为程序员的生活会好过得多！</b>」</p></div>
+
+<div class="summary" id="s10">
+<h3>本章小结</h3>
+<ul>
+<li><b>测试金字塔</b>由单元、集成、系统和验收四个层次组成。<b>持久化测试归类于集成层</b>——因为它把我们的代码和数据库交互组合在了一起。</li>
+<li>可以用 Spring Boot <b>创建并配置一个持久化应用</b>，并在其中管理实体和仓库。</li>
+<li>可以用 <b>Spring TestContext 框架</b>创建持久化测试，并用 <code>@DirtiesContext</code> 或 <code>@Transactional</code> 管理它们。<br>
+<b>关键判断</b>：<code>@Transactional</code> 是默认选择（每个测试跑在事务里、结束时自动回滚）；<code>@DirtiesContext</code> 要节制使用，它的开销取决于上下文被重新初始化的次数，会严重拖慢 CI/CD。</li>
+<li><b>两个必须记住的陷阱</b>：① 用 <code>REQUIRES_NEW</code> 传播行为启动的方法会独立提交，绕过测试的回滚；② 在 <code>@BeforeTransaction</code> / <code>@AfterTransaction</code> 里持久化数据不会被回滚，可能留下沉默的污染。</li>
+<li>可以用 <b>Spring profiles</b> 测试访问不同数据库、拥有不同配置的 Java 持久化应用：<code>application-dev.properties</code>（内存 H2、显示 SQL）与 <code>application-prod.properties</code>（真实 MySQL、不显示 SQL），通过 <code>spring.profiles.active</code> 或 <code>@ActiveProfiles</code> 切换。</li>
+<li>可以创建<b>自定义测试执行监听器</b>来跟踪测试的生命周期，并与默认监听器配合工作。它把生命周期行为从类继承中解放出来，但<b>一旦自定义就必须加 <code>MERGE_WITH_DEFAULTS</code></b>，否则依赖注入和事务回滚都会失效。</li>
+</ul>
+</div>
+
+<div class="note" style="text-align:center"><b>🎉 全书 20 章讲义到此完结</b><p>从第 1 章的对象/关系范式失配，到第 20 章的可预测测试，你已经走完了 JPA、Hibernate、Spring Data 与 NoSQL 的完整路径。<a href="index.html">回到目录</a> 复习任意一章。</p></div>
+
+<div class="pager">
+  <a href="ch19.html">← 第 19 章　用 Querydsl 查询 JPA</a>
+  <a href="index.html">返回目录 ↑</a>
+</div>
+</main>
+</div>
+</body>
+</html>

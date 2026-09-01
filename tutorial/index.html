@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Java Persistence 讲义 · 目录</title>
+<link rel="stylesheet" href="style.css">
+<style>
+.wrap-index{max-width:1080px;margin:0 auto;padding:0 24px 90px}
+.hero-index{padding:54px 0 34px;border-bottom:1px solid var(--line);margin-bottom:10px}
+.hero-index h1{font-size:40px;margin:.15em 0 .3em;line-height:1.15;letter-spacing:-.015em}
+.hero-index .sub{color:var(--ink-soft);font-size:17px;max-width:70ch}
+.meta{display:flex;gap:26px;flex-wrap:wrap;margin-top:22px;font-size:13.5px;color:var(--ink-faint)}
+.meta b{color:var(--ink-soft);font-weight:600}
+</style>
+</head>
+<body>
+<div class="topbar"><div class="topbar-inner">
+  <span class="brand">Java Persistence 讲义</span>
+  <span class="spacer"></span>
+  <a href="#p1">Part 1</a><a href="#p2">Part 2</a><a href="#p3">Part 3</a>
+  <a href="#p4">Part 4</a><a href="#p5">Part 5</a><a href="#p6">Part 6</a>
+</div></div>
+
+<div class="wrap-index">
+<div class="hero-index">
+  <div class="eyebrow" style="font-size:12px;letter-spacing:.16em;text-transform:uppercase;color:var(--accent);font-weight:600">基于 Manning《Java Persistence with Spring Data and Hibernate》</div>
+  <h1>Java 持久化：JPA · Hibernate · Spring Data</h1>
+  <p class="sub">这是对 Cătălin Tudose 所著 <i>Java Persistence with Spring Data and Hibernate</i>（618 页，20 章）及其配套源码的中文精读讲义。每一章都配有大量 SVG 图解，力求把「为什么这样设计」和「实际发出的 SQL 是什么」讲清楚。</p>
+  <div class="meta">
+    <span><b>20</b> 章讲义</span>
+    <span><b>贯穿示例</b>：CaveatEmptor 在线拍卖系统</span>
+    <span><b>源码</b>：仓库根目录 <code>Ch01/</code> – <code>Ch20/</code></span>
+    <span><b>环境</b>：MySQL 8 / H2，Hibernate 5.6，Spring Data JPA 2.7，Java 17</span>
+  </div>
+</div>
+
+<div class="note" style="margin-top:28px">
+<b>建议的阅读路线</b>
+<p><b>只想快速上手</b> → 第 2 章（三种方式的 Hello World）+ 第 4 章（Spring Data JPA 全貌）+ 第 10 章（EntityManager 与实体状态）。<br>
+<b>要把映射写对</b> → 第 5–9 章连读，尤其第 8 章「要不要映射集合」的取舍。<br>
+<b>要把性能调好</b> → 第 11 章（并发与锁）+ 第 12 章（n+1 与笛卡儿积）。这两章是排查线上问题的必修课。</p>
+</div>
+
+<h3 class="part-title" id="p1">Part 1 · 入门 ORM</h3>
+<div class="grid-ch">
+  <a class="ch-card" href="ch01.html"><div class="n">CHAPTER 01</div><div class="t">理解对象/关系持久化</div><div class="d">五道范式失配裂缝：粒度、继承、标识、关联、导航。为什么需要 ORM。</div></a>
+  <a class="ch-card" href="ch02.html"><div class="n">CHAPTER 02</div><div class="t">启动一个项目</div><div class="d">同一个 Hello World 写三遍：JPA / 原生 Hibernate / Spring Data JPA，附性能对比。</div></a>
+  <a class="ch-card" href="ch03.html"><div class="n">CHAPTER 03</div><div class="t">领域模型与元数据</div><div class="d">CaveatEmptor 领域模型、透明持久化、POJO 关联脚手架、注解 vs XML、静态元模型。</div></a>
+  <a class="ch-card" href="ch04.html"><div class="n">CHAPTER 04</div><div class="t">使用 Spring Data JPA</div><div class="d">查询构建器机制、结果限制与分页、@Query、投影、修改型查询、Query by Example。</div></a>
+</div>
+
+<h3 class="part-title" id="p2">Part 2 · 映射策略</h3>
+<div class="grid-ch">
+  <a class="ch-card" href="ch05.html"><div class="n">CHAPTER 05</div><div class="t">映射持久化类</div><div class="d">实体 vs 值类型、三种同一性、代理键与生成器策略、命名策略、@Subselect。</div></a>
+  <a class="ch-card" href="ch06.html"><div class="n">CHAPTER 06</div><div class="t">映射值类型</div><div class="d">基本属性、派生属性与列转换、可嵌入组件与嵌套、AttributeConverter 与 UserType。</div></a>
+  <a class="ch-card" href="ch07.html"><div class="n">CHAPTER 07</div><div class="t">映射继承</div><div class="d">四种继承映射策略的表结构、SQL 与取舍；混合策略、可嵌入类继承、多态关联。</div></a>
+  <a class="ch-card" href="ch08.html"><div class="n">CHAPTER 08</div><div class="t">映射集合与实体关联</div><div class="d">Set/Bag/List/Map 的主键差异、组件相等性、级联的四个台阶与孤儿移除陷阱。</div></a>
+  <a class="ch-card" href="ch09.html"><div class="n">CHAPTER 09</div><div class="t">高级实体关联映射</div><div class="d">一对一四种策略、一对多 bag/list/连接表、多对多的四种映射方式与三元关联。</div></a>
+</div>
+
+<h3 class="part-title" id="p3">Part 3 · 事务性数据处理</h3>
+<div class="grid-ch">
+  <a class="ch-card" href="ch10.html"><div class="n">CHAPTER 10</div><div class="t">管理数据</div><div class="d">四种实体状态与转换图、持久化上下文三大职责、EntityManager 全部操作、游离态与 merge。</div></a>
+  <a class="ch-card" href="ch11.html"><div class="n">CHAPTER 11</div><div class="t">事务与并发</div><div class="d">四类隔离问题、ANSI 隔离级别、乐观锁与悲观锁、死锁规避、Spring 的 7 种事务传播。</div></a>
+  <a class="ch-card" href="ch12.html"><div class="n">CHAPTER 12</div><div class="t">抓取计划、策略与剖面</div><div class="d">代理与集合包装器、n+1 selects 与笛卡儿积、批量/子查询预抓取、join fetch、实体图。</div></a>
+  <a class="ch-card" href="ch13.html"><div class="n">CHAPTER 13</div><div class="t">过滤数据</div><div class="d">级联状态转换、JPA 回调与 Hibernate 拦截器、Envers 审计与版本化、动态数据过滤器。</div></a>
+</div>
+
+<h3 class="part-title" id="p4">Part 4 · 用 Spring 构建持久化应用</h3>
+<div class="grid-ch">
+  <a class="ch-card" href="ch14.html"><div class="n">CHAPTER 14</div><div class="t">把 JPA 与 Hibernate 集成进 Spring</div><div class="d">依赖注入、DAO 模式的四种实现，以及如何把 DAO 泛型化。</div></a>
+  <a class="ch-card" href="ch15.html"><div class="n">CHAPTER 15</div><div class="t">使用 Spring Data JDBC</div><div class="d">不带 JPA「魔法」的持久化：查询方法、分页流式、关系建模的四种形态。</div></a>
+  <a class="ch-card" href="ch16.html"><div class="n">CHAPTER 16</div><div class="t">使用 Spring Data REST</div><div class="d">把 repository 导出为 REST 资源、ETag 条件请求、访问限制、REST 事件与投影。</div></a>
+</div>
+
+<h3 class="part-title" id="p5">Part 5 · 用 Spring 构建 NoSQL 持久化应用</h3>
+<div class="grid-ch">
+  <a class="ch-card" href="ch17.html"><div class="n">CHAPTER 17</div><div class="t">使用 Spring Data MongoDB</div><div class="d">MongoDB 基础、MongoRepository 与查询方法、QBE、文档引用、MongoTemplate。</div></a>
+  <a class="ch-card" href="ch18.html"><div class="n">CHAPTER 18</div><div class="t">使用 Hibernate OGM</div><div class="d">用同一套 JPA API 操作 NoSQL：MongoDB 上手，然后切换到 Neo4j。</div></a>
+</div>
+
+<h3 class="part-title" id="p6">Part 6 · 查询与测试</h3>
+<div class="grid-ch">
+  <a class="ch-card" href="ch19.html"><div class="n">CHAPTER 19</div><div class="t">用 Querydsl 查询 JPA</div><div class="d">类型安全的查询构建：过滤、排序、分组、连接、子查询、更新与删除。</div></a>
+  <a class="ch-card" href="ch20.html"><div class="n">CHAPTER 20</div><div class="t">测试 Java 持久化应用</div><div class="d">测试金字塔、Spring TestContext、配置文件（profiles）、测试执行监听器。</div></a>
+</div>
+
+<div class="summary" style="margin-top:50px">
+<h3>关于这份讲义</h3>
+<ul>
+<li>内容依据仓库中的 <code>jpa.pdf</code> 逐章精读整理，代码路径与仓库中的 <code>Ch01/</code>–<code>Ch20/</code> 源码目录一一对应。</li>
+<li>每章配有 SVG 图解：状态机、表结构、SQL 生成过程、时序、决策树等，<b>目标是让机制可见</b>，而不是只罗列 API。</li>
+<li>书中的重要论断、陷阱与作者的经验之谈用彩色提示框标出：<span class="badge java">note 背景</span> <span class="badge sql">tip 建议</span> <span class="badge">warn 注意</span> <span class="badge new">pit 陷阱</span>。</li>
+<li>页面支持浅色/深色主题，跟随系统设置。</li>
+</ul>
+</div>
+
+</div>
+</body>
+</html>

@@ -1,0 +1,670 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>第 19 章 · 用 Querydsl 查询 JPA</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="topbar"><div class="topbar-inner">
+  <a class="brand" href="index.html">Java Persistence 讲义</a>
+  <span class="spacer"></span>
+  <a href="ch18.html">← 上一章</a>
+  <a href="index.html">目录</a>
+  <a href="ch20.html">下一章 →</a>
+</div></div>
+
+<div class="wrap">
+<nav class="toc">
+  <h4>本章目录</h4>
+  <a href="#s1">19.1 Querydsl 简介</a>
+  <a href="#s2">19.2 创建应用</a>
+  <a class="sub" href="#s21">配置与 Q 类型</a>
+  <a class="sub" href="#s22">实体</a>
+  <a class="sub" href="#s23">测试骨架</a>
+  <a href="#s3">19.3 查询数据库</a>
+  <a class="sub" href="#s31">过滤</a>
+  <a class="sub" href="#s32">排序</a>
+  <a class="sub" href="#s33">分组与聚合</a>
+  <a class="sub" href="#s34">子查询与连接</a>
+  <a class="sub" href="#s35">更新</a>
+  <a class="sub" href="#s36">删除（有坑）</a>
+  <a href="#s4">本章小结</a>
+</nav>
+
+<main>
+<div class="hero">
+  <div class="eyebrow">Part 6 · 编写查询与测试 Java 持久化应用</div>
+  <h1>第 19 章　用 Querydsl 查询 JPA</h1>
+  <p>查询数据库是获取符合特定条件的信息的必备手段。本章聚焦 <b>Querydsl</b>——从 Java 程序查询数据库的备选方案之一。名字里的 <b>dsl</b> 指 <b>领域特定语言（domain specific language）</b>，即专用于特定应用领域的语言——查询数据库就是这样一个领域。</p>
+</div>
+
+<div class="note"><b>本章的源码工程</b><p>只有一个：<code>Ch19/querydsl</code>。运行前先执行 <code>Ch19/Ch19.sql</code>。完整文档见 <a href="http://querydsl.com/">querydsl.com</a>。</p></div>
+
+<h2 id="s1"><span class="num">19.1</span> Querydsl 简介：五种查询方案的取舍</h2>
+
+<p>从 Java 程序里查询数据库有多种方案，每种都有自己的问题。<b>理解 Querydsl 的价值，得先把前面四种方案的缺陷摆出来。</b></p>
+
+<figure>
+<div class="fig-box">
+<svg viewBox="0 0 820 470" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="五种查询方案在四个维度上的对比">
+  <text x="410" y="24" text-anchor="middle" font-size="13.5" font-weight="700" fill="var(--ink)">五种查询方案的演进</text>
+
+  <!-- headers -->
+  <g font-size="10.5" text-anchor="middle" fill="var(--ink-soft)">
+    <text x="440" y="56">可移植性</text>
+    <text x="540" y="56">类型安全</text>
+    <text x="640" y="56">编译期校验</text>
+    <text x="740" y="56">简洁度</text>
+  </g>
+
+  <!-- SQL -->
+  <rect x="20" y="64" width="380" height="60" rx="6" fill="var(--danger-soft)" stroke="var(--danger)"/>
+  <text x="34" y="86" font-size="12.5" font-weight="700" fill="var(--ink)">① SQL（JDBC 时代就有）</text>
+  <text x="34" y="106" font-size="10.5" fill="var(--ink-soft)">查询依赖具体数据库和 SQL 方言</text>
+  <g font-size="16" text-anchor="middle">
+    <text x="440" y="100" fill="var(--danger)">✗</text><text x="540" y="100" fill="var(--danger)">✗</text>
+    <text x="640" y="100" fill="var(--danger)">✗</text><text x="740" y="100" fill="var(--sql)">✓</text>
+  </g>
+
+  <!-- JPQL -->
+  <rect x="20" y="132" width="380" height="60" rx="6" fill="var(--warn-soft)" stroke="var(--warn)"/>
+  <text x="34" y="154" font-size="12.5" font-weight="700" fill="var(--ink)">② JPQL</text>
+  <text x="34" y="174" font-size="10.5" fill="var(--ink-soft)">面向对象、与数据库无关 —— 但仍是字符串</text>
+  <g font-size="16" text-anchor="middle">
+    <text x="440" y="168" fill="var(--sql)">✓</text><text x="540" y="168" fill="var(--danger)">✗</text>
+    <text x="640" y="168" fill="var(--danger)">✗</text><text x="740" y="168" fill="var(--sql)">✓</text>
+  </g>
+
+  <!-- Spring Data -->
+  <rect x="20" y="200" width="380" height="66" rx="6" fill="var(--warn-soft)" stroke="var(--warn)"/>
+  <text x="34" y="222" font-size="12.5" font-weight="700" fill="var(--ink)">③ Spring Data 查询构建器</text>
+  <text x="34" y="240" font-size="10.5" fill="var(--ink-soft)">方法必须<tspan font-weight="700">事先定义好</tspan>，方法名<tspan font-weight="700">不在编译期做静态检查</tspan></text>
+  <text x="34" y="256" font-size="10.5" fill="var(--ink-soft)">@Query 注解的 JPQL/SQL 仍有上面两条的缺陷</text>
+  <g font-size="16" text-anchor="middle">
+    <text x="440" y="238" fill="var(--sql)">✓</text><text x="540" y="238" fill="var(--warn)">～</text>
+    <text x="640" y="238" fill="var(--danger)">✗</text><text x="740" y="238" fill="var(--sql)">✓</text>
+  </g>
+
+  <!-- Criteria -->
+  <rect x="20" y="274" width="380" height="66" rx="6" fill="var(--java-soft)" stroke="var(--java)"/>
+  <text x="34" y="296" font-size="12.5" font-weight="700" fill="var(--ink)">④ Criteria API</text>
+  <text x="34" y="314" font-size="10.5" fill="var(--ink-soft)">用 Java API 构建类型安全、可移植的查询</text>
+  <text x="34" y="330" font-size="10.5" fill="var(--danger)">但<tspan font-weight="700">极其啰嗦</tspan>，生成的代码<tspan font-weight="700">难以阅读</tspan></text>
+  <g font-size="16" text-anchor="middle">
+    <text x="440" y="312" fill="var(--sql)">✓</text><text x="540" y="312" fill="var(--sql)">✓</text>
+    <text x="640" y="312" fill="var(--sql)">✓</text><text x="740" y="312" fill="var(--danger)">✗</text>
+  </g>
+
+  <!-- Querydsl -->
+  <rect x="20" y="348" width="380" height="66" rx="6" fill="var(--accent-soft)" stroke="var(--accent)" stroke-width="2"/>
+  <text x="34" y="370" font-size="12.5" font-weight="700" fill="var(--accent)">⑤ Querydsl　← 本章</text>
+  <text x="34" y="388" font-size="10.5" fill="var(--ink-soft)">保留类型安全与可移植性这两个重要理念，</text>
+  <text x="34" y="404" font-size="10.5" fill="var(--ink-soft)">同时<tspan font-weight="700">降低 Criteria API 的啰嗦程度</tspan>，代码<tspan font-weight="700">好读得多</tspan></text>
+  <g font-size="16" text-anchor="middle">
+    <text x="440" y="386" fill="var(--sql)">✓</text><text x="540" y="386" fill="var(--sql)">✓</text>
+    <text x="640" y="386" fill="var(--sql)">✓</text><text x="740" y="386" fill="var(--sql)">✓</text>
+  </g>
+
+  <rect x="20" y="428" width="780" height="34" rx="6" fill="var(--panel)" stroke="var(--line-strong)"/>
+  <text x="410" y="450" text-anchor="middle" font-size="11.5" fill="var(--ink-soft)">「类型安全」= 写错属性名编译不过；「编译期校验」= 不用跑起来才发现查询有毛病。这两点是<tspan font-weight="700">字符串查询永远给不了的</tspan>。</text>
+</svg>
+</div>
+<figcaption>图 19-A　查询方案的演进史。Querydsl 的定位很清楚：拿走 Criteria API 的优点，扔掉它的啰嗦。</figcaption>
+</figure>
+
+<h2 id="s2"><span class="num">19.2</span> 创建一个 Querydsl 应用</h2>
+
+<h3 id="s21">19.2.1 配置与 Q 类型</h3>
+
+<p>在 <code>pom.xml</code> 里加两个依赖：</p>
+
+<div class="cols">
+<div class="card"><h4><code>querydsl-jpa</code></h4><p>在 JPA 应用中使用 Querydsl API 所需。运行时也要。</p></div>
+<div class="card"><h4><code>querydsl-apt</code>（scope: provided）</h4><p><b>APT = Annotation Processing Tool</b>（注解处理工具）。它在代码编译前处理 Java 文件中的注解。<code>provided</code> 作用域意味着<b>只在构建期生成 Q 类型时需要它</b>，之后就不需要了，因此<b>不会被打进应用制品</b>。</p></div>
+</div>
+
+<figure>
+<div class="fig-box">
+<svg viewBox="0 0 820 380" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Q 类型的生成过程与字段映射">
+  <defs><marker id="a19" markerWidth="10" markerHeight="10" refX="9" refY="5" orient="auto"><path d="M0 0 L10 5 L0 10 z" fill="var(--accent)"/></marker></defs>
+
+  <text x="410" y="24" text-anchor="middle" font-size="13.5" font-weight="700" fill="var(--ink)">Q 类型（Q-types）是怎么来的</text>
+
+  <rect x="20" y="40" width="220" height="130" rx="8" fill="var(--java-soft)" stroke="var(--java)"/>
+  <text x="130" y="62" text-anchor="middle" font-size="12" font-weight="700" fill="var(--ink)">你写的实体</text>
+  <g font-size="10.5" font-family="var(--mono)" fill="var(--ink)">
+    <text x="34" y="86">@Entity</text>
+    <text x="34" y="102">class User {</text>
+    <text x="34" y="118">  Long   id;</text>
+    <text x="34" y="134">  String username;</text>
+    <text x="34" y="150">  int    level;</text>
+    <text x="34" y="164">}</text>
+  </g>
+
+  <path d="M246 105 L316 105" stroke="var(--accent)" stroke-width="2" marker-end="url(#a19)"/>
+  <text x="281" y="96" text-anchor="middle" font-size="10" fill="var(--accent)">构建期</text>
+
+  <rect x="320" y="60" width="180" height="90" rx="8" fill="var(--accent-soft)" stroke="var(--accent)"/>
+  <text x="410" y="82" text-anchor="middle" font-size="11.5" font-weight="700" fill="var(--ink)">apt-maven-plugin</text>
+  <text x="410" y="102" text-anchor="middle" font-size="10" font-family="var(--mono)" fill="var(--ink-soft)">JPAAnnotationProcessor</text>
+  <text x="410" y="124" text-anchor="middle" font-size="10" fill="var(--ink-soft)">（用 Hibernate 原生注解</text>
+  <text x="410" y="138" text-anchor="middle" font-size="10" fill="var(--ink-soft)">则换 HibernateAnnotationProcessor）</text>
+
+  <path d="M506 105 L576 105" stroke="var(--accent)" stroke-width="2" marker-end="url(#a19)"/>
+
+  <rect x="580" y="40" width="220" height="130" rx="8" fill="var(--sql-soft)" stroke="var(--sql)"/>
+  <text x="690" y="62" text-anchor="middle" font-size="12" font-weight="700" fill="var(--ink)">生成的 Q 类型</text>
+  <g font-size="10.5" font-family="var(--mono)" fill="var(--ink)">
+    <text x="594" y="86">class QUser {</text>
+    <text x="594" y="104">  NumberPath&lt;Long&gt;   id;</text>
+    <text x="594" y="122">  StringPath         username;</text>
+    <text x="594" y="140">  NumberPath&lt;Integer&gt; level;</text>
+    <text x="594" y="156">}</text>
+  </g>
+  <text x="690" y="182" text-anchor="middle" font-size="10" fill="var(--ink-faint)">target/generated-sources/java</text>
+
+  <!-- field mapping table -->
+  <rect x="150" y="204" width="520" height="106" rx="8" fill="var(--panel)" stroke="var(--line-strong)"/>
+  <text x="410" y="226" text-anchor="middle" font-size="12" font-weight="700" fill="var(--ink)">字段映射规则</text>
+  <g font-size="11" font-family="var(--mono)">
+    <text x="230" y="250" text-anchor="middle" fill="var(--java)">String</text>
+    <text x="410" y="250" text-anchor="middle" fill="var(--ink-faint)">→</text>
+    <text x="560" y="250" text-anchor="middle" fill="var(--sql)">StringPath</text>
+    <text x="230" y="272" text-anchor="middle" fill="var(--java)">Long</text>
+    <text x="410" y="272" text-anchor="middle" fill="var(--ink-faint)">→</text>
+    <text x="560" y="272" text-anchor="middle" fill="var(--sql)">NumberPath&lt;Long&gt;</text>
+    <text x="230" y="294" text-anchor="middle" fill="var(--java)">Integer</text>
+    <text x="410" y="294" text-anchor="middle" fill="var(--ink-faint)">→</text>
+    <text x="560" y="294" text-anchor="middle" fill="var(--sql)">NumberPath&lt;Integer&gt;</text>
+  </g>
+
+  <rect x="20" y="326" width="780" height="46" rx="8" fill="var(--accent-soft)" stroke="var(--accent)"/>
+  <text x="410" y="346" text-anchor="middle" font-size="12" fill="var(--ink)">每个 Q 类型都<tspan font-weight="700">含有一个自己类型的 static 实例</tspan>，这就是你在查询里用的东西：</text>
+  <text x="410" y="364" text-anchor="middle" font-size="11" font-family="var(--mono)" fill="var(--accent)">QUser.user　QBid.bid　QAddress.address</text>
+</svg>
+</div>
+<figcaption>图 19-B　Q 类型的生成与字段映射。<b>类型安全的秘密就在这里</b>：<code>QUser.user.username</code> 是一个 <code>StringPath</code>，编译器知道它上面有 <code>eq</code>、<code>like</code>、<code>startsWith</code>，却没有 <code>gt</code>。</figcaption>
+</figure>
+
+<div class="filename">Ch19/querydsl/pom.xml</div>
+<pre><code>&lt;dependency&gt;
+    &lt;groupId&gt;com.querydsl&lt;/groupId&gt;
+    &lt;artifactId&gt;querydsl-jpa&lt;/artifactId&gt;
+    &lt;version&gt;5.0.0&lt;/version&gt;
+&lt;/dependency&gt;
+&lt;dependency&gt;
+    &lt;groupId&gt;com.querydsl&lt;/groupId&gt;
+    &lt;artifactId&gt;querydsl-apt&lt;/artifactId&gt;
+    &lt;version&gt;5.0.0&lt;/version&gt;
+    <span class="hl">&lt;scope&gt;provided&lt;/scope&gt;</span>
+&lt;/dependency&gt;
+
+<span class="cmt">&lt;!-- 还需要 Maven APT 插件，它负责在构建过程中生成 Q 类型 --&gt;</span>
+&lt;plugin&gt;
+   &lt;groupId&gt;com.mysema.maven&lt;/groupId&gt;
+   &lt;artifactId&gt;apt-maven-plugin&lt;/artifactId&gt;
+   &lt;version&gt;1.1.3&lt;/version&gt;
+   &lt;executions&gt;
+     &lt;execution&gt;
+       &lt;goals&gt;&lt;goal&gt;process&lt;/goal&gt;&lt;/goals&gt;
+       &lt;configuration&gt;
+          <span class="hl">&lt;outputDirectory&gt;target/generated-sources/java&lt;/outputDirectory&gt;</span>   <span class="cmt">&lt;!-- A --&gt;</span>
+          <span class="hl">&lt;processor&gt;com.querydsl.apt.jpa.JPAAnnotationProcessor&lt;/processor&gt;</span> <span class="cmt">&lt;!-- B --&gt;</span>
+       &lt;/configuration&gt;
+     &lt;/execution&gt;
+   &lt;/executions&gt;
+&lt;/plugin&gt;</code></pre>
+
+<div class="keyhint">
+<div><span class="k">A</span> 生成的 Q 类型会放在 <code>target/generated-sources/java</code> 目录。</div>
+<div><span class="k">B</span> 用 <code>JPAAnnotationProcessor</code> 生成 Q 类型。<b>如果项目用的是 Hibernate 原生 API 和注解，就要换成 <code>com.querydsl.apt.hibernate.HibernateAnnotationProcessor</code>。</b></div>
+</div>
+
+<div class="filename">Ch19/querydsl/src/main/resources/META-INF/persistence.xml</div>
+<pre><code>&lt;persistence-unit name=<span class="str">"ch19.querydsl"</span>&gt;
+    &lt;provider&gt;org.hibernate.jpa.HibernatePersistenceProvider&lt;/provider&gt;
+    &lt;properties&gt;
+        &lt;property name=<span class="str">"javax.persistence.jdbc.driver"</span> value=<span class="str">"com.mysql.cj.jdbc.Driver"</span>/&gt;
+        &lt;property name=<span class="str">"javax.persistence.jdbc.url"</span>
+                  value=<span class="str">"jdbc:mysql://localhost:3306/CH19_QUERYDSL?serverTimezone=UTC"</span>/&gt;
+        &lt;property name=<span class="str">"javax.persistence.jdbc.user"</span> value=<span class="str">"root"</span>/&gt;
+        &lt;property name=<span class="str">"javax.persistence.jdbc.password"</span> value=<span class="str">""</span>/&gt;
+        &lt;property name=<span class="str">"hibernate.dialect"</span> value=<span class="str">"org.hibernate.dialect.MySQL8Dialect"</span>/&gt;
+        &lt;property name=<span class="str">"hibernate.show_sql"</span> value=<span class="str">"true"</span>/&gt;
+        &lt;property name=<span class="str">"hibernate.format_sql"</span> value=<span class="str">"true"</span>/&gt;
+        &lt;property name=<span class="str">"hibernate.hbm2ddl.auto"</span> value=<span class="str">"create"</span>/&gt;
+    &lt;/properties&gt;
+&lt;/persistence-unit&gt;</code></pre>
+
+<div class="tip"><b>把 <code>show_sql</code> 和 <code>format_sql</code> 都打开</b><p>本章会反复对照「Querydsl 代码」和「Hibernate 生成的 SQL」。这两个属性打开后，Hibernate 会漂亮地格式化 SQL 并在字符串里生成注释，让你知道它为什么执行了这条语句。<b>这是学 Querydsl 最有效的方式：写一句，看它变成什么 SQL。</b></p></div>
+
+<h3 id="s22">19.2.2 实体</h3>
+
+<div class="cols">
+<div class="card"><h4>User</h4>
+<pre><code><span class="ann">@Entity</span>
+<span class="ann">@NoArgsConstructor</span>
+<span class="kw">public class</span> User {
+    <span class="ann">@Id</span>
+    <span class="ann">@GeneratedValue</span>(generator = Constants.ID_GENERATOR)
+    <span class="ann">@Getter</span>
+    <span class="kw">private</span> Long id;
+
+    <span class="ann">@Embedded</span>                       <span class="cmt">// 无独立身份</span>
+    <span class="ann">@Getter</span> <span class="ann">@Setter</span>
+    <span class="kw">private</span> Address address;
+
+    <span class="ann">@OneToMany</span>(mappedBy = <span class="str">"user"</span>,
+               cascade = CascadeType.ALL)
+    <span class="kw">private</span> Set&lt;Bid&gt; bids = <span class="kw">new</span> HashSet&lt;&gt;();
+}</code></pre></div>
+<div class="card"><h4>Bid 与 Address</h4>
+<pre><code><span class="ann">@Entity</span>
+<span class="ann">@NoArgsConstructor</span>
+<span class="kw">public class</span> Bid {
+    <span class="ann">@Id</span>
+    <span class="ann">@GeneratedValue</span>(generator = Constants.ID_GENERATOR)
+    <span class="kw">private</span> Long id;
+
+    <span class="ann">@ManyToOne</span>(optional = <span class="kw">false</span>,
+                fetch = FetchType.LAZY)
+    <span class="ann">@Getter</span> <span class="ann">@Setter</span>
+    <span class="kw">private</span> User user;
+}
+
+<span class="ann">@Embeddable</span>
+<span class="ann">@NoArgsConstructor</span>
+<span class="kw">public class</span> Address { <span class="cmt">/* Lombok 字段 */</span> }</code></pre></div>
+</div>
+
+<p>还有一个 <code>UserRepository extends JpaRepository&lt;User, Long&gt;</code>——<b>它只用来方便地填充数据库，好让我们有数据可以拿 Querydsl 来查</b>，并不是 Querydsl 的一部分。</p>
+
+<h3 id="s23">19.2.3 测试骨架</h3>
+
+<div class="filename">Ch19/querydsl/src/test/.../QuerydslTest.java</div>
+<pre><code><span class="ann">@ExtendWith</span>(SpringExtension.class)                                    <span class="cmt">// A</span>
+<span class="ann">@TestInstance</span>(TestInstance.Lifecycle.PER_CLASS)                        <span class="cmt">// B</span>
+<span class="ann">@ContextConfiguration</span>(classes = {SpringDataConfiguration.class})       <span class="cmt">// C</span>
+<span class="kw">class</span> QuerydslTest {
+
+    <span class="ann">@Autowired</span>                                                        <span class="cmt">// D</span>
+    <span class="kw">private</span> UserRepository userRepository;
+
+    <span class="kw">private static</span> EntityManagerFactory entityManagerFactory =         <span class="cmt">// E</span>
+                   Persistence.createEntityManagerFactory(<span class="str">"ch19.querydsl"</span>);
+
+    <span class="kw">private</span> EntityManager entityManager;                               <span class="cmt">// F</span>
+    <span class="hl">private JPAQueryFactory queryFactory;</span>
+
+    <span class="ann">@BeforeAll</span>
+    <span class="kw">void</span> beforeAll() { userRepository.saveAll(generateUsers()); }      <span class="cmt">// G</span>
+
+    <span class="ann">@BeforeEach</span>
+    <span class="kw">void</span> beforeEach() {
+        entityManager = entityManagerFactory.createEntityManager();
+        entityManager.getTransaction().begin();
+        <span class="hl">queryFactory = new JPAQueryFactory(entityManager);</span>              <span class="cmt">// H</span>
+    }
+
+    <span class="ann">@AfterEach</span>
+    <span class="kw">void</span> afterEach() {                                                 <span class="cmt">// I</span>
+        entityManager.getTransaction().commit();
+        entityManager.close();
+    }
+
+    <span class="ann">@AfterAll</span>
+    <span class="kw">void</span> afterAll() { userRepository.deleteAll(); }                    <span class="cmt">// J</span>
+}</code></pre>
+
+<div class="keyhint">
+<div><span class="k">A</span> 用 <code>SpringExtension</code> 扩展测试——把 Spring 测试上下文与 JUnit 5 Jupiter 测试集成起来（第 20 章会详讲）。</div>
+<div><span class="k">B</span> JUnit 只创建<b>一个</b>测试类实例来执行所有测试，这样才能把 <code>UserRepository</code> 作为实例变量注入。</div>
+<div><span class="k">H</span> <b>核心两步</b>：<code>JPAQueryFactory</code> 由接受 <code>EntityManager</code> 参数的构造器创建；然后 <code>JPAQueryFactory</code> 再创建 <code>JPAQuery</code> 实例来真正查询数据库。</div>
+</div>
+
+<h2 id="s3"><span class="num">19.3</span> 用 Querydsl 查询数据库</h2>
+
+<h3 id="s31">19.3.1 过滤数据</h3>
+
+<p>生成的 Q 类型类各自包含一个自己类型的静态实例：</p>
+
+<pre><code><span class="kw">public static final</span> QUser    user    = <span class="kw">new</span> QUser(<span class="str">"user"</span>);
+<span class="kw">public static final</span> QBid     bid     = <span class="kw">new</span> QBid(<span class="str">"bid"</span>);
+<span class="kw">public static final</span> QAddress address = <span class="kw">new</span> QAddress(<span class="str">"address"</span>);</code></pre>
+
+<p>先调 <code>queryFactory.selectFrom(user)</code> 得到一个 <code>JPAQuery</code> 实例，然后用它构建查询的各个子句：<code>where</code> 按给定的 <code>Predicate</code> 过滤，<code>fetchOne</code> 从数据库取<b>单个</b>元素。</p>
+
+<div class="pit"><b><code>fetchOne</code> 的两种边界行为</b><p>找不到满足条件的元素 → <b>返回 <code>null</code></b>；找到<b>多个</b>满足条件的元素 → <b>抛 <code>NonUniqueResultException</code></b>。别把它当 <code>fetchFirst</code> 用。</p></div>
+
+<div class="cols">
+<div class="card"><h4>Querydsl 代码</h4>
+<pre><code><span class="ann">@Test</span>
+<span class="kw">void</span> testFindByUsername() {
+    User fetchedUser = queryFactory
+            .selectFrom(QUser.user)                    <span class="cmt">// A</span>
+            .where(QUser.user.username.eq(<span class="str">"john"</span>))     <span class="cmt">// B</span>
+            .fetchOne();                               <span class="cmt">// C</span>
+
+    assertAll(
+        () -&gt; assertNotNull(fetchedUser),
+        () -&gt; assertEquals(<span class="str">"john"</span>,  fetchedUser.getUsername()),
+        () -&gt; assertEquals(<span class="str">"John"</span>,  fetchedUser.getFirstName()),
+        () -&gt; assertEquals(<span class="str">"Smith"</span>, fetchedUser.getLastName()),
+        () -&gt; assertEquals(<span class="str">2</span>, fetchedUser.getBids().size()));
+}</code></pre></div>
+<div class="card"><h4>Hibernate 生成的 SQL</h4>
+<pre><code><span class="kw">select</span> * <span class="kw">from</span> User user0_
+<span class="kw">where</span> user0_.username=?
+
+<span class="cmt">-- 第二条来自 getBids()：懒加载集合被触发</span>
+<span class="kw">select</span> * <span class="kw">from</span> Bid bids0_
+<span class="kw">where</span> bids0_.user_id=?</code></pre>
+<p>注意生成了<b>两条</b> SQL——第二条是访问 <code>fetchedUser.getBids()</code> 时触发的懒加载（第 12 章）。</p></div>
+</div>
+
+<p>用 <code>and</code> / <code>or</code> 方法（各接收一个 <code>Predicate</code>）可以按多个条件过滤：</p>
+
+<div class="cols">
+<div class="card"><h4>Querydsl 代码</h4>
+<pre><code>List&lt;User&gt; users = (List&lt;User&gt;) queryFactory
+        .from(QUser.user)
+        .where(QUser.user.level.eq(<span class="str">3</span>)
+        <span class="hl">.and</span>(QUser.user.active.eq(<span class="kw">true</span>)))
+        .fetch();</code></pre></div>
+<div class="card"><h4>生成的 SQL</h4>
+<pre><code><span class="kw">select</span> * <span class="kw">from</span> User user0_
+<span class="kw">where</span> user0_.level=?
+  <span class="kw">and</span> user0_.active=?</code></pre></div>
+</div>
+
+<h3 id="s32">19.3.2 排序数据</h3>
+
+<p>用 <code>orderBy</code> 方法——它是重载的，<b>可以接收多个表示排序标准的参数</b>：</p>
+
+<div class="cols">
+<div class="card"><h4>Querydsl 代码</h4>
+<pre><code><span class="ann">@Test</span>
+<span class="kw">void</span> testOrderByUsername() {
+    List&lt;User&gt; users = queryFactory
+            .selectFrom(QUser.user)
+            <span class="hl">.orderBy(QUser.user.username.asc())</span>
+            .fetch();
+
+    assertAll(
+        () -&gt; assertEquals(users.size(), <span class="str">10</span>),
+        () -&gt; assertEquals(<span class="str">"beth"</span>,      users.get(<span class="str">0</span>).getUsername()),
+        () -&gt; assertEquals(<span class="str">"burk"</span>,      users.get(<span class="str">1</span>).getUsername()),
+        () -&gt; assertEquals(<span class="str">"mike"</span>,      users.get(<span class="str">8</span>).getUsername()),
+        () -&gt; assertEquals(<span class="str">"stephanie"</span>, users.get(<span class="str">9</span>).getUsername()));
+}</code></pre></div>
+<div class="card"><h4>生成的 SQL</h4>
+<pre><code><span class="kw">select</span> * <span class="kw">from</span> User user0_
+<span class="kw">order by</span> user0_.username <span class="kw">asc</span></code></pre>
+<p><code>fetch()</code> 取回 <code>List</code>，<code>fetchOne()</code> 取回单个。</p></div>
+</div>
+
+<h3 id="s33">19.3.3 分组与聚合</h3>
+
+<p>用 <code>groupBy</code> 方法接收要分组的表达式。<b>这样的查询返回 <code>List&lt;Tuple&gt;</code></b>——<code>com.querydsl.core.Tuple</code> 对象是一个键/值对，包含用来分组的键和它对应的值。</p>
+
+<figure>
+<div class="fig-box">
+<svg viewBox="0 0 820 280" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="groupBy 返回 List Tuple 的结构">
+  <text x="410" y="24" text-anchor="middle" font-size="13" font-weight="700" fill="var(--ink)">为什么 groupBy 的结果是 List&lt;Tuple&gt; 而不是 List&lt;Bid&gt;</text>
+
+  <rect x="30" y="42" width="220" height="150" rx="8" fill="var(--java-soft)" stroke="var(--java)"/>
+  <text x="140" y="64" text-anchor="middle" font-size="11.5" font-weight="700" fill="var(--ink)">Bid 表原始数据</text>
+  <g font-size="10.5" font-family="var(--mono)" fill="var(--ink-soft)">
+    <text x="46" y="88">id=1  amount=100.00</text>
+    <text x="46" y="108">id=2  amount=110.00</text>
+    <text x="46" y="128">id=3  amount=120.00</text>
+    <text x="46" y="148">id=4  amount=120.00</text>
+    <text x="46" y="168">id=5  amount=105.00</text>
+  </g>
+
+  <path d="M256 118 L326 118" stroke="var(--accent)" stroke-width="2" marker-end="url(#a19b)"/>
+  <defs><marker id="a19b" markerWidth="10" markerHeight="10" refX="9" refY="5" orient="auto"><path d="M0 0 L10 5 L0 10 z" fill="var(--accent)"/></marker></defs>
+  <text x="291" y="108" text-anchor="middle" font-size="10" fill="var(--accent)">groupBy</text>
+  <text x="291" y="132" text-anchor="middle" font-size="9.5" fill="var(--ink-faint)">(amount)</text>
+
+  <rect x="330" y="42" width="300" height="150" rx="8" fill="var(--accent-soft)" stroke="var(--accent)"/>
+  <text x="480" y="64" text-anchor="middle" font-size="11.5" font-weight="700" fill="var(--ink)">List&lt;Tuple&gt;（按 count 降序）</text>
+  <g font-size="10.5" font-family="var(--mono)">
+    <rect x="344" y="74" width="272" height="24" rx="4" fill="var(--panel)" stroke="var(--accent)" stroke-width="1.6"/>
+    <text x="354" y="90" fill="var(--ink)">[ amount=120.00 , count=2 ]  ← get(0)</text>
+    <rect x="344" y="102" width="272" height="22" rx="4" fill="var(--panel)" stroke="var(--line-strong)"/>
+    <text x="354" y="118" fill="var(--ink-soft)">[ amount=100.00 , count=1 ]</text>
+    <rect x="344" y="128" width="272" height="22" rx="4" fill="var(--panel)" stroke="var(--line-strong)"/>
+    <text x="354" y="144" fill="var(--ink-soft)">[ amount=110.00 , count=1 ]</text>
+    <rect x="344" y="154" width="272" height="22" rx="4" fill="var(--panel)" stroke="var(--line-strong)"/>
+    <text x="354" y="170" fill="var(--ink-soft)">[ amount=105.00 , count=1 ]</text>
+  </g>
+
+  <rect x="650" y="70" width="150" height="94" rx="8" fill="var(--sql-soft)" stroke="var(--sql)"/>
+  <text x="725" y="92" text-anchor="middle" font-size="11" font-weight="700" fill="var(--ink)">怎么取值</text>
+  <text x="660" y="114" font-size="9.5" font-family="var(--mono)" fill="var(--ink-soft)">tuple.get(</text>
+  <text x="660" y="128" font-size="9.5" font-family="var(--mono)" fill="var(--ink-soft)">  QBid.bid.amount)</text>
+  <text x="660" y="148" font-size="9.5" font-family="var(--mono)" fill="var(--ink-soft)">tuple.get(count)</text>
+
+  <rect x="30" y="208" width="770" height="58" rx="8" fill="var(--warn-soft)" stroke="var(--warn)"/>
+  <text x="415" y="230" text-anchor="middle" font-size="12" fill="var(--ink)">分组之后每一「行」<tspan font-weight="700">不再对应任何一个实体</tspan> —— 它是「一个分组键 + 若干聚合值」的组合。</text>
+  <text x="415" y="252" text-anchor="middle" font-size="12" fill="var(--ink)">Tuple 就是承载这种<tspan font-weight="700">异构行</tspan>的容器，并且<tspan font-weight="700">取值时仍然是类型安全的</tspan>（用 Q 路径当键）。</text>
+</svg>
+</div>
+<figcaption>图 19-C　<code>groupBy</code> 与 <code>Tuple</code>。这是 Querydsl 类型安全思想贯彻到聚合查询的方式。</figcaption>
+</figure>
+
+<div class="filename">Ch19/querydsl/src/test/.../QuerydslTest.java</div>
+<pre><code><span class="ann">@Test</span>
+<span class="kw">void</span> testGroupByBidAmount() {
+    NumberPath&lt;Long&gt; count = Expressions.numberPath(Long.class, <span class="str">"bids"</span>);  <span class="cmt">// A</span>
+
+    List&lt;Tuple&gt; userBidsGroupByAmount =                                    <span class="cmt">// B</span>
+        queryFactory.select(QBid.bid.amount,
+                            QBid.bid.id.count().as(count))                 <span class="cmt">// C</span>
+                    .from(QBid.bid)
+                    <span class="hl">.groupBy(QBid.bid.amount)</span>                          <span class="cmt">// D</span>
+                    .orderBy(count.desc())                                 <span class="cmt">// E</span>
+                    .fetch();                                              <span class="cmt">// F</span>
+
+    assertAll(                                                             <span class="cmt">// G</span>
+        () -&gt; assertEquals(<span class="kw">new</span> BigDecimal(<span class="str">"120.00"</span>),
+                    userBidsGroupByAmount.get(<span class="str">0</span>).get(QBid.bid.amount)),
+        () -&gt; assertEquals(<span class="str">2</span>, userBidsGroupByAmount.get(<span class="str">0</span>).get(count)));
+}</code></pre>
+
+<div class="keyhint">
+<div><span class="k">A</span> 把 <code>count()</code> 表达式保存下来，因为构建查询时<b>后面要多次用到它</b>（<code>select</code> 里、<code>orderBy</code> 里、最后取值时）。</div>
+</div>
+
+<div class="cols">
+<div class="card"><h4>生成的 SQL</h4>
+<pre><code><span class="kw">select</span>
+    bid0_.amount    <span class="kw">as</span> col_0_0_,
+    count(bid0_.id) <span class="kw">as</span> col_1_0_
+<span class="kw">from</span> Bid bid0_
+<span class="kw">group by</span> bid0_.amount
+<span class="kw">order by</span> col_1_0_ <span class="kw">desc</span></code></pre></div>
+<div class="card"><h4>其他聚合函数</h4>
+<pre><code>queryFactory.from(QBid.bid)
+    .select(QBid.bid.amount.<span class="hl">max</span>()).fetchOne();
+queryFactory.from(QBid.bid)
+    .select(QBid.bid.amount.<span class="hl">min</span>()).fetchOne();
+queryFactory.from(QBid.bid)
+    .select(QBid.bid.amount.<span class="hl">avg</span>()).fetchOne();</code></pre>
+<p>分别生成 <code>select max(...)</code>、<code>select min(...)</code>、<code>select avg(...)</code>。</p></div>
+</div>
+
+<h3 id="s34">19.3.4 子查询与连接</h3>
+
+<p><b>子查询</b>用 <code>JPAExpressions</code> 的静态工厂方法（如 <code>select</code>）创建，再用 <code>from</code>、<code>where</code> 定义参数，最后<b>把子查询传给主查询的 <code>where</code> 方法</b>：</p>
+
+<pre><code><span class="ann">@Test</span>
+<span class="kw">void</span> testSubquery() {
+    List&lt;User&gt; users = queryFactory.selectFrom(QUser.user)               <span class="cmt">// A</span>
+            .where(QUser.user.id.in(                                     <span class="cmt">// B 子查询作为 where 的参数</span>
+                    <span class="hl">JPAExpressions.select(QBid.bid.user.id)</span>              <span class="cmt">// C</span>
+                            .from(QBid.bid)
+                            .where(QBid.bid.amount.eq(
+                                        <span class="kw">new</span> BigDecimal(<span class="str">"120.00"</span>)))))
+            .fetch();                                                    <span class="cmt">// D</span>
+
+    List&lt;User&gt; otherUsers = queryFactory.selectFrom(QUser.user)          <span class="cmt">// E 同理，105.00</span>
+            .where(QUser.user.id.in(
+                    JPAExpressions.select(QBid.bid.user.id)
+                            .from(QBid.bid)
+                            .where(QBid.bid.amount.eq(
+                                        <span class="kw">new</span> BigDecimal(<span class="str">"105.00"</span>)))))
+            .fetch();
+
+    assertAll(
+        () -&gt; assertEquals(<span class="str">2</span>, users.size()),
+        () -&gt; assertEquals(<span class="str">1</span>, otherUsers.size()),
+        () -&gt; assertEquals(<span class="str">"burk"</span>, otherUsers.get(<span class="str">0</span>).getUsername()));
+}</code></pre>
+
+<pre><code><span class="cmt">-- 生成的 SQL</span>
+<span class="kw">select</span> * <span class="kw">from</span> User user0_
+<span class="kw">where</span> user0_.id <span class="kw">in</span> (
+    <span class="kw">select</span> bid1_.user_id <span class="kw">from</span> Bid bid1_ <span class="kw">where</span> bid1_.amount=?
+)</code></pre>
+
+<p><b>连接</b>用 <code>innerJoin</code>、<code>leftJoin</code>、<code>outerJoin</code> 定义连接，用 <code>on</code> 方法声明连接条件（一个 <code>Predicate</code>）：</p>
+
+<pre><code><span class="ann">@Test</span>
+<span class="kw">void</span> testJoin() {
+    List&lt;User&gt; users = queryFactory.selectFrom(QUser.user)
+            <span class="hl">.innerJoin(QUser.user.bids, QBid.bid)</span>                        <span class="cmt">// B 内连到 Bids</span>
+            <span class="hl">.on(QBid.bid.amount.eq(new BigDecimal("120.00")))</span>            <span class="cmt">// C 连接条件</span>
+            .fetch();                                                    <span class="cmt">// D</span>
+
+    List&lt;User&gt; otherUsers = queryFactory.selectFrom(QUser.user)          <span class="cmt">// E</span>
+            .innerJoin(QUser.user.bids, QBid.bid)
+            .on(QBid.bid.amount.eq(<span class="kw">new</span> BigDecimal(<span class="str">"105.00"</span>)))
+            .fetch();
+
+    assertAll(
+        () -&gt; assertEquals(<span class="str">2</span>, users.size()),
+        () -&gt; assertEquals(<span class="str">1</span>, otherUsers.size()),
+        () -&gt; assertEquals(<span class="str">"burk"</span>, otherUsers.get(<span class="str">0</span>).getUsername()));
+}</code></pre>
+
+<pre><code><span class="cmt">-- 生成的 SQL</span>
+<span class="kw">select</span> * <span class="kw">from</span> User user0_
+<span class="kw">inner join</span> Bid bids1_
+    <span class="kw">on</span> user0_.id=bids1_.user_id
+    <span class="kw">and</span> ( bids1_.amount=? )</code></pre>
+
+<div class="tip"><b>子查询 vs 连接：同一个问题的两种写法</b><p>上面两个测试<b>解决的是同一个问题</b>（找出出价为某金额的用户），断言结果也一模一样，但生成的 SQL 完全不同：一个是 <code>IN (子查询)</code>，一个是 <code>INNER JOIN</code>。哪种更快取决于数据库的优化器和数据分布——<b>而 Querydsl 让你能轻松写出两种版本去实测</b>。</p></div>
+
+<h3 id="s35">19.3.5 更新实体</h3>
+
+<p>用 <code>JPAQueryFactory</code> 的 <code>update</code> 方法，<code>where</code> 定义过滤条件（可选），<code>set</code> 定义要做的修改，<code>execute</code> 真正执行更新。</p>
+
+<pre><code><span class="ann">@Test</span>
+<span class="kw">void</span> testUpdate() {
+    queryFactory.<span class="hl">update</span>(QUser.user)                                      <span class="cmt">// A</span>
+            .where(QUser.user.username.eq(<span class="str">"john"</span>))                        <span class="cmt">// B 可选</span>
+            .<span class="hl">set</span>(QUser.user.email, <span class="str">"john@someotherdomain.com"</span>)            <span class="cmt">// C</span>
+            .<span class="hl">execute</span>();                                                   <span class="cmt">// D</span>
+
+    entityManager.getTransaction().commit();                             <span class="cmt">// E 提交 @BeforeEach 开的事务</span>
+    entityManager.getTransaction().begin();                              <span class="cmt">// F 开新事务，由 @AfterEach 提交</span>
+
+    assertEquals(<span class="str">"john@someotherdomain.com"</span>,                             <span class="cmt">// G</span>
+            queryFactory.select(QUser.user.email)
+                    .from(QUser.user)
+                    .where(QUser.user.username.eq(<span class="str">"john"</span>))
+                    .fetchOne());
+}</code></pre>
+
+<div class="note"><b>为什么代码里出现「先 commit 再 begin」这种奇怪顺序</b><p>因为 <code>@BeforeEach</code> 已经开了一个事务，<code>@AfterEach</code> 会提交一个事务。要想<b>在同一个测试方法里验证更新已经落库</b>，就得先把当前事务提交掉，再开一个新事务去读——新事务留给 <code>@AfterEach</code> 提交。这就是那对看似倒置的调用的由来。</p></div>
+
+<h3 id="s36">19.3.6 删除实体（此处有坑）</h3>
+
+<div class="pit"><b>Querydsl 的一个大问题：DML 忽略 JPA 级联规则</b><p>Querydsl 参考文档 2.1.11 节关于 JPA DELETE 查询明确指出：</p><p><i>「JPA 中的 DML 子句<b>不考虑 JPA 层面的级联规则</b>，也不提供细粒度的二级缓存交互。」</i></p><p>因此 <code>User</code> 类中 <code>bids</code> 上 <code>@OneToMany</code> 的 <code>cascade</code> 属性<b>被忽略了</b>：你必须<b>先选出用户、手动删掉他的所有 bid</b>，然后才能用 Querydsl 的 delete 查询删掉这个用户。</p>
+<p><b>额外的佐证</b>：如果改用 <code>userRepository.delete(burk)</code> 来删除用户，<code>@OneToMany</code> 的 cascade 属性<b>就会被正确考虑</b>，完全不需要手工处理该用户的 bid。所以问题确实出在 Querydsl 这一侧。</p></div>
+
+<pre><code><span class="ann">@Test</span>
+<span class="kw">void</span> testDelete() {
+
+    User burk = (User) queryFactory.from(QUser.user)
+                .where(QUser.user.username.eq(<span class="str">"burk"</span>))                     <span class="cmt">// A 先找到 burk</span>
+                .fetchOne();
+    <span class="hl">if (burk != null) {                        // B 必须手动先删掉他的 bids</span>
+        queryFactory.delete(QBid.bid)
+                    .where(QBid.bid.user.eq(burk))
+                    .execute();
+    }
+
+    queryFactory.<span class="hl">delete</span>(QUser.user)                                     <span class="cmt">// C</span>
+            .where(QUser.user.username.eq(<span class="str">"burk"</span>))                         <span class="cmt">// D 可选</span>
+            .execute();                                                    <span class="cmt">// E</span>
+
+    entityManager.getTransaction().commit();                               <span class="cmt">// F</span>
+    entityManager.getTransaction().begin();                                <span class="cmt">// G</span>
+
+    assertNull(queryFactory.selectFrom(QUser.user)                          <span class="cmt">// H 删掉了就返回 null</span>
+            .where(QUser.user.username.eq(<span class="str">"burk"</span>))
+            .fetchOne());
+}</code></pre>
+
+<div class="warn"><b>MySQL 上的另一个相关问题</b><p>如果只发 <code>delete from User where username=?</code> 这一条 SQL，在 <code>User</code> 有子 <code>Bid</code> 时是不够的。这暴露出<b>另一个 MySQL 特有的问题</b>：Hibernate 创建 schema 时，<b>在 <code>bid</code> 表的 <code>user_id</code> 外键约束上没有加 <code>ON DELETE CASCADE</code> 子句</b>。否则的话，即便 Querydsl 忽略 <code>@OneToMany</code> 的 cascade 属性，这一条 DELETE 也足够了。</p></div>
+
+<div class="pit"><b>Querydsl API 不提供插入能力</b><p>没有 <code>queryFactory.insert(...)</code>。要插入实体，请使用 <code>EntityManager</code>（JPA）、<code>Session</code>（Hibernate）或仓库（Spring Data JPA）。<b>Querydsl 是一个查询 DSL，不是一个完整的持久化 API</b>——它和 JPA 是搭配使用而非替代关系。</p></div>
+
+<figure>
+<div class="fig-box">
+<svg viewBox="0 0 820 260" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Querydsl API 的能力边界">
+  <text x="410" y="24" text-anchor="middle" font-size="13" font-weight="700" fill="var(--ink)">Querydsl API 的能力边界</text>
+
+  <rect x="30" y="42" width="480" height="196" rx="8" fill="var(--sql-soft)" stroke="var(--sql)"/>
+  <text x="270" y="66" text-anchor="middle" font-size="12.5" font-weight="700" fill="var(--sql)">✓ Querydsl 能做</text>
+  <g font-size="11" fill="var(--ink)">
+    <text x="48" y="92">selectFrom · from · select　　构建查询起点</text>
+    <text x="48" y="114">where + and/or　　　　　　　过滤（Predicate）</text>
+    <text x="48" y="136">orderBy(.asc()/.desc())　　　　排序，可多条件</text>
+    <text x="48" y="158">groupBy + count/max/min/avg　分组与聚合 → List&lt;Tuple&gt;</text>
+    <text x="48" y="180">JPAExpressions.select　　　　子查询</text>
+    <text x="48" y="202">innerJoin/leftJoin/outerJoin + on　连接</text>
+    <text x="48" y="224">update+set+execute · delete+execute　更新与删除</text>
+  </g>
+
+  <rect x="530" y="42" width="270" height="196" rx="8" fill="var(--danger-soft)" stroke="var(--danger)"/>
+  <text x="665" y="66" text-anchor="middle" font-size="12.5" font-weight="700" fill="var(--danger)">✗ Querydsl 做不了</text>
+  <g font-size="11" fill="var(--ink)">
+    <text x="546" y="94">插入实体</text>
+    <text x="558" y="112" font-size="10" fill="var(--ink-soft)">→ 用 EntityManager / Session /</text>
+    <text x="558" y="126" font-size="10" fill="var(--ink-soft)">　 Spring Data 仓库</text>
+    <text x="546" y="154">DML 时遵守 JPA 级联规则</text>
+    <text x="558" y="172" font-size="10" fill="var(--ink-soft)">→ 删父实体前要手动删子实体</text>
+    <text x="546" y="200">细粒度的二级缓存交互</text>
+    <text x="558" y="218" font-size="10" fill="var(--ink-soft)">→ DML 绕过持久化上下文</text>
+  </g>
+</svg>
+</div>
+<figcaption>图 19-D　Querydsl 的能力清单与三条已知限制。把它当作「JPA 的类型安全查询前端」来用，而不是 JPA 的替代品。</figcaption>
+</figure>
+
+<div class="summary" id="s4">
+<h3>本章小结</h3>
+<ul>
+<li>SQL、JPQL、Criteria API、Spring Data 等查询方案各有缺陷：<b>缺乏可移植性、缺乏类型安全与静态查询校验、过于啰嗦</b>。Querydsl 抓住了类型安全和可移植性这两个重要理念，同时降低了啰嗦程度。</li>
+<li>可以创建一个使用 Querydsl 的持久化应用，定义它的配置和实体，持久化并查询数据。</li>
+<li>要使用 Querydsl，需要把它的依赖加进应用。<b>Maven APT（注解处理工具）是必需的</b>——它在<b>构建期</b>创建复制实体的 <b>Q 类型</b>。<code>String</code> → <code>StringPath</code>、<code>Long</code> → <code>NumberPath&lt;Long&gt;</code>，每个 Q 类型都带一个静态实例（<code>QUser.user</code>）。</li>
+<li>可以使用 Querydsl 的核心类 <b><code>JPAQueryFactory</code> 和 <code>JPAQuery</code></b> 构建查询，来<b>获取、更新和删除</b>数据。<code>JPAQueryFactory</code> 由 <code>EntityManager</code> 构造。</li>
+<li>可以创建查询来<b>过滤、排序、分组</b>数据，以及执行<b>连接、更新和删除</b>。分组返回 <code>List&lt;Tuple&gt;</code>；子查询用 <code>JPAExpressions</code>。</li>
+<li><b>三条必须记住的限制</b>：Querydsl 的 DML 忽略 JPA 级联规则（删父前要手动删子）；MySQL 上 Hibernate 生成的外键没有 <code>ON DELETE CASCADE</code>；<b>Querydsl 没有插入能力</b>。</li>
+</ul>
+</div>
+
+<div class="pager">
+  <a href="ch18.html">← 第 18 章　使用 Hibernate OGM</a>
+  <a href="ch20.html">第 20 章　测试 Java 持久化应用 →</a>
+</div>
+</main>
+</div>
+</body>
+</html>

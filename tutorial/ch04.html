@@ -1,0 +1,692 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>第 4 章 · 使用 Spring Data JPA</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="topbar"><div class="topbar-inner">
+  <a class="brand" href="index.html">Java Persistence 讲义</a>
+  <span class="spacer"></span>
+  <a href="ch03.html">← 上一章</a>
+  <a href="index.html">目录</a>
+  <a href="ch05.html">下一章 →</a>
+</div></div>
+
+<div class="wrap">
+<nav class="toc">
+  <h4>本章目录</h4>
+  <a href="#s1">4.1 Spring Data JPA 简介</a>
+  <a href="#s2">4.2 新建项目</a>
+  <a href="#s3">4.3 首次配置</a>
+  <a href="#s4">4.4 定义查询方法</a>
+  <a class="sub" href="#s41">Repository 层次</a>
+  <a class="sub" href="#s42">查询构建器机制</a>
+  <a class="sub" href="#s43">关键字对照表</a>
+  <a href="#s5">4.5 限制结果 / 排序 / 分页</a>
+  <a href="#s6">4.6 流式结果</a>
+  <a href="#s7">4.7 @Query 注解</a>
+  <a href="#s8">4.8 投影 Projections</a>
+  <a href="#s9">4.9 修改型查询</a>
+  <a href="#s10">4.10 Query by Example</a>
+  <a href="#s11">本章小结</a>
+</nav>
+
+<main>
+<div class="hero">
+  <div class="eyebrow">Part 1 · 入门 ORM</div>
+  <h1>第 4 章　使用 Spring Data JPA</h1>
+  <p>这一章把 Spring Data JPA 的能力一次讲透：<b>按方法名生成查询</b>、限制/排序/分页、<code>@Query</code>、投影、修改型查询、Query by Example。后面章节会反复用它作为「另一条访问数据库的路」。</p>
+</div>
+
+<h2 id="s1"><span class="num">4.1</span>Spring Data JPA 简介</h2>
+
+<p>Spring Data 是伞形项目，各子项目与数据库厂商<b>合作开发</b>。目标是：<b>为数据访问提供抽象，同时保留各数据存储的底层特性</b>。本书用到的通用能力有：</p>
+<ul>
+<li>通过 JavaConfig 与 XML 配置与 Spring 集成</li>
+<li>Repository 与自定义对象映射抽象</li>
+<li>与自定义 repository 代码集成</li>
+<li><b>基于 repository 方法名的动态查询创建</b>（本章重头戏）</li>
+<li>与 Spring Boot 等其他 Spring 项目集成</li>
+</ul>
+
+<figure><div class="fig-box">
+<svg viewBox="0 0 700 260" xmlns="http://www.w3.org/2000/svg" font-family="Inter,system-ui,sans-serif">
+  <rect x="150" y="20" width="400" height="56" rx="9" fill="var(--accent-soft)" stroke="var(--accent)" stroke-width="2"/>
+  <text x="350" y="44" text-anchor="middle" font-size="15" font-weight="700" fill="var(--accent)">Spring Data JPA</text>
+  <text x="350" y="65" text-anchor="middle" font-size="11.5" fill="var(--ink-soft)">支持与 JPA repository 交互；接管配置与事务管理</text>
+
+  <rect x="150" y="86" width="400" height="56" rx="9" fill="var(--panel)" stroke="var(--line-strong)" stroke-width="1.6"/>
+  <text x="350" y="110" text-anchor="middle" font-size="15" font-weight="700" fill="var(--ink)">Spring Data Commons</text>
+  <text x="350" y="131" text-anchor="middle" font-size="11.5" fill="var(--ink-soft)">技术中立的 Repository 抽象 + 持久化元数据模型</text>
+
+  <rect x="150" y="152" width="400" height="56" rx="9" fill="var(--java-soft)" stroke="var(--java)" stroke-width="1.6"/>
+  <text x="350" y="176" text-anchor="middle" font-size="15" font-weight="700" fill="var(--java)">JPA 提供者（本书用 Hibernate）</text>
+  <text x="350" y="197" text-anchor="middle" font-size="11.5" fill="var(--ink-soft)">实体依然由 JPA + Hibernate 定义和管理</text>
+
+  <rect x="150" y="218" width="400" height="32" rx="9" fill="var(--sql-soft)" stroke="var(--sql)"/>
+  <text x="350" y="239" text-anchor="middle" font-size="13" font-weight="700" fill="var(--sql)">数据库</text>
+
+  <text x="70" y="48" font-size="11.5" fill="var(--ink-faint)">Spring Data JPA</text>
+  <text x="70" y="64" font-size="11.5" fill="var(--ink-faint)">帮你做四件事 ↓</text>
+  <g font-size="11" fill="var(--ink-soft)">
+    <text x="20" y="94">① 配置 data source bean</text>
+    <text x="20" y="114">② 配置 entity manager factory bean</text>
+    <text x="20" y="134">③ 配置 transaction manager bean</text>
+    <text x="20" y="154">④ 通过注解管理事务</text>
+  </g>
+  <path d="M143 120 L148 120" stroke="var(--line-strong)"/>
+</svg>
+</div><figcaption>图 4-1　Spring Data JPA 建立在 Spring Data Commons 与 JPA 提供者之上</figcaption></figure>
+
+<h2 id="s2"><span class="num">4.2</span>新建一个 Spring Data JPA 项目</h2>
+
+<div class="note"><b>前置</b><p>先运行 <code>Ch04/Ch04.sql</code>。§4.1–4.3 的源码在 <code>springdatajpa</code> 目录，<b>§4.4 之后在 <code>springdatajpa2</code> 目录</b>。</p></div>
+
+<p>用 <a href="https://start.spring.io/">start.spring.io</a> 生成 Spring Boot 项目：Group <code>com.manning.javapersistence</code>、Artifact <code>springdatajpa</code>，勾选依赖 <b>Spring Data JPA</b> 与 <b>MySQL Driver</b>。骨架含四个文件：<code>SpringDataJpaApplication</code>（main 方法）、<code>SpringDataJpaApplicationTests</code>（测试骨架）、空的 <code>application.properties</code>、<code>pom.xml</code>。</p>
+
+<div class="filename">Ch04/springdatajpa/pom.xml</div>
+<pre><code>&lt;<span class="kw">parent</span>&gt;                                              <span class="cmt">❶ 父 POM：提供默认配置、依赖与插件管理</span>
+   &lt;groupId&gt;org.springframework.boot&lt;/groupId&gt;
+   &lt;artifactId&gt;<span class="ann">spring-boot-starter-parent</span>&lt;/artifactId&gt;   <span class="cmt">   它又继承 spring-boot-dependencies 的依赖管理</span>
+   &lt;version&gt;2.7.0&lt;/version&gt;
+&lt;/<span class="kw">parent</span>&gt;
+&lt;properties&gt;&lt;java.version&gt;17&lt;/java.version&gt;&lt;/properties&gt;
+
+&lt;dependencies&gt;
+   &lt;dependency&gt;&lt;artifactId&gt;<span class="ann">spring-boot-starter-data-jpa</span>&lt;/artifactId&gt;&lt;/dependency&gt;   <span class="cmt">❷ 传递依赖 Hibernate</span>
+   &lt;dependency&gt;&lt;artifactId&gt;<span class="ann">mysql-connector-java</span>&lt;/artifactId&gt;
+       &lt;scope&gt;<span class="hl">runtime</span>&lt;/scope&gt;&lt;/dependency&gt;                                    <span class="cmt">❸ 编译期不需要，只在运行期</span>
+   &lt;dependency&gt;&lt;artifactId&gt;<span class="ann">spring-boot-starter-test</span>&lt;/artifactId&gt;
+       &lt;scope&gt;test&lt;/scope&gt;&lt;/dependency&gt;                                       <span class="cmt">❹ 只用于测试编译与执行</span>
+&lt;/dependencies&gt;
+&lt;build&gt;&lt;plugins&gt;&lt;plugin&gt;&lt;artifactId&gt;<span class="ann">spring-boot-maven-plugin</span>&lt;/artifactId&gt;&lt;/plugin&gt;&lt;/plugins&gt;&lt;/build&gt;</code></pre>
+
+<h2 id="s3"><span class="num">4.3</span>配置第一步：实体 + Repository + properties</h2>
+
+<div class="filename">Ch04/springdatajpa/src/main/java/…/springdatajpa/model/User.java</div>
+<pre><code><span class="ann">@Entity</span>
+<span class="ann">@Table</span>(name = <span class="str">"USERS"</span>)          <span class="cmt">❶ 默认表名 USER 在多数数据库里是保留字，所以显式改名</span>
+<span class="kw">public class</span> User {
+
+    <span class="ann">@Id</span>
+    <span class="ann">@GeneratedValue</span>            <span class="cmt">❷ 自动生成 id（第 5 章细讲）</span>
+    <span class="kw">private</span> Long id;
+
+    <span class="kw">private</span> String username;
+    <span class="kw">private</span> LocalDate registrationDate;
+
+    <span class="kw">public</span> User() { }          <span class="cmt">❸ JPA 要求无参构造器（反射调用它创建实例）</span>
+    <span class="kw">public</span> User(String username) { <span class="kw">this</span>.username = username; }
+    <span class="kw">public</span> User(String username, LocalDate registrationDate) { … }
+
+    <span class="cmt">// getters / setters / toString()</span>
+}</code></pre>
+
+<div class="filename">…/springdatajpa/repositories/UserRepository.java</div>
+<pre><code><span class="kw">public interface</span> UserRepository <span class="kw">extends</span> CrudRepository&lt;User, Long&gt; { }</code></pre>
+
+<div class="tip"><b><code>CrudRepository</code> 是技术无关的</b><p>它不只能用于 JPA/关系数据库，也能用于 NoSQL。比如把依赖从 <code>spring-boot-starter-data-jpa</code> 换成 <code>spring-boot-starter-data-mongodb</code>，就能<b>在不动实现代码的前提下</b>把数据库从 MySQL 换成 MongoDB（第 17 章会做这件事）。</p></div>
+
+<div class="filename">Ch04/springdatajpa/src/main/resources/application.properties　（Spring Boot 自动从 classpath 找它）</div>
+<pre><code>spring.datasource.url=jdbc:mysql://localhost:3306/CH04_SPRINGDATAJPA?serverTimezone=UTC
+spring.datasource.username=root
+spring.datasource.password=
+spring.jpa.properties.hibernate.dialect=org.hibernate.dialect.MySQL8Dialect
+spring.jpa.show-sql=<span class="hl">true</span>                      <span class="cmt"># 执行时打印 SQL</span>
+spring.jpa.hibernate.ddl-auto=<span class="hl">create</span>          <span class="cmt"># 每次运行重建数据库</span></code></pre>
+
+<div class="filename">…/springdatajpa/SpringDataJpaApplication.java</div>
+<pre><code><span class="ann">@SpringBootApplication</span>          <span class="cmt">❶ 开启自动配置 + 扫描本包 + 允许注册额外 bean</span>
+<span class="kw">public class</span> SpringDataJpaApplication {
+
+    <span class="kw">public static void</span> main(String[] args) {
+       SpringApplication.run(SpringDataJpaApplication.class, args);  <span class="cmt">❷ 创建 ApplicationContext 并加载 bean</span>
+    }
+
+    <span class="ann">@Bean</span>
+    <span class="kw">public</span> ApplicationRunner configure(UserRepository userRepository) {  <span class="cmt">❸ run() 结束前会执行这个 Runner</span>
+       <span class="kw">return</span> env -&gt; {
+          User user1 = <span class="kw">new</span> User(<span class="str">"beth"</span>, LocalDate.of(2020, Month.AUGUST, 3));
+          User user2 = <span class="kw">new</span> User(<span class="str">"mike"</span>, LocalDate.of(2020, Month.JANUARY, 18));
+          userRepository.save(user1);
+          userRepository.save(user2);
+          userRepository.findAll().forEach(System.out::println);
+       };
+    }
+}
+<span class="cmt">// 输出：
+// User{id=1, username='beth', registrationDate=2020-08-03}
+// User{id=2, username='mike', registrationDate=2020-01-18}</span></code></pre>
+
+<h2 id="s4"><span class="num">4.4</span>定义查询方法</h2>
+
+<p>从这里起使用 <code>springdatajpa2</code>，<code>User</code> 增加了 <code>email</code>、<code>level</code>（等级，决定能做什么动作，比如出价上限）、<code>active</code>（活跃 / 已退休）三个字段。</p>
+
+<h3 id="s41">4.4.1　Repository 接口层次：选哪一个</h3>
+
+<figure><div class="fig-box">
+<svg viewBox="0 0 800 380" xmlns="http://www.w3.org/2000/svg" font-family="Inter,system-ui,sans-serif">
+  <defs><marker id="ext" markerWidth="13" markerHeight="13" refX="12" refY="6.5" orient="auto">
+    <path d="M0 0 L13 6.5 L0 13 z" fill="var(--bg)" stroke="var(--java)" stroke-width="1.2"/></marker></defs>
+
+  <rect x="270" y="14" width="260" height="34" rx="7" fill="var(--bg-soft)" stroke="var(--line-strong)"/>
+  <text x="400" y="36" text-anchor="middle" font-size="13" font-weight="700" fill="var(--ink-soft)">Repository&lt;T, ID&gt;　（标记接口）</text>
+
+  <path d="M400 100 L400 52" stroke="var(--java)" stroke-width="1.5" marker-end="url(#ext)"/>
+  <rect x="230" y="102" width="340" height="58" rx="7" fill="var(--java-soft)" stroke="var(--java)" stroke-width="1.6"/>
+  <text x="400" y="124" text-anchor="middle" font-size="13.5" font-weight="700" fill="var(--java)">CrudRepository&lt;T, ID&gt;</text>
+  <text x="400" y="146" text-anchor="middle" font-size="11.5" fill="var(--ink)">基础 CRUD：save · findAll · findById · delete · count</text>
+
+  <path d="M400 212 L400 164" stroke="var(--java)" stroke-width="1.5" marker-end="url(#ext)"/>
+  <rect x="200" y="214" width="400" height="58" rx="7" fill="var(--java-soft)" stroke="var(--java)" stroke-width="1.6"/>
+  <text x="400" y="236" text-anchor="middle" font-size="13.5" font-weight="700" fill="var(--java)">PagingAndSortingRepository&lt;T, ID&gt;</text>
+  <text x="400" y="258" text-anchor="middle" font-size="11.5" fill="var(--ink)">在此之上加入便捷的<tspan font-weight="700">排序</tspan>与<tspan font-weight="700">分页</tspan>方法</text>
+
+  <path d="M400 294 L400 276" stroke="var(--accent)" stroke-width="1.8" marker-end="url(#ext)"/>
+  <rect x="130" y="296" width="540" height="72" rx="8" fill="var(--accent-soft)" stroke="var(--accent)" stroke-width="2"/>
+  <text x="400" y="320" text-anchor="middle" font-size="13.5" font-weight="700" fill="var(--accent)">JpaRepository&lt;T, ID&gt;　← 本章之后都用它</text>
+  <text x="400" y="340" text-anchor="middle" font-size="11.5" fill="var(--ink)">JPA 专属方法：flush 持久化上下文、批量删除记录</text>
+  <text x="400" y="358" text-anchor="middle" font-size="11.5" fill="var(--ink)">并<tspan font-weight="700">重写</tspan> findAll / findAllById / saveAll，返回 <tspan font-family="monospace">List</tspan> 而不是 <tspan font-family="monospace">Iterable</tspan></text>
+</svg>
+</div><figcaption>图 4-A　Repository 接口继承链，每往下一层多一组能力</figcaption></figure>
+
+<div class="filename">Ch04/springdatajpa2/…/repositories/UserRepository.java（节选）</div>
+<pre><code><span class="kw">public interface</span> UserRepository <span class="kw">extends</span> JpaRepository&lt;User, Long&gt; {
+
+   User       findByUsername(String username);
+   List&lt;User&gt; findAllByOrderByUsernameAsc();
+   List&lt;User&gt; findByRegistrationDateBetween(LocalDate start, LocalDate end);
+   List&lt;User&gt; findByUsernameAndEmail(String username, String email);
+   List&lt;User&gt; findByUsernameOrEmail(String username, String email);
+   List&lt;User&gt; findByUsernameIgnoreCase(String username);
+   List&lt;User&gt; findByLevelOrderByUsernameDesc(<span class="kw">int</span> level);
+   List&lt;User&gt; findByLevelGreaterThanEqual(<span class="kw">int</span> level);
+   List&lt;User&gt; findByUsernameContaining(String text);
+   List&lt;User&gt; findByUsernameLike(String text);
+   List&lt;User&gt; findByUsernameStartingWith(String start);
+   List&lt;User&gt; findByUsernameEndingWith(String end);
+   List&lt;User&gt; findByActive(<span class="kw">boolean</span> active);
+   List&lt;User&gt; findByRegistrationDateIn(Collection&lt;LocalDate&gt; dates);
+   List&lt;User&gt; findByRegistrationDateNotIn(Collection&lt;LocalDate&gt; dates);
+}</code></pre>
+
+<h3 id="s42">4.4.2　查询构建器机制：方法名是怎么被翻译成 JPQL 的</h3>
+
+<figure><div class="fig-box">
+<svg viewBox="0 0 840 380" xmlns="http://www.w3.org/2000/svg" font-family="Inter,system-ui,sans-serif">
+  <defs><marker id="qb" markerWidth="9" markerHeight="9" refX="8" refY="4.5" orient="auto"><path d="M0 0 L9 4.5 L0 9 z" fill="var(--accent)"/></marker></defs>
+
+  <rect x="20" y="20" width="800" height="46" rx="8" fill="var(--java-soft)" stroke="var(--java)" stroke-width="1.6"/>
+  <text x="420" y="49" text-anchor="middle" font-family="monospace" font-size="16" fill="var(--ink)">
+    <tspan fill="var(--ink-faint)">List&lt;User&gt; </tspan><tspan fill="var(--danger)" font-weight="700">findBy</tspan><tspan fill="var(--java)" font-weight="700">Level</tspan><tspan fill="var(--accent)" font-weight="700">GreaterThanEqual</tspan><tspan fill="var(--ink-faint)">(int level)</tspan></text>
+
+  <path d="M180 68 L180 96" stroke="var(--danger)" stroke-width="1.5" marker-end="url(#qb)"/>
+  <path d="M355 68 L355 96" stroke="var(--java)" stroke-width="1.5" marker-end="url(#qb)"/>
+  <path d="M520 68 L520 96" stroke="var(--accent)" stroke-width="1.5" marker-end="url(#qb)"/>
+
+  <rect x="40" y="98" width="240" height="86" rx="7" fill="var(--danger-soft)" stroke="var(--danger)"/>
+  <text x="160" y="120" text-anchor="middle" font-size="12.5" font-weight="700" fill="var(--danger)">① 剥掉前后缀</text>
+  <text x="160" y="140" text-anchor="middle" font-family="monospace" font-size="11" fill="var(--ink)">find…By / get…By / query…By</text>
+  <text x="160" y="157" text-anchor="middle" font-family="monospace" font-size="11" fill="var(--ink)">read…By / count…By / delete…By</text>
+  <text x="160" y="176" text-anchor="middle" font-size="11" fill="var(--ink-soft)">剩下的部分才是要解析的主体</text>
+
+  <rect x="290" y="98" width="200" height="86" rx="7" fill="var(--java-soft)" stroke="var(--java)"/>
+  <text x="390" y="120" text-anchor="middle" font-size="12.5" font-weight="700" fill="var(--java)">② 匹配实体属性</text>
+  <text x="390" y="142" text-anchor="middle" font-family="monospace" font-size="12" fill="var(--ink)">Level → u.level</text>
+  <text x="390" y="164" text-anchor="middle" font-size="11" fill="var(--danger)">属性名对不上 →</text>
+  <text x="390" y="179" text-anchor="middle" font-size="11" fill="var(--danger)">加载上下文时就报错</text>
+
+  <rect x="500" y="98" width="300" height="86" rx="7" fill="var(--accent-soft)" stroke="var(--accent)"/>
+  <text x="650" y="120" text-anchor="middle" font-size="12.5" font-weight="700" fill="var(--accent)">③ 解析谓词与修饰</text>
+  <text x="650" y="140" text-anchor="middle" font-size="11.5" fill="var(--ink)">运算符 LessThan / GreaterThan / Between / Like</text>
+  <text x="650" y="157" text-anchor="middle" font-size="11.5" fill="var(--ink)">复合条件 And / Or　·　去重 Distinct</text>
+  <text x="650" y="174" text-anchor="middle" font-size="11.5" fill="var(--ink)">静态排序 OrderByXxxAsc/Desc　·　IgnoreCase</text>
+
+  <path d="M420 186 L420 214" stroke="var(--accent)" stroke-width="2" marker-end="url(#qb)"/>
+
+  <rect x="120" y="216" width="600" height="46" rx="8" fill="var(--sql-soft)" stroke="var(--sql)" stroke-width="1.8"/>
+  <text x="420" y="245" text-anchor="middle" font-family="monospace" font-size="14" fill="var(--ink)">select u from User u where u.level &gt;= ?1</text>
+
+  <rect x="20" y="284" width="390" height="86" rx="8" fill="var(--panel)" stroke="var(--line-strong)"/>
+  <text x="215" y="306" text-anchor="middle" font-size="12.5" font-weight="700" fill="var(--ink)">返回类型也参与解析</text>
+  <text x="38" y="328" font-size="11.5" fill="var(--ink)">想放进 Optional 容器 → 声明 <tspan font-family="monospace">Optional&lt;User&gt;</tspan></text>
+  <text x="38" y="348" font-size="11.5" fill="var(--ink)">删除行 → 把 <tspan font-family="monospace">find</tspan> 换成 <tspan font-family="monospace">delete</tspan></text>
+  <text x="38" y="366" font-size="11" fill="var(--ink-faint)">完整返回类型清单见 Spring Data JPA 参考文档附录 D</text>
+
+  <rect x="430" y="284" width="390" height="86" rx="8" fill="var(--warn-soft)" stroke="var(--warn)"/>
+  <text x="625" y="306" text-anchor="middle" font-size="12.5" font-weight="700" fill="var(--warn)">两种错误的暴露时机不同</text>
+  <text x="448" y="328" font-size="11.5" fill="var(--ink)"><tspan font-weight="700">方法名写错</tspan>（属性对不上）→ <tspan font-weight="700">应用上下文加载时</tspan>报错</text>
+  <text x="448" y="348" font-size="11.5" fill="var(--ink)"><tspan font-weight="700">@Query 里的查询写错</tspan> → <tspan font-weight="700">运行到该方法时</tspan>才报错</text>
+  <text x="448" y="366" font-size="11" fill="var(--ink-faint)">所以 @Query 更灵活，但安全性更低</text>
+</svg>
+</div><figcaption>图 4-B　查询构建器把方法名逐段解析成 JPQL</figcaption></figure>
+
+<h3 id="s43">4.4.3　核心关键字对照表</h3>
+
+<div class="tablewrap"><table>
+<thead><tr><th>关键字</th><th>方法名示例</th><th>生成的 JPQL</th></tr></thead>
+<tbody>
+<tr><td><code>Is</code> <code>Equals</code><br><i>(可省略)</i></td><td><code>findByUsername</code><br><code>findByUsernameIs</code><br><code>findByUsernameEquals</code></td><td><code>… where e.username = ?1</code></td></tr>
+<tr><td><code>And</code></td><td><code>findByUsernameAndRegistrationDate</code></td><td><code>… where e.username = ?1 and e.registrationdate = ?2</code></td></tr>
+<tr><td><code>Or</code></td><td><code>findByUsernameOrRegistrationDate</code></td><td><code>… where e.username = ?1 or e.registrationdate = ?2</code></td></tr>
+<tr><td><code>LessThan</code></td><td><code>findByRegistrationDateLessThan</code></td><td><code>… where e.registrationdate &lt; ?1</code></td></tr>
+<tr><td><code>LessThanEqual</code></td><td><code>findByRegistrationDateLessThanEqual</code></td><td><code>… where e.registrationdate &lt;= ?1</code></td></tr>
+<tr><td><code>GreaterThan</code></td><td><code>findByRegistrationDateGreaterThan</code></td><td><code>… where e.registrationdate &gt; ?1</code></td></tr>
+<tr><td><code>GreaterThanEqual</code></td><td><code>findByRegistrationDateGreaterThanEqual</code></td><td><code>… where e.registrationdate &gt;= ?1</code></td></tr>
+<tr><td><code>Between</code></td><td><code>findByRegistrationDateBetween</code></td><td><code>… where e.registrationdate between ?1 and ?2</code></td></tr>
+<tr><td><code>OrderBy</code></td><td><code>findByRegistrationDateOrderByUsernameDesc</code></td><td><code>… where e.registrationdate = ?1 order by e.username desc</code></td></tr>
+<tr><td><code>Like</code> / <code>NotLike</code></td><td><code>findByUsernameLike</code> / <code>…NotLike</code></td><td><code>… where e.username like ?1</code> / <code>not like ?1</code></td></tr>
+<tr><td><code>Before</code> / <code>After</code></td><td><code>findByRegistrationDateBefore</code> / <code>…After</code></td><td><code>… where e.registrationdate &lt; ?1</code> / <code>&gt; ?1</code></td></tr>
+<tr><td><code>Null</code> / <code>IsNull</code></td><td><code>findByRegistrationDate(Is)Null</code></td><td><code>… where e.registrationdate is null</code></td></tr>
+<tr><td><code>NotNull</code> / <code>IsNotNull</code></td><td><code>findByRegistrationDate(Is)NotNull</code></td><td><code>… where e.registrationdate is not null</code></td></tr>
+<tr><td><code>Not</code></td><td><code>findByUsernameNot</code></td><td><code>… where e.username &lt;&gt; ?1</code></td></tr>
+</tbody></table></div>
+
+<h3>测试基类：一次建库、全类复用</h3>
+
+<div class="filename">Ch04/springdatajpa2/src/test/java/…/SpringDataJpaApplicationTests.java</div>
+<pre><code><span class="ann">@SpringBootTest</span>                                        <span class="cmt">❶ 让 Boot 找到 @SpringBootApplication 主配置类并建 ApplicationContext</span>
+<span class="ann">@TestInstance</span>(TestInstance.Lifecycle.PER_CLASS)         <span class="cmt">❷ 让 JUnit 5 只建一个测试类实例并复用</span>
+<span class="kw">abstract class</span> SpringDataJpaApplicationTests {
+
+    <span class="ann">@Autowired</span>
+    UserRepository userRepository;                      <span class="cmt">❸ 因 @SpringBootApplication 的包扫描而可注入</span>
+
+    <span class="ann">@BeforeAll</span>
+    <span class="kw">void</span> beforeAll() { userRepository.saveAll(generateUsers()); }   <span class="cmt">❹ 注意：非 static（拜 ❷ 所赐）</span>
+
+    <span class="kw">private static</span> List&lt;User&gt; generateUsers() {
+        <span class="cmt">// 共创建 10 个用户，设置 email / level / active</span>
+    }
+
+    <span class="ann">@AfterAll</span>
+    <span class="kw">void</span> afterAll() { userRepository.deleteAll(); }                 <span class="cmt">❺ 同样非 static</span>
+}</code></pre>
+
+<div class="tip"><b><code>@TestInstance(PER_CLASS)</code> 的作用</b><p>默认情况下 JUnit 5 每个测试方法建一个实例，因此 <code>@BeforeAll</code>/<code>@AfterAll</code> 必须是 <code>static</code> —— 而 static 方法拿不到 <code>@Autowired</code> 的实例字段。改成 PER_CLASS 后二者都能是实例方法，可以直接用注入的 <code>userRepository</code>。</p></div>
+
+<div class="filename">…/FindUsersUsingQueriesTest.java（节选）—— 测试配方：调 repository 方法 + 验证结果</div>
+<pre><code><span class="kw">public class</span> FindUsersUsingQueriesTest <span class="kw">extends</span> SpringDataJpaApplicationTests {
+
+    <span class="ann">@Test</span> <span class="kw">void</span> testFindAll() {
+        assertEquals(10, userRepository.findAll().size());
+    }
+
+    <span class="ann">@Test</span> <span class="kw">void</span> testFindUser() {
+        User beth = userRepository.findByUsername(<span class="str">"beth"</span>);
+        assertEquals(<span class="str">"beth"</span>, beth.getUsername());
+    }
+
+    <span class="ann">@Test</span> <span class="kw">void</span> testFindAllByOrderByUsernameAsc() {
+        List&lt;User&gt; users = userRepository.findAllByOrderByUsernameAsc();
+        assertAll(() -&gt; assertEquals(10, users.size()),
+                  () -&gt; assertEquals(<span class="str">"beth"</span>, users.get(0).getUsername()),
+                  () -&gt; assertEquals(<span class="str">"stephanie"</span>, users.get(users.size()-1).getUsername()));
+    }
+
+    <span class="ann">@Test</span> <span class="kw">void</span> testFindByRegistrationDateBetween() {
+        List&lt;User&gt; users = userRepository.findByRegistrationDateBetween(
+                LocalDate.of(2020, Month.JULY, 1), LocalDate.of(2020, Month.DECEMBER, 31));
+        assertEquals(4, users.size());
+    }
+}</code></pre>
+
+<h2 id="s5"><span class="num">4.5</span>限制结果、排序与分页</h2>
+
+<div class="keyhint"><span class="k">first / top</span><span>两者等价，用来<b>限制结果数量</b>。后面可跟一个可选数字表示最多返回几条；<b>没写数字就是 1</b>。</span></div>
+<div class="keyhint"><span class="k">Pageable / PageRequest</span><span><code>Pageable</code> 是分页信息的接口，实践中用实现它的 <code>PageRequest</code>，可指定<b>页码、每页大小、排序条件</b>。注意<b>页码从 0 开始</b>。</span></div>
+<div class="keyhint"><span class="k">Sort / Sort.TypedSort / JpaSort</span><span><code>Sort.by("prop")</code> 按属性名；<code>Sort.TypedSort</code> 用<b>方法句柄</b>（类型安全）；<code>JpaSort.unsafe(...)</code> 允许<b>任意查询内表达式</b>而不只是属性或别名。</span></div>
+
+<div class="cols">
+<div>
+<div class="filename">UserRepository 新增的方法</div>
+<pre><code>User       findFirstByOrderByUsernameAsc();
+User       findTopByOrderByRegistrationDateDesc();
+Page&lt;User&gt; findAll(Pageable pageable);
+List&lt;User&gt; findFirst2ByLevel(<span class="kw">int</span> level, Sort sort);
+List&lt;User&gt; findByLevel(<span class="kw">int</span> level, Sort sort);
+List&lt;User&gt; findByActive(<span class="kw">boolean</span> active, Pageable pageable);</code></pre>
+</div>
+<div>
+<div class="filename">FindUsersSortingAndPagingTest.java</div>
+<pre><code>User user1 = userRepository.findFirstByOrderByUsernameAsc();
+User user2 = userRepository.findTopByOrderByRegistrationDateDesc();
+Page&lt;User&gt; userPage =
+    userRepository.findAll(PageRequest.of(<span class="hl">1</span>, 3));   <span class="cmt">// 第 2 页(从0数)，每页3条</span>
+List&lt;User&gt; users =
+    userRepository.findFirst2ByLevel(2, Sort.by(<span class="str">"registrationDate"</span>));
+
+<span class="cmt">// 类型安全的排序</span>
+Sort.TypedSort&lt;User&gt; user = Sort.sort(User.class);
+List&lt;User&gt; l3 = userRepository.findByLevel(3,
+        user.by(User::getRegistrationDate).descending());
+
+<span class="cmt">// 分页 + 排序一起来</span>
+List&lt;User&gt; act = userRepository.findByActive(<span class="kw">true</span>,
+        PageRequest.of(1, 4, Sort.by(<span class="str">"registrationDate"</span>)));</code></pre>
+</div>
+</div>
+
+<h2 id="s6"><span class="num">4.6</span>流式结果：Streamable</h2>
+
+<p>返回多条结果的查询方法可用标准的 <code>Iterable</code>、<code>List</code>、<code>Set</code>。此外 Spring Data 支持 <b><code>Streamable</code></b> —— 可以<b>拼接</b>多个 Streamable，并直接对元素做 filter / map。</p>
+
+<pre><code><span class="cmt">// UserRepository</span>
+Streamable&lt;User&gt; findByEmailContaining(String text);
+Streamable&lt;User&gt; findByLevel(<span class="kw">int</span> level);
+
+<span class="cmt">// QueryResultsTest</span>
+<span class="ann">@Test</span> <span class="kw">void</span> testStreamable() {
+    <span class="kw">try</span> (Stream&lt;User&gt; result =
+             userRepository.findByEmailContaining(<span class="str">"someother"</span>)
+                 .and(userRepository.findByLevel(2))     <span class="cmt">// 拼接两个 Streamable</span>
+                 .stream().distinct()) {                 <span class="cmt">// 转 Stream 并去重</span>
+        assertEquals(6, result.count());
+    }
+}</code></pre>
+
+<div class="pit"><b>必须关闭 Stream</b><p>这里把 stream 作为 try-with-resources 的资源，会被<b>自动关闭</b>；也可以显式调 <code>close()</code>。<b>否则这个 stream 会一直占着底层数据库连接。</b></p></div>
+
+<h2 id="s7"><span class="num">4.7</span><code>@Query</code> 注解：自己写查询</h2>
+
+<p>用了 <code>@Query</code>，<b>方法名就不必遵守任何命名约定</b>。参数可按位置或按名字绑定（<code>@Param</code>）。<code>nativeQuery = true</code> 可写原生 SQL —— 但要清楚这会<b>影响应用的可移植性</b>。</p>
+
+<div class="filename">Ch04/springdatajpa2/…/repositories/UserRepository.java</div>
+<pre><code><span class="ann">@Query</span>(<span class="str">"select count(u) from User u where u.active = ?1"</span>)          <span class="cmt">❶ 位置参数</span>
+<span class="kw">int</span> findNumberOfUsersByActivity(<span class="kw">boolean</span> active);
+
+<span class="ann">@Query</span>(<span class="str">"select u from User u where u.level = :level and u.active = :active"</span>)
+List&lt;User&gt; findByLevelAndActive(<span class="ann">@Param</span>(<span class="str">"level"</span>) <span class="kw">int</span> level,             <span class="cmt">❷ 具名参数</span>
+                                <span class="ann">@Param</span>(<span class="str">"active"</span>) <span class="kw">boolean</span> active);
+
+<span class="ann">@Query</span>(value = <span class="str">"SELECT COUNT(*) FROM USERS WHERE ACTIVE = ?1"</span>,
+       <span class="hl">nativeQuery = true</span>)                                             <span class="cmt">❸ 原生 SQL</span>
+<span class="kw">int</span> findNumberOfUsersByActivityNative(<span class="kw">boolean</span> active);
+
+<span class="ann">@Query</span>(<span class="str">"select u.username, LENGTH(u.email) as email_length from "</span> +
+       <span class="str">"<span class="hl">#{#entityName}</span> u where u.username like %?1%"</span>)                <span class="cmt">❹ SpEL：entityName</span>
+List&lt;Object[]&gt; findByAsArrayAndSort(String text, Sort sort);</code></pre>
+
+<div class="keyhint"><span class="k">❷ 为什么要 @Param</span><span>当你<b>调整方法签名里参数的顺序</b>而忘了同步改查询时，具名参数不会错位。</span></div>
+<div class="keyhint"><span class="k">❹ SpEL 与 #{#entityName}</span><span><code>entityName</code> 根据 <code>@Entity</code> 注解解析。因为 <code>UserRepository extends JpaRepository&lt;User, Long&gt;</code>，这里会解析成 <code>User</code>。</span></div>
+
+<div class="filename">QueryResultsTest.java　—— 三种排序写法的对比</div>
+<pre><code>List&lt;Object[]&gt; l1 = userRepository.findByAsArrayAndSort(<span class="str">"ar"</span>,
+        Sort.by(<span class="str">"username"</span>));                          <span class="cmt">❶ 按属性名排序</span>
+List&lt;Object[]&gt; l2 = userRepository.findByAsArrayAndSort(<span class="str">"ar"</span>,
+        Sort.by(<span class="str">"email_length"</span>).descending());          <span class="cmt">❷ 按查询里的<b>别名</b>排序</span>
+List&lt;Object[]&gt; l3 = userRepository.findByAsArrayAndSort(<span class="str">"ar"</span>,
+        JpaSort.unsafe(<span class="str">"LENGTH(u.email)"</span>));            <span class="cmt">❸ 按任意<b>表达式</b>排序</span>
+
+assertAll(() -&gt; assertEquals(2, l1.size()),
+          () -&gt; assertEquals(<span class="str">"darren"</span>, l1.get(0)[0]), () -&gt; assertEquals(21, l1.get(0)[1]),
+          () -&gt; assertEquals(<span class="str">"marion"</span>, l2.get(0)[0]), () -&gt; assertEquals(26, l2.get(0)[1]),
+          () -&gt; assertEquals(<span class="str">"darren"</span>, l3.get(0)[0]));</code></pre>
+
+<div class="warn"><b>排序对象的三层能力</b>
+<p><code>Sort</code> 里排序的属性必须能解析为<b>查询属性或查询别名</b>（所以 ❷ 里必须在查询中写出 <code>as email_length</code> 这个别名）。<code>JpaSort</code> 继承 <code>Sort</code>，它的 <b>unsafe</b> 属性处理意味着：给的字符串<b>不必</b>是属性或别名，可以是查询内的任意表达式。</p></div>
+
+<h2 id="s8"><span class="num">4.8</span>投影（Projections）：只取需要的字段</h2>
+
+<p>并非总是需要实体的全部属性。前端可以借此<b>减少 I/O</b>，只显示终端用户关心的信息。Spring Data JPA 可以「塑形」返回类型，有选择地返回实体的部分属性。</p>
+
+<figure><div class="fig-box">
+<svg viewBox="0 0 840 420" xmlns="http://www.w3.org/2000/svg" font-family="Inter,system-ui,sans-serif">
+  <rect x="20" y="20" width="390" height="184" rx="9" fill="var(--java-soft)" stroke="var(--java)" stroke-width="1.8"/>
+  <text x="215" y="44" text-anchor="middle" font-size="14" font-weight="700" fill="var(--java)">接口式投影（interface-based）</text>
+  <text x="215" y="64" text-anchor="middle" font-size="11.5" fill="var(--ink-soft)">运行期为每个返回元素<tspan font-weight="700">创建接口的代理实例</tspan>，把方法调用转发给目标对象</text>
+  <rect x="42" y="76" width="346" height="56" rx="6" fill="var(--sql-soft)" stroke="var(--sql)"/>
+  <text x="215" y="96" text-anchor="middle" font-size="12.5" font-weight="700" fill="var(--sql)">✓ 封闭投影 closed</text>
+  <text x="215" y="114" text-anchor="middle" font-size="11.5" fill="var(--ink)">getter <tspan font-weight="700">全部</tspan>对应目标实体的属性</text>
+  <text x="215" y="128" text-anchor="middle" font-size="11" fill="var(--sql)">代理需要什么属性一开始就知道 → <tspan font-weight="700">查询可被优化</tspan></text>
+  <rect x="42" y="138" width="346" height="56" rx="6" fill="var(--warn-soft)" stroke="var(--warn)"/>
+  <text x="215" y="158" text-anchor="middle" font-size="12.5" font-weight="700" fill="var(--warn)">△ 开放投影 open</text>
+  <text x="215" y="176" text-anchor="middle" font-size="11.5" fill="var(--ink)">含 <tspan font-family="monospace">@Value</tspan> + SpEL 表达式的 getter，更灵活</text>
+  <text x="215" y="190" text-anchor="middle" font-size="11" fill="var(--warn)">SpEL 运行期才求值，可能引用任意属性 → <tspan font-weight="700">无法优化查询</tspan></text>
+
+  <rect x="430" y="20" width="390" height="184" rx="9" fill="var(--accent-soft)" stroke="var(--accent)" stroke-width="1.8"/>
+  <text x="625" y="44" text-anchor="middle" font-size="14" font-weight="700" fill="var(--accent)">类式投影（class-based / DTO）</text>
+  <text x="625" y="66" text-anchor="middle" font-size="11.5" fill="var(--ink)">声明一个 DTO 类，写好属性与 getter</text>
+  <text x="625" y="90" text-anchor="middle" font-size="11.5" fill="var(--ink)"><tspan font-weight="700">不需要创建代理类</tspan> —— Spring Data 直接实例化该类</text>
+  <text x="625" y="114" text-anchor="middle" font-size="11.5" fill="var(--ink)">要包含哪些属性，由<tspan font-weight="700">构造器的参数名</tspan>决定</text>
+  <rect x="452" y="128" width="346" height="62" rx="6" fill="var(--panel)" stroke="var(--line-strong)"/>
+  <text x="470" y="148" font-family="monospace" font-size="11" fill="var(--ink)">public static class UsernameOnly {</text>
+  <text x="486" y="164" font-family="monospace" font-size="11" fill="var(--ink)">private String username;</text>
+  <text x="486" y="180" font-family="monospace" font-size="11" fill="var(--accent)">public UsernameOnly(String username) {…}  // ← 关键</text>
+
+  <rect x="20" y="224" width="800" height="76" rx="9" fill="var(--panel)" stroke="var(--line-strong)"/>
+  <text x="420" y="246" text-anchor="middle" font-size="13" font-weight="700" fill="var(--ink)">实践建议</text>
+  <text x="40" y="268" font-size="12" fill="var(--ink)">• 当你需要<tspan font-weight="700">提供受限信息、不想暴露完整实体</tspan>时使用投影</text>
+  <text x="40" y="288" font-size="12" fill="var(--ink)">• 出于性能考虑，只要一开始就明确要返回什么，<tspan font-weight="700">优先用封闭投影</tspan></text>
+  <text x="440" y="268" font-size="12" fill="var(--ink)">• 若既有返回完整对象的查询、又有只返回投影的相似查询，</text>
+  <text x="440" y="288" font-size="12" fill="var(--ink)">　可用不同命名约定区分：一个 <tspan font-family="monospace">find…By</tspan>，另一个 <tspan font-family="monospace">get…By</tspan></text>
+
+  <rect x="20" y="316" width="800" height="90" rx="9" fill="var(--sql-soft)" stroke="var(--sql)" stroke-width="1.6"/>
+  <text x="420" y="338" text-anchor="middle" font-size="13" font-weight="700" fill="var(--sql)">动态投影：把返回类型泛型化</text>
+  <text x="420" y="360" text-anchor="middle" font-family="monospace" font-size="12.5" fill="var(--ink)">&lt;T&gt; List&lt;T&gt; findByEmail(String username, Class&lt;T&gt; type);</text>
+  <text x="420" y="384" text-anchor="middle" font-size="11.5" fill="var(--ink)">同一个方法，传 <tspan font-family="monospace">Projection.UsernameOnly.class</tspan> 就返回投影，</text>
+  <text x="420" y="400" text-anchor="middle" font-size="11.5" fill="var(--ink)">传 <tspan font-family="monospace">User.class</tspan> 就返回完整实体</text>
+</svg>
+</div><figcaption>图 4-C　三种投影方式与它们的性能含义</figcaption></figure>
+
+<div class="filename">Ch04/springdatajpa2/…/model/Projection.java　（把逻辑相关的投影归到一个类里）</div>
+<pre><code><span class="kw">public class</span> Projection {
+
+    <span class="kw">public interface</span> UserSummary {                          <span class="cmt">// 接口式</span>
+        String getUsername();                               <span class="cmt">// 封闭部分：直接对应属性</span>
+
+        <span class="ann">@Value</span>(<span class="str">"#{target.username} #{target.email}"</span>)         <span class="cmt">// 开放部分：SpEL 拼接</span>
+        String getInfo();
+    }
+
+    <span class="kw">public static class</span> UsernameOnly {                      <span class="cmt">// 类式（DTO）</span>
+        <span class="kw">private</span> String username;
+        <span class="kw">public</span> UsernameOnly(String username) { <span class="kw">this</span>.username = username; }
+        <span class="kw">public</span> String getUsername() { <span class="kw">return</span> username; }
+    }
+}</code></pre>
+
+<div class="cols">
+<div>
+<div class="filename">UserRepository 上的投影方法</div>
+<pre><code>List&lt;Projection.UserSummary&gt;
+    findByRegistrationDateAfter(LocalDate date);
+
+List&lt;Projection.UsernameOnly&gt;
+    findByEmail(String username);
+
+<span class="cmt">// 动态投影</span>
+&lt;T&gt; List&lt;T&gt; findByEmail(String username, Class&lt;T&gt; type);</code></pre>
+</div>
+<div>
+<div class="filename">ProjectionTest.java</div>
+<pre><code>List&lt;Projection.UsernameOnly&gt; users =
+    userRepository.findByEmail(<span class="str">"john@somedomain.com"</span>);
+assertEquals(<span class="str">"john"</span>, users.get(0).getUsername());
+
+List&lt;Projection.UserSummary&gt; sum =
+    userRepository.findByRegistrationDateAfter(
+        LocalDate.of(2021, Month.FEBRUARY, 1));
+assertEquals(<span class="str">"julius julius@someotherdomain.com"</span>,
+             sum.get(0).getInfo());     <span class="cmt">// ← SpEL 拼出来的</span>
+
+<span class="cmt">// 同一方法，两种返回</span>
+List&lt;Projection.UsernameOnly&gt; a = userRepository
+    .findByEmail(<span class="str">"mike@…"</span>, Projection.UsernameOnly.class);
+List&lt;User&gt; b = userRepository
+    .findByEmail(<span class="str">"mike@…"</span>, User.class);</code></pre>
+</div>
+</div>
+
+<h2 id="s9"><span class="num">4.9</span>修改型查询（Modifying queries）</h2>
+
+<p>用 <code>@Modifying</code> 定义修改方法：INSERT、UPDATE、DELETE 或 DDL 语句。这类方法<b>必须</b>加 <code>@Transactional</code>，或在程序化管理的事务中运行。</p>
+
+<div class="filename">Ch04/springdatajpa2/…/repositories/UserRepository.java</div>
+<pre><code><span class="ann">@Modifying</span>
+<span class="ann">@Transactional</span>
+<span class="ann">@Query</span>(<span class="str">"update User u set u.level = ?2 where u.level = ?1"</span>)
+<span class="kw">int</span> updateLevel(<span class="kw">int</span> oldLevel, <span class="kw">int</span> newLevel);
+
+<span class="ann">@Transactional</span>                               <span class="cmt">❶ 查询由框架按方法名生成，不需要 @Modifying</span>
+<span class="kw">int</span> deleteByLevel(<span class="kw">int</span> level);
+
+<span class="ann">@Transactional</span>
+<span class="ann">@Modifying</span>
+<span class="ann">@Query</span>(<span class="str">"delete from User u where u.level = ?1"</span>)
+<span class="kw">int</span> deleteBulkByLevel(<span class="kw">int</span> level);</code></pre>
+
+<figure><div class="fig-box">
+<svg viewBox="0 0 820 250" xmlns="http://www.w3.org/2000/svg" font-family="Inter,system-ui,sans-serif">
+  <defs><marker id="dq" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0 0 L8 4 L0 8 z" fill="var(--ink-soft)"/></marker></defs>
+  <rect x="20" y="20" width="380" height="212" rx="9" fill="var(--java-soft)" stroke="var(--java)" stroke-width="1.6"/>
+  <text x="210" y="44" text-anchor="middle" font-family="monospace" font-size="14" font-weight="700" fill="var(--java)">deleteByLevel(2)</text>
+  <rect x="46" y="58" width="140" height="28" rx="5" fill="var(--panel)" stroke="var(--line-strong)"/>
+  <text x="116" y="77" text-anchor="middle" font-size="11.5" fill="var(--ink)">① 先执行一次查询</text>
+  <path d="M116 88 L116 104" stroke="var(--ink-soft)" stroke-width="1.3" marker-end="url(#dq)"/>
+  <rect x="46" y="106" width="140" height="28" rx="5" fill="var(--panel)" stroke="var(--line-strong)"/>
+  <text x="116" y="125" text-anchor="middle" font-size="11.5" fill="var(--ink)">② 拿到返回的实例</text>
+  <path d="M116 136 L116 152" stroke="var(--ink-soft)" stroke-width="1.3" marker-end="url(#dq)"/>
+  <rect x="46" y="154" width="140" height="28" rx="5" fill="var(--panel)" stroke="var(--line-strong)"/>
+  <text x="116" y="173" text-anchor="middle" font-size="11.5" fill="var(--ink)">③ <tspan font-weight="700">逐个</tspan>删除</text>
+  <text x="300" y="80" text-anchor="middle" font-size="12" font-weight="700" fill="var(--sql)">✓ 生命周期回调</text>
+  <text x="300" y="100" text-anchor="middle" font-size="11.5" fill="var(--ink)">每个实例的回调方法</text>
+  <text x="300" y="118" text-anchor="middle" font-size="11.5" fill="var(--ink)">（如「用户被删除时执行」）</text>
+  <text x="300" y="136" text-anchor="middle" font-size="11.5" fill="var(--ink)"><tspan font-weight="700">会被执行</tspan></text>
+  <text x="210" y="208" text-anchor="middle" font-size="11.5" fill="var(--ink-soft)">代价：N+1 次数据库交互</text>
+
+  <rect x="420" y="20" width="380" height="212" rx="9" fill="var(--accent-soft)" stroke="var(--accent)" stroke-width="1.6"/>
+  <text x="610" y="44" text-anchor="middle" font-family="monospace" font-size="14" font-weight="700" fill="var(--accent)">deleteBulkByLevel(2)</text>
+  <rect x="470" y="76" width="280" height="52" rx="6" fill="var(--panel)" stroke="var(--accent)"/>
+  <text x="610" y="98" text-anchor="middle" font-size="12" font-weight="700" fill="var(--accent)">批量删除：执行单条 JPQL</text>
+  <text x="610" y="118" text-anchor="middle" font-family="monospace" font-size="11" fill="var(--ink)">delete from User u where u.level = ?1</text>
+  <text x="610" y="152" text-anchor="middle" font-size="12" font-weight="700" fill="var(--danger)">✗ 没有任何 User 实例</text>
+  <text x="610" y="172" text-anchor="middle" font-size="11.5" fill="var(--ink)">会执行生命周期回调</text>
+  <text x="610" y="190" text-anchor="middle" font-size="11.5" fill="var(--ink)"><tspan font-weight="700">连已经加载进内存的实例也不会</tspan></text>
+  <text x="610" y="214" text-anchor="middle" font-size="11.5" fill="var(--ink-soft)">收益：1 次数据库交互</text>
+</svg>
+</div><figcaption>图 4-D　<code>deleteByLevel</code> 与 <code>deleteBulkByLevel</code> 的本质差别：回调 vs 性能</figcaption></figure>
+
+<div class="tip"><b>修改型查询的价值</b><p>它们<b>清楚地强调自己作用于哪些列</b>，并可带条件，因此与「持久化/删除整个对象」相比代码更清晰；而且<b>只改动数据库中有限的几列，执行更快</b>。</p></div>
+
+<h2 id="s10"><span class="num">4.10</span>Query by Example（QBE）</h2>
+
+<p>QBE 是一种<b>不需要写传统查询</b>的查询技术，支持动态构造查询。它由三部分组成：</p>
+
+<figure><div class="fig-box">
+<svg viewBox="0 0 840 300" xmlns="http://www.w3.org/2000/svg" font-family="Inter,system-ui,sans-serif">
+  <defs><marker id="qbe" markerWidth="9" markerHeight="9" refX="8" refY="4.5" orient="auto"><path d="M0 0 L9 4.5 L0 9 z" fill="var(--accent)"/></marker></defs>
+  <rect x="20" y="30" width="230" height="106" rx="9" fill="var(--java-soft)" stroke="var(--java)" stroke-width="1.8"/>
+  <text x="135" y="54" text-anchor="middle" font-size="14" font-weight="700" fill="var(--java)">① probe 探针</text>
+  <text x="135" y="76" text-anchor="middle" font-size="11.5" fill="var(--ink)">一个<tspan font-weight="700">已设好部分属性</tspan>的领域对象</text>
+  <text x="135" y="100" text-anchor="middle" font-family="monospace" font-size="11" fill="var(--ink-soft)">User u = new User();</text>
+  <text x="135" y="118" text-anchor="middle" font-family="monospace" font-size="11" fill="var(--ink-soft)">u.setEmail("@someotherdomain.com");</text>
+
+  <rect x="290" y="30" width="230" height="106" rx="9" fill="var(--java-soft)" stroke="var(--java)" stroke-width="1.8"/>
+  <text x="405" y="54" text-anchor="middle" font-size="14" font-weight="700" fill="var(--java)">② ExampleMatcher</text>
+  <text x="405" y="76" text-anchor="middle" font-size="11.5" fill="var(--ink)">提供<tspan font-weight="700">特定属性的匹配规则</tspan></text>
+  <text x="405" y="100" text-anchor="middle" font-size="11" fill="var(--ink-soft)">建造者模式；一个 matcher</text>
+  <text x="405" y="118" text-anchor="middle" font-size="11" fill="var(--ink-soft)">可被多个 Example 复用</text>
+
+  <rect x="560" y="30" width="260" height="106" rx="9" fill="var(--accent-soft)" stroke="var(--accent)" stroke-width="2"/>
+  <text x="690" y="54" text-anchor="middle" font-size="14" font-weight="700" fill="var(--accent)">③ Example</text>
+  <text x="690" y="76" text-anchor="middle" font-size="11.5" fill="var(--ink)">把探针与匹配器<tspan font-weight="700">组合起来并生成查询</tspan></text>
+  <text x="690" y="100" text-anchor="middle" font-family="monospace" font-size="11" fill="var(--ink-soft)">Example.of(user, matcher)</text>
+  <text x="690" y="120" text-anchor="middle" font-family="monospace" font-size="11" fill="var(--ink-soft)">userRepository.findAll(example)</text>
+
+  <path d="M252 82 L286 82" stroke="var(--accent)" stroke-width="1.6" marker-end="url(#qbe)"/>
+  <path d="M522 82 L556 82" stroke="var(--accent)" stroke-width="1.6" marker-end="url(#qbe)"/>
+
+  <rect x="20" y="156" width="400" height="130" rx="9" fill="var(--sql-soft)" stroke="var(--sql)"/>
+  <text x="220" y="178" text-anchor="middle" font-size="12.5" font-weight="700" fill="var(--sql)">✓ 适用场景</text>
+  <text x="38" y="200" font-size="11.5" fill="var(--ink)">• 想把代码与底层数据存储 API <tspan font-weight="700">解耦</tspan></text>
+  <text x="38" y="224" font-size="11.5" fill="var(--ink)">• 领域对象的内部结构<tspan font-weight="700">频繁变动</tspan>，</text>
+  <text x="52" y="240" font-size="11.5" fill="var(--ink)">  而这些变动没有传播到已有查询上</text>
+  <text x="38" y="266" font-size="11.5" fill="var(--ink)">• 要为查询 repository 构建一组<tspan font-weight="700">静态或动态约束</tspan></text>
+
+  <rect x="436" y="156" width="384" height="130" rx="9" fill="var(--danger-soft)" stroke="var(--danger)"/>
+  <text x="628" y="178" text-anchor="middle" font-size="12.5" font-weight="700" fill="var(--danger)">✗ 两条限制</text>
+  <text x="454" y="202" font-size="11.5" fill="var(--ink)">• String 属性只支持 starting / ending / containing</text>
+  <text x="468" y="218" font-size="11.5" fill="var(--ink)">  的正则匹配；<tspan font-weight="700">其他类型只支持精确匹配</tspan></text>
+  <text x="454" y="246" font-size="11.5" fill="var(--ink)">• 不支持<tspan font-weight="700">嵌套或分组</tspan>的属性约束，例如</text>
+  <text x="468" y="266" font-family="monospace" font-size="11" fill="var(--ink-soft)">username = ?0 or (username = ?1 and email = ?2)</text>
+</svg>
+</div><figcaption>图 4-E　QBE 的三件套与适用边界</figcaption></figure>
+
+<div class="filename">Ch04/springdatajpa2/src/test/java/…/QueryByExampleTest.java</div>
+<pre><code><span class="ann">@Test</span> <span class="kw">void</span> testEmailWithQueryByExample() {
+    User user = <span class="kw">new</span> User();                                  <span class="cmt">❶ 探针</span>
+    user.setEmail(<span class="str">"@someotherdomain.com"</span>);
+
+    ExampleMatcher matcher = ExampleMatcher.matching()
+            .<span class="hl">withIgnorePaths("level", "active")</span>                <span class="cmt">❷ 关键！见下方警告</span>
+            .withMatcher(<span class="str">"email"</span>, match -&gt; match.endsWith());
+
+    Example&lt;User&gt; example = Example.of(user, matcher);          <span class="cmt">❸</span>
+    List&lt;User&gt; users = userRepository.findAll(example);
+    assertEquals(4, users.size());
+}
+
+<span class="ann">@Test</span> <span class="kw">void</span> testUsernameWithQueryByExample() {
+    User user = <span class="kw">new</span> User();
+    user.setUsername(<span class="str">"J"</span>);
+
+    ExampleMatcher matcher = ExampleMatcher.matching()
+            .withIgnorePaths(<span class="str">"level"</span>, <span class="str">"active"</span>)
+            .withStringMatcher(ExampleMatcher.StringMatcher.STARTING)
+            .withIgnoreCase();
+
+    List&lt;User&gt; users = userRepository.findAll(Example.of(user, matcher));
+    assertEquals(3, users.size());
+}</code></pre>
+
+<div class="pit"><b>为什么必须 <code>withIgnorePaths("level", "active")</b>
+<p>matcher 会<b>自动忽略所有 null 引用属性</b>。但 <code>level</code>（<code>int</code>）和 <code>active</code>（<code>boolean</code>）是<b>基本类型</b>，不可能为 null —— 如果不显式忽略，它们会带着<b>默认值</b>（<code>0</code> 和 <code>false</code>）进入匹配条件，<b>改变生成的查询</b>。</p></div>
+
+<div class="cols">
+<div>
+<div class="filename">✓ 带 withIgnorePaths 生成的 SQL</div>
+<pre><code>select … from users user0_
+where <span class="hl">user0_.email like ? escape ?</span></code></pre>
+<div class="filename" style="margin-top:14px">✓ 第二个测试，带 withIgnorePaths</div>
+<pre><code>select … from users user0_
+where <span class="hl">lower(user0_.username) like ? escape ?</span></code></pre>
+</div>
+<div>
+<div class="filename">✗ 去掉 withIgnorePaths 后</div>
+<pre><code>select … from users user0_
+where <span class="hl">user0_.active=?</span> and (user0_.email like ? escape ?)
+  and <span class="hl">user0_.level=0</span></code></pre>
+<div class="filename" style="margin-top:14px">✗ 第二个测试，去掉后</div>
+<pre><code>select … from users user0_
+where <span class="hl">user0_.active=?</span> and <span class="hl">user0_.level=0</span>
+  and (lower(user0_.username) like ? escape ?)</code></pre>
+</div>
+</div>
+<p style="margin-top:-6px"><b>多出来的 <code>user0_.active=? and user0_.level=0</code> 会改变查询结果。</b></p>
+
+<div class="summary" id="s11">
+<h3>本章小结</h3>
+<ul>
+<li>可以用 Spring Boot 创建并配置 Spring Data JPA 项目：<code>@Entity</code> + 空的 repository 接口 + <code>application.properties</code>。</li>
+<li>repository 接口层次：<code>Repository</code> → <code>CrudRepository</code>（基础 CRUD）→ <code>PagingAndSortingRepository</code>（排序分页）→ <code>JpaRepository</code>（JPA 专属 + 返回 List）。</li>
+<li><b>查询构建器机制</b>：剥前后缀 → 匹配属性 → 解析谓词，直接把方法名翻译成 JPQL。方法名写错在<b>上下文加载时</b>暴露。</li>
+<li>结果限制（<code>first</code>/<code>top</code>）、排序（<code>Sort</code>/<code>TypedSort</code>/<code>JpaSort</code>）、分页（<code>PageRequest</code>，页码从 0 起）、流式（<code>Streamable</code>，<b>用完必须关闭</b>）。</li>
+<li><code>@Query</code> 可写 JPQL 或原生 SQL（<code>nativeQuery=true</code>，牺牲可移植性），支持位置/具名参数与 SpEL；<b>更灵活但更不安全</b>（错误运行期才暴露）。</li>
+<li><b>投影</b>塑形返回类型：接口式（封闭可优化 / 开放靠 SpEL）、类式 DTO、以及泛型化的<b>动态投影</b>。</li>
+<li><b>修改型查询</b>用 <code>@Modifying</code> + <code>@Transactional</code>；注意逐条删除（触发回调）与批量删除（单条 JPQL、不触发回调）的取舍。</li>
+<li><b>QBE</b> = probe + ExampleMatcher + Example；小心基本类型属性的默认值污染查询条件。</li>
+</ul>
+</div>
+
+<div class="pager">
+  <a href="ch03.html">← 第 3 章　领域模型与元数据</a>
+  <a href="ch05.html">第 5 章　映射持久化类 →</a>
+</div>
+</main>
+</div>
+</body>
+</html>

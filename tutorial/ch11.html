@@ -1,0 +1,682 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>第 11 章 · 事务与并发</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="topbar"><div class="topbar-inner">
+  <a class="brand" href="index.html">Java Persistence 讲义</a>
+  <span class="spacer"></span>
+  <a href="ch10.html">← 上一章</a>
+  <a href="index.html">目录</a>
+  <a href="ch12.html">下一章 →</a>
+</div></div>
+
+<div class="wrap">
+<nav class="toc">
+  <h4>本章目录</h4>
+  <a href="#s1">11.1 事务要义</a>
+  <a href="#s2">11.2 控制并发访问</a>
+  <a class="sub" href="#s21">数据库级并发</a>
+  <a class="sub" href="#s22">乐观并发控制</a>
+  <a class="sub" href="#s23">显式悲观锁</a>
+  <a class="sub" href="#s24">避免死锁</a>
+  <a href="#s3">11.3 非事务数据访问</a>
+  <a href="#s4">11.4 Spring 事务管理</a>
+  <a class="sub" href="#s41">事务传播</a>
+  <a class="sub" href="#s42">事务回滚</a>
+  <a class="sub" href="#s43">事务属性</a>
+  <a class="sub" href="#s45">完整示例</a>
+  <a href="#s5">本章小结</a>
+</nav>
+
+<main>
+<div class="hero">
+  <div class="eyebrow">Part 3 · 事务性数据处理</div>
+  <h1>第 11 章　事务与并发</h1>
+  <p>工作单元是<b>操作的原子分组</b>，事务让我们设定工作单元的边界并<b>把一个工作单元与另一个隔离开</b>。本章从最低层（数据库与系统事务）讲起，一路到 Spring 的声明式事务。</p>
+</div>
+
+<div class="note"><b>JPA 2 的重要新特性</b>
+<p>① 新增<b>悲观锁</b>的锁模式与异常：可以在 <code>Query</code> 上设置乐观/悲观锁模式；可在 <code>find()</code>、<code>refresh()</code>、<code>lock()</code> 时设置锁模式；<b>悲观锁模式的锁超时提示也被标准化</b>。<br>
+② 抛出新的 <code>QueryTimeoutException</code> 或 <code>LockTimeoutException</code> 时，<b>事务不必回滚</b>。<br>
+③ 持久化上下文现在可以处于<b>非同步（unsynchronized）模式</b>，禁用自动刷新 —— 这允许我们<b>把修改排队</b>直到加入事务，从而把 <code>EntityManager</code> 的使用与事务解耦。</p>
+<p style="margin-top:6px">本章所有示例都能在任何 Java SE 环境下运行，不需要特殊运行时容器。运行前先执行 <code>Ch11/Ch11.sql</code>。</p></div>
+
+<h2 id="s1"><span class="num">11.1</span>事务要义</h2>
+
+<p>拍卖结束时 CaveatEmptor 必须做三件事：① 找出该商品的最高出价；② 向卖家收取拍卖费用；③ 通知卖家与中标者。<b>如果外部信用卡系统故障导致无法计费怎么办？</b>业务需求可能规定：<b>要么全部成功，要么全部不成功</b>。这时这些步骤合起来就是一个<b>事务</b>或<b>工作单元</b>——只要有一步失败，整个工作单元就必须失败。</p>
+
+<figure><div class="fig-box">
+<svg viewBox="0 0 840 200" xmlns="http://www.w3.org/2000/svg" font-family="Inter,system-ui,sans-serif">
+  <rect x="20" y="20" width="190" height="150" rx="8" fill="var(--sql-soft)" stroke="var(--sql)" stroke-width="1.6"/>
+  <text x="115" y="44" text-anchor="middle" font-size="14" font-weight="700" fill="var(--sql)">A — Atomicity</text>
+  <text x="115" y="62" text-anchor="middle" font-size="12" fill="var(--ink-soft)">原子性</text>
+  <text x="115" y="90" text-anchor="middle" font-size="11.5" fill="var(--ink)">事务中的所有操作</text>
+  <text x="115" y="108" text-anchor="middle" font-size="11.5" fill="var(--ink)">作为<tspan font-weight="700">一个原子单元</tspan>执行</text>
+
+  <rect x="226" y="20" width="190" height="150" rx="8" fill="var(--sql-soft)" stroke="var(--sql)" stroke-width="1.6"/>
+  <text x="321" y="44" text-anchor="middle" font-size="14" font-weight="700" fill="var(--sql)">C — Consistency</text>
+  <text x="321" y="62" text-anchor="middle" font-size="12" fill="var(--ink-soft)">一致性</text>
+  <text x="321" y="90" text-anchor="middle" font-size="11.5" fill="var(--ink)">多用户并发操作同一数据</text>
+  <text x="321" y="108" text-anchor="middle" font-size="11.5" fill="var(--ink)">而不破坏数据一致性</text>
+  <text x="321" y="130" text-anchor="middle" font-size="11" fill="var(--sql)"><tspan font-weight="700">是数据库的职责</tspan></text>
+
+  <rect x="432" y="20" width="190" height="150" rx="8" fill="var(--sql-soft)" stroke="var(--sql)" stroke-width="1.6"/>
+  <text x="527" y="44" text-anchor="middle" font-size="14" font-weight="700" fill="var(--sql)">I — Isolation</text>
+  <text x="527" y="62" text-anchor="middle" font-size="12" fill="var(--ink-soft)">隔离性</text>
+  <text x="527" y="90" text-anchor="middle" font-size="11.5" fill="var(--ink)">某个事务不应被其他</text>
+  <text x="527" y="108" text-anchor="middle" font-size="11.5" fill="var(--ink)">并发运行的事务看见</text>
+  <text x="527" y="130" text-anchor="middle" font-size="11" fill="var(--accent)"><tspan font-weight="700">本章最复杂的部分</tspan></text>
+
+  <rect x="638" y="20" width="182" height="150" rx="8" fill="var(--sql-soft)" stroke="var(--sql)" stroke-width="1.6"/>
+  <text x="729" y="44" text-anchor="middle" font-size="14" font-weight="700" fill="var(--sql)">D — Durability</text>
+  <text x="729" y="62" text-anchor="middle" font-size="12" fill="var(--ink-soft)">持久性</text>
+  <text x="729" y="90" text-anchor="middle" font-size="11.5" fill="var(--ink)">事务成功完成后，</text>
+  <text x="729" y="108" text-anchor="middle" font-size="11.5" fill="var(--ink)">即使系统随后崩溃，</text>
+  <text x="729" y="126" text-anchor="middle" font-size="11.5" fill="var(--ink)">改动也应持久保留</text>
+
+</svg>
+</div><figcaption>图 11-A　ACID 四属性</figcaption></figure>
+
+<div class="tip"><b>还有第五个：正确性（correctness）</b><p>业务规则规定「应用只向卖家收费<b>一次</b>，而不是两次」。这是合理的假设，但我们可能<b>无法用数据库约束表达它</b>。因此：<b>事务的「正确性」是<u>应用</u>的责任，而「一致性」是<u>数据库</u>的责任。</b></p></div>
+
+<div class="keyhint"><span class="k">数据库事务必须短</span><span>开着的事务<b>消耗数据库资源</b>，还可能因数据上的排他锁而<b>阻止并发访问</b>。单个数据库事务通常只包含<b>一批</b>数据库操作。</span></div>
+<div class="keyhint"><span class="k">事务划界（demarcation）</span><span>必须开启事务、在某个点提交更改；出错（执行操作时或提交时）则<b>回滚</b>以让数据保持一致状态。边界可以<b>程序化</b>设定，也可以<b>声明式</b>设定（Spring 部分主要用声明式）。</span></div>
+
+<h2 id="s2"><span class="num">11.2</span>控制并发访问</h2>
+
+<p>数据库传统上用<b>加锁</b>实现隔离：事务可以对某个数据项加锁，暂时阻止其他事务读/写它。一些现代数据库引擎用<b>多版本并发控制（MVCC）</b>实现隔离，厂商普遍认为它<b>更可扩展</b>。本章按加锁模型分析，但大多数结论对 MVCC 也适用。</p>
+
+<h3 id="s21">11.2.1　理解数据库级并发</h3>
+
+<h4>四类隔离性问题</h4>
+
+<figure><div class="fig-box">
+<svg viewBox="0 0 860 560" xmlns="http://www.w3.org/2000/svg" font-family="Inter,system-ui,sans-serif">
+  <!-- lost update -->
+  <rect x="16" y="14" width="410" height="250" rx="8" fill="var(--danger-soft)" stroke="var(--danger)" stroke-width="1.6"/>
+  <text x="221" y="36" text-anchor="middle" font-size="13.5" font-weight="700" fill="var(--danger)">① 丢失更新 Lost update</text>
+  <text x="120" y="56" text-anchor="middle" font-size="11.5" font-weight="700" fill="var(--java)">事务 1</text>
+  <text x="330" y="56" text-anchor="middle" font-size="11.5" font-weight="700" fill="var(--sql)">事务 2</text>
+  <line x1="120" y1="62" x2="120" y2="248" stroke="var(--java)" stroke-width="1.2" stroke-dasharray="4 3"/>
+  <line x1="330" y1="62" x2="330" y2="248" stroke="var(--sql)" stroke-width="1.2" stroke-dasharray="4 3"/>
+  <rect x="34" y="72" width="172" height="26" rx="4" fill="var(--panel)" stroke="var(--java)"/>
+  <text x="120" y="89" text-anchor="middle" font-size="10.5" fill="var(--ink)">读 buyNowPrice = 10</text>
+  <rect x="244" y="104" width="172" height="26" rx="4" fill="var(--panel)" stroke="var(--sql)"/>
+  <text x="330" y="121" text-anchor="middle" font-size="10.5" fill="var(--ink)">读 buyNowPrice = 10</text>
+  <rect x="244" y="136" width="172" height="26" rx="4" fill="var(--panel)" stroke="var(--sql)"/>
+  <text x="330" y="153" text-anchor="middle" font-size="10.5" fill="var(--ink)">加 2 → 12</text>
+  <rect x="34" y="168" width="172" height="26" rx="4" fill="var(--panel)" stroke="var(--java)"/>
+  <text x="120" y="185" text-anchor="middle" font-size="10.5" fill="var(--ink)">加 1 → 11</text>
+  <rect x="34" y="200" width="172" height="24" rx="4" fill="var(--java-soft)" stroke="var(--java)"/>
+  <text x="120" y="216" text-anchor="middle" font-size="10.5" fill="var(--ink)">UPDATE → 11</text>
+  <rect x="244" y="200" width="172" height="24" rx="4" fill="var(--danger-soft)" stroke="var(--danger)"/>
+  <text x="330" y="216" text-anchor="middle" font-size="10.5" font-weight="700" fill="var(--danger)">UPDATE → 12（覆盖！）</text>
+  <text x="221" y="244" text-anchor="middle" font-size="11" fill="var(--danger)"><tspan font-weight="700">最后提交者获胜（last commit wins）</tspan>，事务 1 的更新丢失</text>
+  <text x="221" y="258" text-anchor="middle" font-size="10.5" fill="var(--ink-faint)">发生在<tspan font-weight="700">完全不实现并发控制</tspan>的系统里</text>
+
+  <!-- dirty read -->
+  <rect x="440" y="14" width="410" height="250" rx="8" fill="var(--warn-soft)" stroke="var(--warn)" stroke-width="1.6"/>
+  <text x="645" y="36" text-anchor="middle" font-size="13.5" font-weight="700" fill="var(--warn)">② 脏读 Dirty read</text>
+  <text x="544" y="56" text-anchor="middle" font-size="11.5" font-weight="700" fill="var(--java)">事务 1</text>
+  <text x="754" y="56" text-anchor="middle" font-size="11.5" font-weight="700" fill="var(--sql)">事务 2</text>
+  <line x1="544" y1="62" x2="544" y2="248" stroke="var(--java)" stroke-width="1.2" stroke-dasharray="4 3"/>
+  <line x1="754" y1="62" x2="754" y2="248" stroke="var(--sql)" stroke-width="1.2" stroke-dasharray="4 3"/>
+  <rect x="458" y="72" width="172" height="26" rx="4" fill="var(--panel)" stroke="var(--java)"/>
+  <text x="544" y="89" text-anchor="middle" font-size="10.5" fill="var(--ink)">把最高出价更新为 110</text>
+  <text x="544" y="112" text-anchor="middle" font-size="10" fill="var(--ink-faint)">（<tspan font-weight="700">尚未提交</tspan>）</text>
+  <rect x="668" y="120" width="172" height="26" rx="4" fill="var(--danger-soft)" stroke="var(--danger)"/>
+  <text x="754" y="137" text-anchor="middle" font-size="10.5" font-weight="700" fill="var(--danger)">读到最高出价 110</text>
+  <rect x="458" y="156" width="172" height="26" rx="4" fill="var(--panel)" stroke="var(--java)"/>
+  <text x="544" y="173" text-anchor="middle" font-size="10.5" fill="var(--ink)">检查资金：不足</text>
+  <rect x="458" y="190" width="172" height="40" rx="4" fill="var(--java-soft)" stroke="var(--java)"/>
+  <text x="544" y="206" text-anchor="middle" font-size="10.5" fill="var(--ink)">事务回滚</text>
+  <text x="544" y="222" text-anchor="middle" font-size="10.5" fill="var(--ink)">恢复最高出价 100</text>
+  <text x="645" y="250" text-anchor="middle" font-size="11" fill="var(--danger)"><tspan font-weight="700">事务 2 读到了后来被回滚的无效数据</tspan></text>
+
+  <!-- unrepeatable read -->
+  <rect x="16" y="278" width="410" height="250" rx="8" fill="var(--java-soft)" stroke="var(--java)" stroke-width="1.6"/>
+  <text x="221" y="300" text-anchor="middle" font-size="13.5" font-weight="700" fill="var(--java)">③ 不可重复读 Unrepeatable read</text>
+  <text x="120" y="320" text-anchor="middle" font-size="11.5" font-weight="700" fill="var(--java)">事务 1</text>
+  <text x="330" y="320" text-anchor="middle" font-size="11.5" font-weight="700" fill="var(--sql)">事务 2</text>
+  <line x1="120" y1="326" x2="120" y2="512" stroke="var(--java)" stroke-width="1.2" stroke-dasharray="4 3"/>
+  <line x1="330" y1="326" x2="330" y2="512" stroke="var(--sql)" stroke-width="1.2" stroke-dasharray="4 3"/>
+  <rect x="34" y="336" width="172" height="26" rx="4" fill="var(--panel)" stroke="var(--java)"/>
+  <text x="120" y="353" text-anchor="middle" font-size="10.5" fill="var(--ink)">最高出价是多少？100</text>
+  <rect x="244" y="372" width="172" height="26" rx="4" fill="var(--panel)" stroke="var(--sql)"/>
+  <text x="330" y="389" text-anchor="middle" font-size="10.5" fill="var(--ink)">更新最高出价为 110</text>
+  <rect x="244" y="404" width="172" height="24" rx="4" fill="var(--sql-soft)" stroke="var(--sql)"/>
+  <text x="330" y="420" text-anchor="middle" font-size="10.5" fill="var(--ink)">提交事务</text>
+  <rect x="34" y="436" width="172" height="24" rx="4" fill="var(--panel)" stroke="var(--java)"/>
+  <text x="120" y="452" text-anchor="middle" font-size="10.5" fill="var(--ink)">以 105 成交</text>
+  <rect x="34" y="468" width="172" height="38" rx="4" fill="var(--danger-soft)" stroke="var(--danger)"/>
+  <text x="120" y="484" text-anchor="middle" font-size="10.5" font-weight="700" fill="var(--danger)">事务回滚</text>
+  <text x="120" y="499" text-anchor="middle" font-size="10" fill="var(--danger)">成交价低于最高出价</text>
+  <text x="221" y="522" text-anchor="middle" font-size="11" fill="var(--ink)"><tspan font-weight="700">同一数据项读两次，两次状态不同</tspan></text>
+
+  <!-- phantom -->
+  <rect x="440" y="278" width="410" height="250" rx="8" fill="var(--accent-soft)" stroke="var(--accent)" stroke-width="1.6"/>
+  <text x="645" y="300" text-anchor="middle" font-size="13.5" font-weight="700" fill="var(--accent)">④ 幻读 Phantom read</text>
+  <text x="544" y="320" text-anchor="middle" font-size="11.5" font-weight="700" fill="var(--java)">事务 1</text>
+  <text x="754" y="320" text-anchor="middle" font-size="11.5" font-weight="700" fill="var(--sql)">事务 2</text>
+  <line x1="544" y1="326" x2="544" y2="512" stroke="var(--java)" stroke-width="1.2" stroke-dasharray="4 3"/>
+  <line x1="754" y1="326" x2="754" y2="512" stroke="var(--sql)" stroke-width="1.2" stroke-dasharray="4 3"/>
+  <rect x="458" y="336" width="172" height="26" rx="4" fill="var(--panel)" stroke="var(--java)"/>
+  <text x="544" y="353" text-anchor="middle" font-size="10.5" fill="var(--ink)">该 Item 有几条出价？<tspan font-weight="700">2</tspan></text>
+  <rect x="668" y="372" width="172" height="26" rx="4" fill="var(--panel)" stroke="var(--sql)"/>
+  <text x="754" y="389" text-anchor="middle" font-size="10.5" fill="var(--ink)">为该 Item 插入一条新出价</text>
+  <rect x="668" y="404" width="172" height="24" rx="4" fill="var(--sql-soft)" stroke="var(--sql)"/>
+  <text x="754" y="420" text-anchor="middle" font-size="10.5" fill="var(--ink)">提交事务</text>
+  <rect x="458" y="436" width="172" height="26" rx="4" fill="var(--danger-soft)" stroke="var(--danger)"/>
+  <text x="544" y="453" text-anchor="middle" font-size="10.5" font-weight="700" fill="var(--danger)">该 Item 有几条出价？<tspan font-weight="700">3</tspan></text>
+  <text x="645" y="486" text-anchor="middle" font-size="11" fill="var(--ink)"><tspan font-weight="700">同一查询执行两次，第二次结果多了（或少了）数据</tspan></text>
+  <text x="645" y="504" text-anchor="middle" font-size="10.5" fill="var(--ink-faint)">不一定是<tspan font-weight="700">完全相同</tspan>的查询；两次查询之间另一事务插入/删除了数据</text>
+</svg>
+</div><figcaption>图 11-1 ~ 11-4　削弱隔离性会带来的四类问题</figcaption></figure>
+
+<h4>ANSI 隔离级别</h4>
+
+<div class="tablewrap"><table>
+<thead><tr><th style="width:200px">隔离级别</th><th>幻读</th><th>不可重复读</th><th>脏读</th><th>丢失更新</th><th>说明</th></tr></thead>
+<tbody>
+<tr><td><code>READ_UNCOMMITTED</code></td><td style="color:var(--danger)">✗ 允许</td><td style="color:var(--danger)">✗ 允许</td><td style="color:var(--danger)">✗ 允许</td><td style="color:var(--sql)">✓ 防止</td><td>一个事务不能写另一个未提交事务已写过的行；<b>但任何事务可以读任何行</b>。DBMS 可用排他写锁实现</td></tr>
+<tr><td><code>READ_COMMITTED</code><br><span class="badge new">JPA 假定的默认值</span></td><td style="color:var(--danger)">✗ 允许</td><td style="color:var(--danger)">✗ 允许</td><td style="color:var(--sql)">✓ 防止</td><td style="color:var(--sql)">✓ 防止</td><td>可用共享读锁 + 排他写锁实现。<b>读事务不阻塞其他事务访问某行，但未提交的写事务会阻塞所有其他事务访问该行</b></td></tr>
+<tr><td><code>REPEATABLE_READ</code></td><td style="color:var(--danger)">✗ 允许</td><td style="color:var(--sql)">✓ 防止</td><td style="color:var(--sql)">✓ 防止</td><td style="color:var(--sql)">✓ 防止</td><td><b>读事务阻塞写事务但不阻塞其他读事务；写事务阻塞所有其他事务</b></td></tr>
+<tr><td><code>SERIALIZABLE</code></td><td style="color:var(--sql)">✓ 防止</td><td style="color:var(--sql)">✓ 防止</td><td style="color:var(--sql)">✓ 防止</td><td style="color:var(--sql)">✓ 防止</td><td>最严格，模拟串行执行。<b>DBMS 不能只用行级锁实现</b>，必须提供别的机制防止新插入的行对已执行过相关查询的事务可见 —— 粗暴的做法是写后<b>排他锁定整张表</b></td></tr>
+</tbody></table></div>
+
+<h4>怎么选隔离级别</h4>
+
+<div class="pit"><b>①　几乎所有场景都要排除 <code>READ_UNCOMMITTED</code></b>
+<p>让一个事务的<b>未提交</b>更改被另一个事务使用<b>极其危险</b>：一个事务的回滚或失败会影响其他并发事务 —— <b>可能把其他事务一起拖垮，甚至让数据库进入不正确的状态</b>（拍卖商品的卖家可能被收费两次 —— <b>符合数据库完整性规则，但不正确</b>）。<b>最糟的是：某个最终被回滚的事务所做的更改，可能因为被另一个成功事务读取并传播而被「提交」进去！</b></p>
+<p style="margin-top:6px">它<b>可以用于调试</b>：跟踪长插入查询的执行、对聚合函数（<code>SUM(*)</code>、<code>COUNT(*)</code>）做粗略估算。</p></div>
+
+<div class="warn"><b>②　多数应用不需要 <code>SERIALIZABLE</code></b><p>幻读通常不成问题，而这个级别<b>扩展性很差</b>。<b>生产环境中很少有应用使用它</b>，人们转而在特定场景下<b>有选择地施加悲观锁</b>，从而有效地强制某些操作串行执行。</p></div>
+
+<div class="tip"><b>③　本书的建议：<code>READ_COMMITTED</code> + 实体版本控制</b>
+<p><b>持久化上下文缓存（强制存在）与版本控制的组合，已经给了我们「可重复读」的大部分好处</b>：上下文缓存确保某事务加载的实体实例状态<b>与其他事务的修改隔离</b>；同一工作单元里第二次查同一实体会在上下文缓存中解析、不打库 —— <b>因此读是可重复的，看不到冲突的已提交数据</b>（仍可能出现幻读，但那通常好处理得多）。此外，<b>版本控制把语义切换成「首次提交者获胜（first commit wins）」</b>。</p>
+<p style="margin-top:6px"><b>因此，对几乎所有多用户 JPA 应用，在开启实体版本控制的前提下，所有数据库事务用 <code>READ_COMMITTED</code> 都是可接受的。</b></p></div>
+
+<div class="note"><b>怎么改隔离级别</b>
+<p>Hibernate <b>保留</b>数据库连接的隔离级别，<b>不去改它</b>。多数产品默认 read committed，<b>但 MySQL 默认 repeatable read</b>。修改途径：① DBMS 私有配置里的全局设置；② 标准 SQL 的 <code>SET SESSION CHARACTERISTICS</code>（设置该数据库会话中开启的所有事务）；③ <code>SET TRANSACTION</code>（设置当前事务）；④ JDBC 的 <code>Connection.setTransactionIsolation()</code>（文档措辞是「<b>尝试</b>改变」）—— 在 Hibernate/JPA 应用中可从原生 <code>Session</code> API 拿到 JDBC <code>Connection</code>。</p>
+<p style="margin-top:6px"><b>但更好的做法</b>：与其改整个事务的隔离级别，不如用 JPA API 对相关数据<b>获取额外的锁</b>。<b>这种细粒度加锁在高并发应用中更可扩展。</b></p></div>
+
+<h3 id="s22">11.2.2　乐观并发控制</h3>
+
+<p><b>适用场景</b>：并发修改<b>很少发生</b>，且在工作单元的<b>较晚阶段检测冲突是可行的</b>。JPA 提供自动版本检查作为乐观冲突检测手段。</p>
+
+<figure><div class="fig-box">
+<svg viewBox="0 0 840 300" xmlns="http://www.w3.org/2000/svg" font-family="Inter,system-ui,sans-serif">
+  <rect x="20" y="16" width="800" height="42" rx="7" fill="var(--code-bg)" stroke="var(--line-strong)"/>
+  <text x="38" y="34" font-family="monospace" font-size="12" fill="var(--accent)">@Entity public class Item {  @Version  private long version;  … }</text>
+  <text x="38" y="52" font-size="11" fill="var(--ink-soft)">映射到 ITEM 表的额外列（默认列名 VERSION）。<tspan font-weight="700">可以有 getVersion()，但绝不要有 setter，应用也不该修改它的值</tspan></text>
+
+  <rect x="20" y="70" width="390" height="216" rx="8" fill="var(--java-soft)" stroke="var(--java)" stroke-width="1.6"/>
+  <text x="215" y="92" text-anchor="middle" font-size="13" font-weight="700" fill="var(--java)">Hibernate 自动做的两件事</text>
+  <text x="38" y="116" font-size="11.5" fill="var(--ink)">① 刷新持久化上下文时，<tspan font-weight="700">只要发现某 Item 变脏</tspan>，</text>
+  <text x="52" y="132" font-size="11.5" fill="var(--ink)">   就把版本号<tspan font-weight="700">加一</tspan></text>
+  <text x="38" y="156" font-size="11.5" fill="var(--ink)">② 执行 UPDATE / DELETE 时<tspan font-weight="700">比较版本</tspan>：</text>
+  <text x="52" y="176" font-family="monospace" font-size="10.5" fill="var(--accent)">update ITEM set NAME=?, VERSION=1</text>
+  <text x="52" y="192" font-family="monospace" font-size="10.5" fill="var(--accent)">  where ID=? and <tspan font-weight="700">VERSION=0</tspan></text>
+  <text x="38" y="216" font-size="11.5" fill="var(--ink)">JDBC 返回受影响行数；<tspan font-weight="700">若为 0</tspan>，说明该行要么没了、</text>
+  <text x="52" y="232" font-size="11.5" fill="var(--ink)">要么版本已不是 0 → 抛 <tspan font-family="monospace">OptimisticLockException</tspan></text>
+  <text x="38" y="258" font-size="11" fill="var(--ink-soft)">版本类型可用 int/Integer/short/Short/Long；到达数据类型</text>
+  <text x="52" y="272" font-size="11" fill="var(--ink-soft)">上限时 Hibernate 会<tspan font-weight="700">回绕并从零重新开始</tspan></text>
+
+  <rect x="430" y="70" width="390" height="216" rx="8" fill="var(--sql-soft)" stroke="var(--sql)" stroke-width="1.6"/>
+  <text x="625" y="92" text-anchor="middle" font-size="13" font-weight="700" fill="var(--sql)">结果：首次提交者获胜（first commit wins）</text>
+  <text x="448" y="116" font-size="11.5" fill="var(--ink)">两个用户同时执行同一工作单元时：</text>
+  <text x="448" y="138" font-size="11.5" fill="var(--sql)">• <tspan font-weight="700">先提交的用户</tspan>更新 name 并把版本 1 刷进数据库</text>
+  <text x="448" y="160" font-size="11.5" fill="var(--danger)">• <tspan font-weight="700">后提交的用户失败</tspan>：他的 UPDATE 找不到 version=0 的行</text>
+  <rect x="448" y="176" width="356" height="60" rx="6" fill="var(--panel)" stroke="var(--sql)"/>
+  <text x="626" y="196" text-anchor="middle" font-size="11.5" font-weight="700" fill="var(--sql)">可以捕获 OptimisticLockException 并专门处理</text>
+  <text x="626" y="214" text-anchor="middle" font-size="11" fill="var(--ink)">例如提示第二个用户：「您正在处理的数据已被他人修改。</text>
+  <text x="626" y="230" text-anchor="middle" font-size="11" fill="var(--ink)">请用最新数据重新开始，点击『重启』继续。」</text>
+  <text x="625" y="260" text-anchor="middle" font-size="11" fill="var(--ink-soft)">对比 §11.2.1 图 11-1 的「最后提交者获胜」</text>
+  <text x="625" y="276" text-anchor="middle" font-size="11" fill="var(--sql)"><tspan font-weight="700">这才是对用户更友好的行为</tspan></text>
+</svg>
+</div><figcaption>图 11-B　<code>@Version</code> 如何把「最后提交者获胜」变成「首次提交者获胜」</figcaption></figure>
+
+<div class="keyhint"><span class="k">什么改动会让版本递增</span><span><b>只要实体变脏就递增</b>：包括实体的所有变脏的值类型属性，无论是单值（<code>String</code>、<code>int</code>）、嵌入的（<code>Address</code>）还是集合。<b>例外是用 <code>mappedBy</code> 变成只读的 <code>@OneToMany</code> / <code>@ManyToMany</code> 关联集合</b> —— 在这些集合里增删元素<b>不会</b>递增拥有者实体的版本号。</span></div>
+<div class="keyhint"><span class="k">重要警告</span><span><b>这些规则在 JPA 里都没有标准化</b> —— 访问同一个共享数据库时，<b>不要指望两个 JPA 提供者实现相同的规则</b>。</span></div>
+<div class="keyhint"><span class="k">排除某个属性</span><span>不想让某属性的变化触发版本递增：<code>@org.hibernate.annotations.OptimisticLock(excluded = true)</code>。</span></div>
+
+<h4>三种版本控制方式</h4>
+
+<div class="tablewrap"><table>
+<thead><tr><th style="width:200px">方式</th><th>写法</th><th>评价</th></tr></thead>
+<tbody>
+<tr><td><b>数值计数器</b><br><span class="badge new">推荐</span></td><td><code>@Version private long version;</code></td><td><b>新项目应依赖数值计数器</b></td></tr>
+<tr><td><b>时间戳</b></td><td><code>@Version private LocalDateTime lastUpdated;</code></td><td>schema 已有 <code>LASTUPDATED</code>/<code>MODIFIED_ON</code> 列时可用。<b>理论上略不安全</b>：两个并发事务可能在<b>同一毫秒</b>加载并更新同一 Item，而 JVM 通常没有毫秒级精度；<b>集群环境下从 JVM 取当前时间也不安全</b>（节点系统时间可能不同步）。可加 <code>@org.hibernate.annotations.Type(type="dbtimestamp")</code> 改从<b>数据库</b>取时间（<b>但并非所有方言支持，且每次递增都要多打一次库</b>）。<b>JPA 标准只认为 <code>java.sql.Timestamp</code> 可移植</b> —— 但那要把 JDBC 类引进领域模型，<b>不够理想</b></td></tr>
+<tr><td><b>不用版本号/时间戳</b></td><td><code>@org.hibernate.annotations.OptimisticLocking(type = OptimisticLockType.ALL)</code><br>+ <code>@DynamicUpdate</code>（<b>必需</b>）</td><td>把当前数据库状态与「Hibernate 取回实体时（或上次刷新时）的未修改值」比较。生成的 SQL 把<b>所有列及其最后已知值</b>列进 <code>WHERE</code>。适合遗留 schema 或既有 Java 类无法加列的场景</td></tr>
+</tbody></table></div>
+
+<pre><code><span class="cmt">// OptimisticLockType.ALL 生成的 SQL</span>
+update ITEM set NAME = <span class="str">'New Name'</span>
+    where ID = 123
+      and NAME = <span class="str">'Old Name'</span>
+      and PRICE = <span class="str">'9.99'</span>
+      and DESCRIPTION = <span class="str">'Some item for auction'</span>
+      and … and SELLER_ID = 45
+<span class="cmt">// 任何并发事务改动过其中任一值、或删掉了该行 → 更新 0 行 → 刷新时抛异常</span></code></pre>
+
+<div class="pit"><b><code>OptimisticLockType.DIRTY</code>：看似更宽松，实则危险</b>
+<p>它只把<b>被修改的</b>属性放进限制条件（上例会缩减为 <code>where ID = 123 and NAME = 'Old Name'</code>）。这意味着两个工作单元可以并发修改同一个 Item，<b>只有当它们修改<u>同一个</u>值类型属性（或外键值）时才检测到冲突</b>。</p>
+<p style="margin-top:6px"><b>对业务实体来说，只检查脏属性通常不是好策略 —— 描述变了却允许改价格，多半是不对的！</b>而且<b>这个策略对游离实体和 merge 无效</b>：把游离实体 merge 进新上下文时，「旧值」是未知的。<b>游离实体实例必须携带版本号或时间戳才能做乐观并发控制。</b></p></div>
+
+<div class="note"><b>与共享数据库的版本控制</b><p>如果多个应用访问同一数据库、而不是全都使用 Hibernate 的版本控制算法，就会出并发问题。一个简单方案是<b>数据库级触发器 + 存储过程</b>：用 <code>INSTEAD OF</code> 触发器在任何 <code>UPDATE</code> 时执行一个存储过程<b>替代</b>该更新。在过程里检查应用是否递增了该行版本；<b>如果版本没更新、或更新语句里根本没包含版本列，就说明这条语句不是 Hibernate 应用发出的</b> —— 那就在过程里先递增版本再应用 <code>UPDATE</code>。</p></div>
+
+<h4>手工版本检查：让「读」可重复</h4>
+
+<div class="warn"><b>问题场景</b><p>拍卖系统里每个 <code>Item</code> 属于一个 <code>Category</code>（常规 <code>@ManyToOne</code>）。现在要<b>汇总若干类别下所有商品的价格总和</b>：需要对每个类别查询其全部 item 再累加。<b>问题是：如果在你查询并遍历所有类别与商品的过程中，有人把某个 Item 从一个 Category 移到了另一个 Category 呢？在 read-committed 隔离下，同一个 Item 可能出现两次！</b></p></div>
+
+<pre><code>BigDecimal totalPrice = BigDecimal.ZERO;
+<span class="kw">for</span> (Long categoryId : CATEGORIES) {
+    List&lt;Item&gt; items = em
+        .createQuery(<span class="str">"select i from Item i where i.category.id = :catId"</span>, Item.class)
+        .<span class="hl">setLockMode(LockModeType.OPTIMISTIC)</span>          <span class="cmt">// 告诉 Hibernate 刷新时要检查每个 Item</span>
+        .setParameter(<span class="str">"catId"</span>, categoryId)
+        .getResultList();
+    <span class="kw">for</span> (Item item : items)
+        totalPrice = totalPrice.add(item.getBuyNowPrice());
+}
+em.getTransaction().commit();   <span class="cmt">// 刷新时对每个 Item 执行一条 SELECT 检查版本；不一致就抛 OptimisticLockException</span></code></pre>
+
+<div class="pit"><b>为什么持久化上下文缓存救不了这个场景？</b>
+<p>「查某类别下所有 item」的查询返回一个 <code>ResultSet</code>。Hibernate 看主键值，<b>先尝试在持久化上下文缓存里解析每个 Item 的其余细节</b>。</p>
+<p style="margin-top:6px"><b>但这个缓存在这里帮不上忙</b>：如果并发事务把某个 item 移到了另一个类别，那个 item 可能在<b>不同的 ResultSet 里被返回多次</b>。Hibernate 做上下文查找后会说：「哦，这个 Item 实例我已经加载过了，用内存里现成的吧。」—— <b>它根本不知道该 item 的类别变了，也不知道它在另一个结果里又出现了一次。</b></p>
+<p style="margin-top:6px"><b>因此这正是持久化上下文的「可重复读」特性<u>隐藏</u>了并发提交数据的情形。我们必须手工检查版本，才能发现「我们以为不会变的数据」其实变了。</b></p></div>
+
+<div class="tablewrap"><table>
+<thead><tr><th style="width:100px"></th><th>要点</th></tr></thead>
+<tbody>
+<tr><td>别被术语迷惑</td><td>JPA 规范<b>没有规定</b>每个 <code>LockModeType</code> 具体怎么实现。对 <code>OPTIMISTIC</code>，<b>Hibernate 执行的是版本检查，根本不涉及真正的锁</b></td></tr>
+<tr><td>前提</td><td>必须先在 <code>Item</code> 上<b>启用版本控制</b>，否则无法在 Hibernate 中使用乐观锁模式</td></tr>
+<tr><td>性能代价</td><td>Hibernate <b>不会批量或以其他方式优化</b>手工版本检查的 SELECT —— <b>汇总 100 个 item 就会在刷新时多出 100 条查询</b>。这种情况下<b>悲观方案可能更好</b></td></tr>
+<tr><td>适用接口</td><td><code>Query</code>、<code>TypedQuery</code>、<code>NamedQuery</code> 都支持 <code>setLockMode()</code></td></tr>
+</tbody></table></div>
+
+<h4>强制版本递增：<code>OPTIMISTIC_FORCE_INCREMENT</code></h4>
+
+<div class="warn"><b>问题场景：两个用户同时给同一商品出价</b>
+<p>下新出价时应用要做两件事：① 从数据库取该 Item <b>当前最高的</b> Bid；② 比较新 Bid 与最高 Bid，更高则存库。<b>这两步之间存在竞态条件</b>：如果在读到最高出价和放入新出价之间，另一条出价进来了，你根本看不到它。</p>
+<p style="margin-top:6px"><b>这个冲突是「不可见的」，即使给 Item 启用版本控制也无济于事 —— 因为整个过程中 <code>Item</code> 从未被修改。</b></p></div>
+
+<pre><code>Item item = em.find(Item.class, ITEM_ID,
+        <span class="hl">LockModeType.OPTIMISTIC_FORCE_INCREMENT</span>);   <span class="cmt">// 加载后<b>即便从未修改</b>也递增其版本</span>
+Bid highestBid = queryHighestBid(em, item);
+<span class="cmt">// …另一个事务改动了记录…</span>
+Bid newBid = <span class="kw">new</span> Bid(<span class="kw">new</span> BigDecimal(<span class="str">"45.45"</span>), item, highestBid);
+em.persist(newBid);          <span class="cmt">// 只往 BID 表插入新行，不影响 Item 的任何值</span>
+
+assertThrows(RollbackException.class, () -&gt; em.getTransaction().commit());
+<span class="cmt">// 刷新时：为新 Bid 执行 INSERT，并<b>强制对 Item 做一次带版本检查的 UPDATE</b>
+// → 若期间有人并发修改了 Item 或并发下了出价，就抛异常</span></code></pre>
+
+<div class="tip"><b>一个重要的替代方案</b><p>如果不用 <code>Bid#item</code> 的 <code>@ManyToOne</code> 实体关联，而是用 <code>Item#bids</code> 的 <code>@ElementCollection</code>，那么<b>往集合里加一个 Bid 就会递增 Item 的版本，不需要强制递增</b>。（可回顾 §8.3 关于父/子歧义以及聚合与组合在 ORM 中如何工作的讨论。）<b>手工递增版本在「插入或修改数据、并希望某个聚合根实例的版本被递增」的许多场景中都有用。</b></p></div>
+
+<h3 id="s23">11.2.3　显式悲观锁</h3>
+
+<pre><code><span class="kw">for</span> (Long categoryId : CATEGORIES) {
+    List&lt;Item&gt; items = em
+        .createQuery(<span class="str">"select i from Item i where i.category.id = :catId"</span>, Item.class)
+        .<span class="hl">setLockMode(LockModeType.PESSIMISTIC_READ)</span>
+        .<span class="hl">setHint("javax.persistence.lock.timeout", 5000)</span>   <span class="cmt">// 拿不到锁就等 5 秒，仍拿不到则抛异常</span>
+        .setParameter(<span class="str">"catId"</span>, categoryId)
+        .getResultList();
+    <span class="cmt">// 查询成功返回 = 我们<b>已持有排他锁</b>，本事务提交前其他事务无法排他访问或修改这些数据</span>
+    …
+}
+em.getTransaction().commit();     <span class="cmt">// 事务完成、提交后<b>锁被释放</b></span></code></pre>
+
+<div class="tablewrap"><table>
+<thead><tr><th style="width:270px"><code>LockModeType</code></th><th>语义与 Hibernate 的实现</th></tr></thead>
+<tbody>
+<tr><td><code>OPTIMISTIC</code><br><span style="font-size:12px;color:var(--ink-faint)">（JPA 1.0 的 <code>READ</code> 等价，已不建议用）</span></td><td>刷新时做<b>版本检查</b>，无真实锁</td></tr>
+<tr><td><code>OPTIMISTIC_FORCE_INCREMENT</code><br><span style="font-size:12px;color:var(--ink-faint)">（JPA 1.0 的 <code>WRITE</code> 等价）</span></td><td>加载后强制递增版本，即便从未修改</td></tr>
+<tr><td><code>PESSIMISTIC_READ</code></td><td>规范定义它<b>保证可重复读</b>。Hibernate 在加载数据的 SQL 后<b>追加 FOR UPDATE 子句</b>，在数据库层对行加锁。<br>H2：<code>SELECT … FOR UPDATE</code>（H2 只支持一种排他锁，所有悲观模式生成相同 SQL）<br>PostgreSQL：支持共享读锁，追加 <code>FOR SHARE</code><br>MySQL：翻译成 <code>LOCK IN SHARE MODE</code></td></tr>
+<tr><td><code>PESSIMISTIC_WRITE</code></td><td>在可重复读之上，还要求 JPA 提供者<b>串行化数据访问，且不能出现幻读</b>。<br>PostgreSQL/MySQL：<code>FOR UPDATE</code> 排他写锁</td></tr>
+<tr><td><code>PESSIMISTIC_FORCE_INCREMENT</code></td><td><b>要求实体已启用版本控制</b>。Hibernate 执行 <code>FOR UPDATE NOWAIT</code>（或方言支持的等价物），查询一返回<b>立即递增版本并对每个返回的实体实例做 UPDATE</b> —— 向任何并发事务表明「我们更新过这些行」，<b>即便我们至今未修改任何数据</b>。<b>除了聚合加锁外很少用到</b></td></tr>
+</tbody></table></div>
+
+<div class="cols">
+<div>
+<div class="tip"><b>悲观 vs 乐观：失败时机的根本差别</b>
+<p><b>悲观</b>：<b>只要加锁查询成功，就知道可以安全地读写数据</b>。</p>
+<p style="margin-top:6px"><b>乐观</b>：<b>我们抱最好的希望，可能到提交时才被打个措手不及。</b></p>
+<p style="margin-top:6px">JPA 中<b>悲观锁的持续时间是单个数据库事务</b> —— 无法用排他锁把并发访问阻塞得比一个数据库事务更久。</p></div>
+<pre><code><span class="cmt">// 也可以给 find() 设超时提示</span>
+Map&lt;String,Object&gt; hints = <span class="kw">new</span> HashMap&lt;&gt;();
+hints.put(<span class="str">"javax.persistence.lock.timeout"</span>, 5000);
+Category category = em.find(Category.class, CATEGORY_ID,
+        LockModeType.PESSIMISTIC_WRITE, hints);
+<span class="cmt">// 方言支持时执行 SELECT … FOR UPDATE WAIT 5000</span></code></pre>
+</div>
+<div>
+<div class="pit"><b>两类异常的差别</b>
+<p>拿不到锁时 Hibernate 抛 <code>LockTimeoutException</code> 或 <code>PessimisticLockException</code>：</p>
+<p style="margin-top:6px">• 抛 <code>PessimisticLockException</code> → <b>事务必须回滚，工作单元结束</b><br>
+• 抛<b>超时</b>异常 → <b>对事务不是致命的</b></p>
+<p style="margin-top:6px">抛哪个<b>取决于 SQL 方言</b>。例如 H2 不支持逐语句的锁超时，所以<b>总是</b>得到 <code>PessimisticLockException</code>。</p></div>
+<div class="warn"><b>锁超时提示的可移植性</b><p>和其他提示一样，<b>Hibernate 可能忽略它</b>，取决于数据库产品。H2 只支持连接级的全局锁超时（默认 1 秒）；PostgreSQL、Oracle 等方言下<b>超时设为 0 会给 SQL 追加 <code>NOWAIT</code></b>。</p></div>
+</div>
+</div>
+
+<div class="pit"><b>悲观锁到底锁住了什么？—— 容易误判的边界</b>
+<p>Hibernate <b>只锁定对应实体实例状态的那些行</b>。锁一个 <code>Item</code> 实例 → 锁 <code>ITEM</code> 表里它那行；<b>joined 继承策略下会锁父表和子表中相应的行</b>；实体的<b>次表映射</b>同理。</p>
+<p style="margin-top:6px"><b>因为锁的是整行，所以外键在该行中的任何关系也实际上被锁住了</b>：若 <code>SELLER_ID</code> 外键列在 <code>ITEM</code> 表中，<code>Item#seller</code> 关联被锁住 —— <b>但真正的 <code>Seller</code> 实例并没有被锁！</b>外键在其他表中的集合或其他关联也都没被锁。</p>
+<p style="margin-top:6px"><b>扩展锁作用域</b>：JPA 2.0 定义了 <code>PessimisticLockScope.EXTENDED</code>，可用查询提示 <code>javax.persistence.lock.scope</code> 设置。启用后，持久化引擎会把加锁数据的范围<b>扩展到被锁实体的集合与关联连接表中的数据</b>。</p></div>
+
+<div class="note"><b>离线锁（offline locks）</b>
+<p>悲观数据库锁只持有一个事务。其他实现也是可能的：内存中的锁、数据库里的所谓「锁表」等，统称<b>离线锁</b>。</p>
+<p style="margin-top:6px"><b>悲观地锁定超过一个数据库事务，通常是性能瓶颈</b>：每次数据访问都要额外向一个全局同步的锁管理器做锁检查。<b>而乐观锁则是长时间会话（conversation）的完美并发控制策略，性能也好。</b>取决于冲突解决策略（检测到冲突后做什么），<b>应用的用户对乐观锁的满意度可能与阻塞式并发访问一样高 —— 他们大概还会庆幸应用没有因为别人正在看同一份数据而把自己锁在某些界面之外。</b></p></div>
+
+<h3 id="s24">11.2.4　避免死锁</h3>
+
+<figure><div class="fig-box">
+<svg viewBox="0 0 840 290" xmlns="http://www.w3.org/2000/svg" font-family="Inter,system-ui,sans-serif">
+  <defs><marker id="dl" markerWidth="9" markerHeight="9" refX="8" refY="4.5" orient="auto"><path d="M0 0 L9 4.5 L0 9 z" fill="var(--danger)"/></marker></defs>
+  <rect x="20" y="16" width="390" height="128" rx="8" fill="var(--java-soft)" stroke="var(--java)" stroke-width="1.6"/>
+  <text x="215" y="38" text-anchor="middle" font-size="13" font-weight="700" fill="var(--java)">事务 A</text>
+  <text x="38" y="62" font-family="monospace" font-size="11.5" fill="var(--sql)">update ITEM set ... where ID = 1;   ← 锁住行 1</text>
+  <text x="38" y="84" font-family="monospace" font-size="11.5" fill="var(--danger)">update ITEM set ... where ID = 2;   ← 尝试锁行 2</text>
+  <text x="38" y="112" font-size="11" fill="var(--ink-soft)">来自这段代码：先改 itemOne 的名字，再改 itemTwo 的名字</text>
+  <text x="38" y="130" font-size="11" fill="var(--ink-soft)">Hibernate 在刷新上下文时按此顺序发出两条 UPDATE</text>
+
+  <rect x="430" y="16" width="390" height="128" rx="8" fill="var(--sql-soft)" stroke="var(--sql)" stroke-width="1.6"/>
+  <text x="625" y="38" text-anchor="middle" font-size="13" font-weight="700" fill="var(--sql)">事务 B（并发，<tspan font-weight="700">顺序相反</tspan>）</text>
+  <text x="448" y="62" font-family="monospace" font-size="11.5" fill="var(--sql)">update ITEM set ... where ID = 2;   ← 锁住行 2</text>
+  <text x="448" y="84" font-family="monospace" font-size="11.5" fill="var(--danger)">update ITEM set ... where ID = 1;   ← 尝试锁行 1</text>
+  <text x="448" y="116" font-size="11" fill="var(--danger)"><tspan font-weight="700">两个事务互相等待对方释放锁 → 死锁</tspan></text>
+
+  <path d="M300 150 L520 172" stroke="var(--danger)" stroke-width="1.6" marker-end="url(#dl)"/>
+  <path d="M540 150 L320 172" stroke="var(--danger)" stroke-width="1.6" marker-end="url(#dl)"/>
+
+  <rect x="20" y="182" width="390" height="100" rx="8" fill="var(--warn-soft)" stroke="var(--warn)"/>
+  <text x="215" y="204" text-anchor="middle" font-size="12.5" font-weight="700" fill="var(--warn)">危险之处</text>
+  <text x="38" y="226" font-size="11.5" fill="var(--ink)">死锁概率通常很小，但<tspan font-weight="700">高并发应用中两个 Hibernate 应用</tspan></text>
+  <text x="38" y="242" font-size="11.5" fill="var(--ink)"><tspan font-weight="700">可能执行这种交错更新</tspan></text>
+  <text x="38" y="264" font-size="11.5" fill="var(--danger)"><tspan font-weight="700">测试时可能看不到死锁</tspan>（除非你写了对的那种测试），</text>
+  <text x="38" y="278" font-size="11.5" fill="var(--danger)">它会在生产环境高事务负载下<tspan font-weight="700">突然出现</tspan></text>
+
+  <rect x="430" y="182" width="390" height="100" rx="8" fill="var(--sql-soft)" stroke="var(--sql)" stroke-width="1.6"/>
+  <text x="625" y="204" text-anchor="middle" font-size="12.5" font-weight="700" fill="var(--sql)">三种应对</text>
+  <text x="448" y="226" font-size="11.5" fill="var(--ink)">① 用 <tspan font-weight="700">serializable</tspan> 模式跑连接（更新单行会锁整表）</text>
+  <text x="448" y="246" font-size="11.5" fill="var(--ink)">② SELECT 时就<tspan font-weight="700">对所有数据取排他锁</tspan>（上一节的做法）</text>
+  <text x="448" y="266" font-size="11.5" fill="var(--sql)">③ <tspan font-weight="700">务实的优化</tspan>：<tspan font-family="monospace">hibernate.order_updates=true</tspan></text>
+  <text x="460" y="280" font-size="11" fill="var(--ink-soft)">让 Hibernate 把所有 UPDATE <tspan font-weight="700">按主键值升序排列</tspan>后再执行</text>
+</svg>
+</div><figcaption>图 11-C　交错更新导致的死锁与三种缓解手段</figcaption></figure>
+
+<div class="tip"><b><code>hibernate.order_updates</code> 的效果</b><p>无论应用以什么顺序加载和修改数据，Hibernate <b>总是先更新主键为 1 的行，再更新第 2 行</b>。刷新时检测到的被修改实体实例与集合元素，其 UPDATE 都按主键值升序排列。<b>这能显著降低死锁概率。</b>（再次提醒：务必彻底理解你的 DBMS 产品的事务与加锁行为。Hibernate 的大部分事务保证继承自 DBMS；<b>你的 MVCC 数据库产品可能避免了读锁，但写者隔离多半仍依赖排他锁，因此仍可能出现死锁。</b>）</p></div>
+
+<div class="note"><b><code>EntityManager#lock()</code></b><p>它接受一个<b>已加载的持久实体实例</b>和一个锁模式，执行与 <code>find()</code>/<code>Query</code> 相同的加锁，<b>但不加载实例</b>。此外，<b>对已启用版本的实体做悲观加锁时，<code>lock()</code> 会立即在数据库上做一次版本检查</b>，可能抛 <code>OptimisticLockException</code>；若数据库表示已不存在，抛 <code>EntityNotFoundException</code>。<code>EntityManager#refresh()</code> 也接受锁模式，语义相同。</p></div>
+
+<h2 id="s3"><span class="num">11.3</span>非事务数据访问</h2>
+
+<p>JDBC <code>Connection</code> <b>默认处于自动提交（auto-commit）模式</b>。想象你用 SQL 控制台连上数据库随手跑几个查询、甚至更新删除 —— 这种交互式访问是<b>临时的</b>，多数时候你并没有一个「构成工作单元」的语句序列计划。<b>自动提交模式非常适合这种数据访问</b>（你总不想为每条 SQL 都敲 begin transaction / end transaction）。</p>
+
+<figure><div class="fig-box">
+<svg viewBox="0 0 840 330" xmlns="http://www.w3.org/2000/svg" font-family="Inter,system-ui,sans-serif">
+  <rect x="20" y="16" width="800" height="46" rx="7" fill="var(--warn-soft)" stroke="var(--warn)" stroke-width="1.6"/>
+  <text x="420" y="38" text-anchor="middle" font-size="13" font-weight="700" fill="var(--warn)">创建 EntityManager 时<tspan font-weight="700">没有活跃事务</tspan> → 持久化上下文进入特殊的「<u>非同步（unsynchronized）</u>」模式，<tspan font-weight="700">Hibernate 不会自动刷新</tspan></text>
+  <text x="420" y="56" text-anchor="middle" font-size="11.5" fill="var(--ink)">你可以访问数据库读数据，这类操作执行的 SELECT 以<tspan font-weight="700">自动提交模式</tspan>发往数据库</text>
+
+  <rect x="20" y="74" width="390" height="140" rx="8" fill="var(--sql-soft)" stroke="var(--sql)" stroke-width="1.6"/>
+  <text x="215" y="96" text-anchor="middle" font-size="13" font-weight="700" fill="var(--sql)">✓ 能做什么</text>
+  <text x="38" y="120" font-size="11.5" fill="var(--ink)">用 <tspan font-family="monospace">find()</tspan>、<tspan font-family="monospace">getReference()</tspan>、<tspan font-family="monospace">refresh()</tspan> 或查询<tspan font-weight="700">读数据</tspan></text>
+  <text x="38" y="142" font-size="11.5" fill="var(--ink)">也能<tspan font-weight="700">按需加载</tspan>：访问代理会初始化它，</text>
+  <text x="52" y="158" font-size="11.5" fill="var(--ink)">开始遍历集合元素会加载集合</text>
+  <text x="38" y="182" font-size="11.5" fill="var(--sql)">检索<tspan font-weight="700">受管实体实例</tspan>时会在当前上下文中查找 →</text>
+  <text x="52" y="198" font-size="11.5" fill="var(--sql)"><tspan font-weight="700">即使没有系统事务，实体实例的读也是可重复的</tspan></text>
+
+  <rect x="430" y="74" width="390" height="140" rx="8" fill="var(--danger-soft)" stroke="var(--danger)" stroke-width="1.6"/>
+  <text x="625" y="96" text-anchor="middle" font-size="13" font-weight="700" fill="var(--danger)">✗ 不能做什么</text>
+  <text x="448" y="120" font-size="11.5" fill="var(--ink)">手工 <tspan font-family="monospace">flush()</tspan> 存新的 <tspan font-family="monospace">Item#name</tspan> →</text>
+  <text x="462" y="136" font-family="monospace" font-size="11.5" fill="var(--danger)">TransactionRequiredException</text>
+  <text x="448" y="158" font-size="11.5" fill="var(--ink)">用 <tspan font-family="monospace">LockModeType.NONE</tspan> 以外的模式加锁 → 同样抛异常</text>
+  <text x="448" y="182" font-size="11.5" fill="var(--ink)"><tspan font-weight="700">原因：非同步模式下无法执行 UPDATE ——</tspan></text>
+  <text x="462" y="198" font-size="11.5" fill="var(--ink)"><tspan font-weight="700">因为你没法回滚这次改动</tspan></text>
+
+  <rect x="20" y="228" width="800" height="94" rx="8" fill="var(--code-bg)" stroke="var(--line-strong)"/>
+  <g font-family="monospace" font-size="11.5" fill="var(--ink)">
+    <text x="38" y="250">EntityManager em = emf.createEntityManager();   <tspan fill="var(--ink-faint)">// 无事务</tspan></text>
+    <text x="38" y="268">Item item = em.find(Item.class, ITEM_ID);  item.setName("New Name");</text>
+    <text x="38" y="286">assertEquals(<tspan fill="var(--danger)" font-weight="700">"Original Name"</tspan>, em.createQuery("select i.name from Item i where i.id=:id", String.class)…);  <tspan fill="var(--ink-faint)">// 标量查询 → 拿到库里的旧值</tspan></text>
+    <text x="38" y="304">assertEquals(<tspan fill="var(--sql)" font-weight="700">"New Name"</tspan>,      em.createQuery("select i from Item i where i.id=:id", Item.class)…getName());  <tspan fill="var(--ink-faint)">// 实体查询 → 上下文中已加载的实例</tspan></text>
+    <text x="38" y="320">em.refresh(item);  assertEquals("Original Name", item.getName());   <tspan fill="var(--ink-faint)">// refresh() 可以回滚内存中的改动</tspan></text>
+  </g>
+</svg>
+</div><figcaption>图 11-D　非同步持久化上下文中的读行为</figcaption></figure>
+
+<div class="pit"><b>许多开发者出于<u>错误</u>的理由依赖自动提交</b>
+<ul style="margin-bottom:0">
+<li><b>不会提升性能</b>：许多小的、每语句一个的数据库事务（这正是自动提交的含义）并不会让应用更快。</li>
+<li><b>不会提升可扩展性</b>：你可能以为长事务比每条 SQL 一个小事务持有数据库锁的时间更久，<b>但这是次要顾虑</b> —— 因为 Hibernate 在事务内<b>尽可能晚</b>地写库（提交时刷新），数据库本来就只短暂持有写锁。</li>
+<li><b>并发修改时隔离保证更弱</b>：自动提交模式下<b>基于读锁的可重复读是不可能的</b>（当然，持久化上下文缓存在这里有帮助）。</li>
+<li><b>与 MVCC 冲突</b>：如果 DBMS 有 MVCC（Oracle、PostgreSQL），你多半想用它的<b>快照隔离</b>来避免不可重复读和幻读 —— 每个事务拿到自己的数据快照。<b>自动提交模式下快照隔离毫无意义，因为根本没有事务作用域。</b></li>
+<li><b>代码更难理解</b>：任何读你代码的人都要特别留意持久化上下文是否加入了事务、是否处于非同步模式。<b>如果你总是把操作组织在系统事务里（哪怕只是读数据），所有人都能遵循这条简单规则，难以定位的并发问题也会更少。</b></li>
+</ul></div>
+
+<h3>那非同步上下文的真正好处是什么？—— <b>把修改排队</b></h3>
+
+<pre><code><span class="cmt">// ① 排队 INSERT</span>
+EntityManager em = emf.createEntityManager();       <span class="cmt">// 无事务</span>
+Item newItem = <span class="kw">new</span> Item(<span class="str">"New Item"</span>);
+em.persist(newItem);            <span class="cmt">// Hibernate 只<b>取一个新标识符值</b>（通常调数据库序列）并赋给实例</span>
+assertNotNull(newItem.getId()); <span class="cmt">// 实例在上下文中已是持久态，<b>但 SQL INSERT 还没发生</b>
+                                //（<b>这只有用「预插入」标识符生成器才可能</b>，见 §5.2.5）</span>
+em.getTransaction().begin();
+<span class="kw">if</span> (!em.isJoinedToTransaction()) em.joinTransaction();   <span class="cmt">// 准备好保存时，<b>把上下文加入事务</b></span>
+em.getTransaction().commit();   <span class="cmt">// 同步与刷新照常发生，Hibernate 写出所有排队的操作</span>
+
+<span class="cmt">// ② 排队 UPDATE（游离实例的 merge）</span>
+detachedItem.setName(<span class="str">"New Name"</span>);
+Item mergedItem = em.merge(detachedItem);   <span class="cmt">// merge 时以自动提交模式执行一条 SELECT</span>
+em.getTransaction().begin();  em.joinTransaction();  em.getTransaction().commit();  <span class="cmt">// UPDATE 被推迟到这里</span>
+
+<span class="cmt">// ③ 排队 DELETE</span>
+Item item = em.find(Item.class, ITEM_ID);
+em.remove(item);
+em.getTransaction().begin();  em.joinTransaction();  em.getTransaction().commit();</code></pre>
+
+<div class="tip"><b>这项能力的意义</b><p>非同步持久化上下文让你<b>把持久化操作与事务解耦</b>。<b>能够独立于事务（以及客户端/服务器请求）把数据修改排队，是持久化上下文的一项重要特性。</b></p></div>
+
+<div class="note"><b>Hibernate 的 MANUAL 刷新模式 —— 更方便的替代品</b>
+<p><code>Session#setFlushMode()</code> 支持额外的 <code>FlushMode.MANUAL</code>：它<b>禁用持久化上下文的一切自动刷新，即便加入的事务提交时也不刷新</b>；必须显式调 <code>flush()</code> 才同步数据库。</p>
+<p style="margin-top:6px">JPA 的设计思路是「<b>事务提交应当总是写出所有未决更改</b>」，因此用非同步模式把读与写分开。<b>如果你不认同这一点、或不想要自动提交的语句，就用 <code>Session</code> API 启用手工刷新</b> —— 这样你可以为所有工作单元保留常规的事务边界，享有可重复读甚至 MVCC 数据库的快照隔离，<b>同时仍在持久化上下文里排队更改，并在事务提交前手工 <code>flush()</code></b>。</p></div>
+
+<h2 id="s4"><span class="num">11.4</span>用 Spring 与 Spring Data 管理事务</h2>
+
+<p>Spring 的事务模型适用于不同 API（Hibernate、JPA、Spring Data JPA）。管理方式可以是<b>程序化的</b>，也可以是<b>声明式的</b>（注解，本节主要用这种）。核心抽象是 <code>org.springframework.transaction.PlatformTransactionManager</code>：</p>
+
+<pre><code><span class="kw">public interface</span> PlatformTransactionManager <span class="kw">extends</span> TransactionManager {
+    TransactionStatus getTransaction(<span class="ann">@Nullable</span> TransactionDefinition definition)
+                                     <span class="kw">throws</span> TransactionException;
+    <span class="kw">void</span> commit(TransactionStatus status) <span class="kw">throws</span> TransactionException;
+    <span class="kw">void</span> rollback(TransactionStatus status) <span class="kw">throws</span> TransactionException;
+}
+<span class="cmt">// 通常<b>不直接使用</b>这个接口：要么用注解声明式标注事务，要么用 TransactionTemplate 做程序化定义</span></code></pre>
+<p><b>Spring 使用的隔离级别与前面讨论的 ANSI 隔离级别完全相同。</b></p>
+
+<h3 id="s41">11.4.1　事务传播（transaction propagation）</h3>
+
+<figure><div class="fig-box">
+<svg viewBox="0 0 840 250" xmlns="http://www.w3.org/2000/svg" font-family="Inter,system-ui,sans-serif">
+  <defs><marker id="tp" markerWidth="9" markerHeight="9" refX="8" refY="4.5" orient="auto"><path d="M0 0 L9 4.5 L0 9 z" fill="var(--accent)"/></marker></defs>
+  <rect x="60" y="26" width="280" height="90" rx="8" fill="var(--java-soft)" stroke="var(--java)" stroke-width="1.6"/>
+  <text x="200" y="48" text-anchor="middle" font-size="13" font-weight="700" fill="var(--java)">Bean1</text>
+  <text x="80" y="72" font-family="monospace" font-size="12" fill="var(--ink)">methodA() {          </text>
+  <rect x="284" y="58" width="44" height="20" rx="4" fill="var(--accent-soft)" stroke="var(--accent)"/>
+  <text x="306" y="73" text-anchor="middle" font-size="11" font-weight="700" fill="var(--accent)">TX1</text>
+  <text x="96" y="94" font-family="monospace" font-size="12" fill="var(--accent)">bean2.methodB();</text>
+  <text x="80" y="110" font-family="monospace" font-size="12" fill="var(--ink)">}</text>
+
+  <path d="M200 122 L200 152" stroke="var(--accent)" stroke-width="1.8" marker-end="url(#tp)"/>
+
+  <rect x="60" y="156" width="280" height="80" rx="8" fill="var(--sql-soft)" stroke="var(--sql)" stroke-width="1.6"/>
+  <text x="200" y="178" text-anchor="middle" font-size="13" font-weight="700" fill="var(--sql)">Bean2</text>
+  <text x="80" y="202" font-family="monospace" font-size="12" fill="var(--ink)">methodB() {          </text>
+  <rect x="284" y="188" width="44" height="20" rx="4" fill="var(--danger-soft)" stroke="var(--danger)"/>
+  <text x="306" y="203" text-anchor="middle" font-size="11" font-weight="700" fill="var(--danger)">TX?</text>
+  <text x="80" y="224" font-family="monospace" font-size="12" fill="var(--ink)">}</text>
+
+  <rect x="380" y="26" width="440" height="210" rx="8" fill="var(--panel)" stroke="var(--line-strong)"/>
+  <text x="600" y="48" text-anchor="middle" font-size="13" font-weight="700" fill="var(--ink)">问题：methodB 会在哪个事务里执行？</text>
+  <text x="398" y="72" font-size="11.5" fill="var(--ink)">① bean-1 的 methodA 是事务性的，在 TX1 中执行</text>
+  <text x="398" y="92" font-size="11.5" fill="var(--ink)">② methodA 调用 bean-2.methodB()，后者<tspan font-weight="700">也是事务性的</tspan></text>
+  <text x="398" y="122" font-size="12" font-weight="700" fill="var(--accent)">答案由「传播行为」决定：</text>
+  <text x="398" y="144" font-family="monospace" font-size="11.5" fill="var(--ink-soft)">org.springframework.transaction.annotation.Propagation</text>
+  <text x="398" y="176" font-size="11.5" fill="var(--ink)">Spring 定义了 <tspan font-weight="700">7</tspan> 种传播行为，</text>
+  <text x="398" y="196" font-size="11.5" fill="var(--ink)">默认是 <tspan font-family="monospace" font-weight="700" fill="var(--accent)">REQUIRED</tspan></text>
+  <text x="398" y="222" font-size="11" fill="var(--ink-faint)">下表逐一列出</text>
+</svg>
+</div><figcaption>图 11-5　事务传播的概念</figcaption></figure>
+
+<div class="tablewrap"><table>
+<thead><tr><th style="width:170px">传播行为</th><th>调用方<b>有</b>事务 T1 时</th><th>调用方<b>无</b>事务时</th></tr></thead>
+<tbody>
+<tr><td><code>REQUIRED</code><br><span class="badge new">默认</span></td><td>在 <b>T1</b> 中继续执行</td><td><b>创建新事务</b></td></tr>
+<tr><td><code>SUPPORTS</code></td><td>在 <b>T1</b> 中继续执行</td><td><b>不创建事务</b>，直接执行</td></tr>
+<tr><td><code>MANDATORY</code></td><td>在 <b>T1</b> 中继续执行</td><td>抛 <b><code>TransactionRequiredException</code></b></td></tr>
+<tr><td><code>REQUIRES_NEW</code></td><td><b>挂起 T1</b>，开启新事务 <b>T2</b></td><td>照样<b>创建新事务</b></td></tr>
+<tr><td><code>NOT_SUPPORTED</code></td><td><b>挂起 T1</b>，以<b>非事务方式</b>继续</td><td>直接继续执行</td></tr>
+<tr><td><code>NEVER</code></td><td>抛 <b><code>IllegalTransactionStateException</code></b></td><td>直接继续执行</td></tr>
+<tr><td><code>NESTED</code></td><td>创建 T1 的<b>子事务 T2 并建立一个保存点</b>；子事务失败则回滚到该保存点</td><td><b>创建新事务</b></td></tr>
+</tbody></table></div>
+
+<h3 id="s42">11.4.2　事务回滚</h3>
+<p>Spring 的默认回滚规则：<b>遇到 <code>RuntimeException</code> 就回滚事务</b>。可以用 <code>@Transactional</code> 的四个属性覆盖：</p>
+<div class="tablewrap"><table>
+<thead><tr><th style="width:230px">属性</th><th>类型</th><th>行为</th></tr></thead>
+<tbody>
+<tr><td><code>rollbackFor</code></td><td>继承 <code>Throwable</code> 的 <code>Class</code> 数组</td><td>定义<b>必须</b>导致回滚的异常类</td></tr>
+<tr><td><code>rollbackForClassName</code></td><td>继承 <code>Throwable</code> 的类名数组</td><td>定义<b>必须</b>导致回滚的异常类名</td></tr>
+<tr><td><code>noRollbackFor</code></td><td>继承 <code>Throwable</code> 的 <code>Class</code> 数组</td><td>定义<b>不得</b>导致回滚的异常类</td></tr>
+<tr><td><code>noRollbackForClassName</code></td><td>继承 <code>Throwable</code> 的类名数组</td><td>定义<b>不得</b>导致回滚的异常类名</td></tr>
+</tbody></table></div>
+
+<h3 id="s43">11.4.3　<code>@Transactional</code> 的属性与作用位置</h3>
+<div class="cols">
+<div>
+<div class="tablewrap"><table>
+<thead><tr><th style="width:110px">属性</th><th>类型</th><th>行为</th></tr></thead>
+<tbody>
+<tr><td><code>isolation</code></td><td><code>Isolation</code> 枚举</td><td>按 ANSI 标准声明隔离级别</td></tr>
+<tr><td><code>propagation</code></td><td><code>Propagation</code> 枚举</td><td>上表的传播设置</td></tr>
+<tr><td><code>timeout</code></td><td><code>int</code>（秒）</td><td>超时后事务<b>自动回滚</b></td></tr>
+<tr><td><code>readOnly</code></td><td><code>boolean</code></td><td>声明只读还是读写。<b>只读事务允许一些优化，可以更快</b></td></tr>
+</tbody></table></div>
+</div>
+<div>
+<div class="tip"><b>作用位置与继承规则</b>
+<p><code>@Transactional</code> 可用于<b>接口、接口方法、类、类方法</b>。</p>
+<p style="margin-top:6px">加在接口或类上 → 该类/接口的<b>所有方法都继承</b>它；可以对特定方法单独注解来改变行为。加在接口或接口方法上 → <b>实现该接口的类（或对应方法）也继承</b>它，同样可被覆盖。</p>
+<p style="margin-top:6px"><b>因此：要获得细粒度的行为，建议把 <code>@Transactional</code> 加在<u>类的方法</u>上。</b></p></div>
+</div>
+</div>
+
+<h3 id="s44">11.4.4　程序化事务定义（<code>TransactionTemplate</code>）</h3>
+<pre><code>transactionTemplate.setIsolationLevel(TransactionDefinition.ISOLATION_REPEATABLE_READ);
+transactionTemplate.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
+transactionTemplate.setTimeout(5);
+transactionTemplate.setReadOnly(<span class="kw">false</span>);
+
+<span class="cmt">// TransactionCallback 是函数式接口（带 @FunctionalInterface），可用 lambda</span>
+transactionTemplate.execute(status -&gt; {
+    <span class="cmt">// 要在事务中执行的操作</span>
+});</code></pre>
+<p><b>在 Spring 应用中，声明式事务管理通常是首选</b>：代码更少，行为由注解提供的元信息决定。</p>
+
+<h3 id="s45">11.4.5　完整示例：用传播行为实现「无论成败都记日志」</h3>
+<p><span class="badge">源码目录 transactions5-springdata</span></p>
+
+<div class="note"><b>Spring Data 的「片段接口（fragment interface）」机制</b>
+<p>先声明 <code>ItemRepositoryCustom</code> / <code>LogRepositoryCustom</code> 这类<b>片段接口</b>，用途是<b>给 repository 扩展自定义功能</b>；再让 <code>ItemRepository</code> 同时继承 <code>JpaRepository</code> 和这个片段接口。</p>
+<p style="margin-top:6px"><b>类名以 <code>Impl</code> 结尾是关键约定</b>（它本身与 Spring Data 无关，只实现片段接口）。注入 <code>ItemRepository</code> bean 时，Spring Data 要创建代理类，<b>会发现它实现了 <code>ItemRepositoryCustom</code>，于是去查找名为 <code>ItemRepositoryImpl</code> 的类作为自定义实现</b> —— 结果就是注入的 bean 的这些方法拥有 <code>ItemRepositoryImpl</code> 中的行为。</p></div>
+
+<div class="cols">
+<div>
+<div class="filename">ItemRepositoryImpl.java（节选）</div>
+<pre><code><span class="ann">@Transactional</span>(propagation = Propagation.<span class="hl">MANDATORY</span>)
+<span class="kw">public void</span> checkNameDuplicate(String name) {
+    <span class="kw">if</span> (…已存在同名 item…)
+        <span class="kw">throw new</span> DuplicateItemNameException(
+            <span class="str">"Item with name "</span> + name + <span class="str">" already exists"</span>);
+}
+
+<span class="ann">@Transactional</span>                       <span class="cmt">// 默认 REQUIRED</span>
+<span class="kw">public void</span> addItem(String name, LocalDate creationDate) {
+    logRepository.log(<span class="str">"adding item with name "</span> + name);
+    checkNameDuplicate(name);
+    itemRepository.save(<span class="kw">new</span> Item(name, creationDate));
+}
+
+<span class="ann">@Transactional</span>(<span class="hl">noRollbackFor = DuplicateItemNameException.class</span>)
+<span class="kw">public void</span> addItemNoRollback(String name, LocalDate d) { … }
+
+<span class="ann">@Transactional</span>
+<span class="kw">public void</span> addLogs()  { logRepository.addSeparateLogsNotSupported(); }
+<span class="ann">@Transactional</span>
+<span class="kw">public void</span> showLogs() { logRepository.showLogs(); }</code></pre>
+</div>
+<div>
+<div class="filename">LogRepositoryImpl.java（节选）</div>
+<pre><code><span class="ann">@Transactional</span>(propagation = Propagation.<span class="hl">REQUIRES_NEW</span>)
+<span class="kw">public void</span> log(String message) {     <span class="cmt">// ← 日志在<b>独立事务</b>中执行</span>
+    logRepository.save(<span class="kw">new</span> Log(message));
+}
+
+<span class="ann">@Transactional</span>(propagation = Propagation.<span class="hl">NOT_SUPPORTED</span>)
+<span class="kw">public void</span> addSeparateLogsNotSupported() {
+    logRepository.save(<span class="kw">new</span> Log(<span class="str">"check from not supported 1"</span>));
+    <span class="kw">if</span> (<span class="kw">true</span>) <span class="kw">throw new</span> RuntimeException();
+    logRepository.save(<span class="kw">new</span> Log(<span class="str">"check from not supported 2"</span>));
+}
+
+<span class="ann">@Transactional</span>(propagation = Propagation.<span class="hl">SUPPORTS</span>)
+<span class="kw">public void</span> addSeparateLogsSupports() { … 同上结构 … }
+
+<span class="ann">@Transactional</span>(propagation = Propagation.<span class="hl">NEVER</span>)
+<span class="kw">public void</span> showLogs() {
+    logRepository.findAll().forEach(System.out::println);
+}</code></pre>
+</div>
+</div>
+
+<div class="tablewrap"><table>
+<thead><tr><th style="width:150px">测试</th><th>验证的行为</th></tr></thead>
+<tbody>
+<tr><td><code>notSupported()</code></td><td><code>addLogs()</code> 开启了事务，但它调用的 <code>addSeparateLogsNotSupported()</code> 会<b>挂起该事务</b>，然后显式抛异常。<b>抛异常之前 logRepository 已成功保存了一条消息</b> → 断言仓库里有 1 条且内容是 "check from not supported 1"</td></tr>
+<tr><td><code>supports()</code></td><td>直接调 <code>addSeparateLogsSupports()</code>（无事务），显式抛异常前也成功保存了 1 条消息</td></tr>
+<tr><td><code>mandatory()</code></td><td>无事务时调 <code>checkNameDuplicate()</code> → 抛 <code>IllegalTransactionStateException</code>，消息为 <i>"No existing transaction found for transaction marked with propagation 'mandatory'"</i></td></tr>
+<tr><td><code>never()</code></td><td>加完 Item 后<b>直接</b>调 <code>logRepository.showLogs()</code> 是安全的（无事务）；但通过<b>事务性的</b> <code>itemRepository.showLogs()</code> 去调它就会抛 <code>IllegalTransactionStateException</code>：<i>"Existing transaction found for transaction marked with propagation 'never'"</i></td></tr>
+<tr><td><b><code>requiresNew()</code></b><br><span class="badge new">重点</span></td><td>加了 3 个 Item 后再加一个重名的 → 抛 <code>DuplicateItemNameException</code>，<b>外层事务回滚</b>。<b>但那条日志消息仍然被持久化了，因为它是在<u>独立事务</u>中添加的。</b>结果：<b>4 条 Log（每次插入尝试一条，无论成败），但只有 3 个 Item</b></td></tr>
+<tr><td><code>noRollback()</code></td><td>用 <code>addItemNoRollback()</code>（<code>noRollbackFor = DuplicateItemNameException.class</code>）时，<b>因为事务没有回滚</b>，异常之后日志消息同样被保留。结果同样是 <b>4 条 Log、3 个 Item</b></td></tr>
+</tbody></table></div>
+
+<div class="summary" id="s5">
+<h3>本章小结</h3>
+<ul>
+<li>Hibernate <b>依赖数据库的并发控制机制</b>，但借助<b>自动版本控制</b>与<b>持久化上下文缓存</b>，在事务中提供了<b>更好的隔离保证</b>。</li>
+<li><b>ACID</b>：一致性是数据库的职责，<b>正确性是应用的职责</b>。四类隔离问题：丢失更新、脏读、不可重复读、幻读。<b>本书建议：<code>READ_COMMITTED</code> + 实体版本控制。</b></li>
+<li><b>乐观并发控制</b>（<code>@Version</code>）把「最后提交者获胜」变成「<b>首次提交者获胜</b>」；<code>OPTIMISTIC</code> 做手工版本检查、<code>OPTIMISTIC_FORCE_INCREMENT</code> 强制递增以检测「不可见的冲突」。</li>
+<li><b>显式悲观锁</b>（<code>PESSIMISTIC_READ</code>/<code>WRITE</code>）在数据库层加锁，<b>只持有一个数据库事务</b>；<b>只锁实体自身的行</b>，关联实体并未被锁。注意 <code>LockTimeoutException</code> 与 <code>PessimisticLockException</code> 的致命性差异。</li>
+<li><b>死锁</b>可用 serializable 模式、提前取排他锁，或务实的 <code>hibernate.order_updates=true</code> 缓解。</li>
+<li>可以在事务之外用<b>自动提交模式与非同步持久化上下文</b>工作 —— 它的真正价值是<b>把修改排队、与事务解耦</b>；Hibernate 的 <code>FlushMode.MANUAL</code> 是更方便的替代品。</li>
+<li>用 Spring 与 Spring Data 管理事务：<b>7 种传播行为</b>、回滚规则、<code>@Transactional</code> 的四个属性，以及 <code>TransactionTemplate</code> 的程序化方式。<b><code>REQUIRES_NEW</code> 的经典用途就是「无论主事务成败都要留下日志」。</b></li>
+</ul>
+</div>
+
+<div class="pager">
+  <a href="ch10.html">← 第 10 章　管理数据</a>
+  <a href="ch12.html">第 12 章　抓取计划、策略与剖面 →</a>
+</div>
+</main>
+</div>
+</body>
+</html>

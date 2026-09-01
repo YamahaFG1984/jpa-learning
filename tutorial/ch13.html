@@ -1,0 +1,675 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>第 13 章 · 过滤数据</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="topbar"><div class="topbar-inner">
+  <a class="brand" href="index.html">Java Persistence 讲义</a>
+  <span class="spacer"></span>
+  <a href="ch12.html">← 上一章</a>
+  <a href="index.html">目录</a>
+  <a href="ch14.html">下一章 →</a>
+</div></div>
+
+<div class="wrap">
+<nav class="toc">
+  <h4>本章目录</h4>
+  <a href="#s0">本章总览</a>
+  <a href="#s1">13.1 级联状态转换</a>
+  <a class="sub" href="#s11">可用的级联选项</a>
+  <a class="sub" href="#s12">传递性游离与合并</a>
+  <a class="sub" href="#s13">级联刷新</a>
+  <a class="sub" href="#s14">级联复制</a>
+  <a href="#s2">13.2 监听与拦截事件</a>
+  <a class="sub" href="#s21">JPA 事件监听器与回调</a>
+  <a class="sub" href="#s22">Hibernate 拦截器</a>
+  <a class="sub" href="#s23">核心事件系统</a>
+  <a href="#s3">13.3 Hibernate Envers</a>
+  <a href="#s4">13.4 动态数据过滤器</a>
+  <a href="#s5">本章小结</a>
+</nav>
+
+<main>
+<div class="hero">
+  <div class="eyebrow">Part 3 · 事务性数据处理</div>
+  <h1>第 13 章　过滤数据</h1>
+  <p>本章分析<b>数据穿过 Hibernate 引擎时</b>的各种过滤策略。<b>加载时</b>可以用过滤器透明地限制应用能看到的数据；<b>存储时</b>可以监听事件并执行附带流程 —— 例如写审计日志、给记录打上租户标识。</p>
+</div>
+
+<h2 id="s0"><span class="num">§</span>本章总览：四种「介入」数据流的手段</h2>
+
+<figure><div class="fig-box">
+<svg viewBox="0 0 860 330" xmlns="http://www.w3.org/2000/svg" font-family="Inter,system-ui,sans-serif">
+  <defs><marker id="f13" markerWidth="9" markerHeight="9" refX="8" refY="4.5" orient="auto"><path d="M0 0 L9 4.5 L0 9 z" fill="var(--accent)"/></marker></defs>
+  <rect x="20" y="18" width="200" height="140" rx="8" fill="var(--java-soft)" stroke="var(--java)" stroke-width="1.6"/>
+  <text x="120" y="42" text-anchor="middle" font-size="13" font-weight="700" fill="var(--java)">① 级联状态转换</text>
+  <text x="120" y="60" text-anchor="middle" font-size="11" fill="var(--ink-soft)">§13.1　JPA 标准</text>
+  <text x="36" y="86" font-size="11.5" fill="var(--ink)">对某实体的状态变更，</text>
+  <text x="36" y="102" font-size="11.5" fill="var(--ink)"><tspan font-weight="700">传递</tspan>到关联实体上</text>
+  <text x="36" y="126" font-size="11" fill="var(--ink-soft)">存 User → 连带存所有</text>
+  <text x="36" y="140" font-size="11" fill="var(--ink-soft)">BillingDetails；删 Item →</text>
+  <text x="36" y="152" font-size="11" fill="var(--ink-soft)">连带删所有 Bid</text>
+
+  <rect x="232" y="18" width="200" height="140" rx="8" fill="var(--sql-soft)" stroke="var(--sql)" stroke-width="1.6"/>
+  <text x="332" y="42" text-anchor="middle" font-size="13" font-weight="700" fill="var(--sql)">② 事件监听与拦截</text>
+  <text x="332" y="60" text-anchor="middle" font-size="11" fill="var(--ink-soft)">§13.2　标准 + Hibernate 私有</text>
+  <text x="248" y="86" font-size="11.5" fill="var(--ink)">实体状态变化时（加载后、</text>
+  <text x="248" y="102" font-size="11.5" fill="var(--ink)">即将删除前…）调用你的方法</text>
+  <text x="248" y="126" font-size="11" fill="var(--ink-soft)">让你在状态转换发生时</text>
+  <text x="248" y="140" font-size="11" fill="var(--ink-soft)"><tspan font-weight="700">执行自定义副作用</tspan></text>
+
+  <rect x="444" y="18" width="200" height="140" rx="8" fill="var(--accent-soft)" stroke="var(--accent)" stroke-width="1.6"/>
+  <text x="544" y="42" text-anchor="middle" font-size="13" font-weight="700" fill="var(--accent)">③ Hibernate Envers</text>
+  <text x="544" y="60" text-anchor="middle" font-size="11" fill="var(--ink-soft)">§13.3　子项目</text>
+  <text x="460" y="86" font-size="11.5" fill="var(--ink)">最常见的副作用是<tspan font-weight="700">写审计日志</tspan>：</text>
+  <text x="460" y="102" font-size="11.5" fill="var(--ink)">改了什么、何时改的、谁改的</text>
+  <text x="460" y="126" font-size="11" fill="var(--ink-soft)">更复杂的需求要<tspan font-weight="700">存多版本数据</tspan></text>
+  <text x="460" y="140" font-size="11" fill="var(--ink-soft)">和<tspan font-weight="700">时点视图</tspan>：「加载上周的数据」</text>
+
+  <rect x="656" y="18" width="184" height="140" rx="8" fill="var(--warn-soft)" stroke="var(--warn)" stroke-width="1.6"/>
+  <text x="748" y="42" text-anchor="middle" font-size="13" font-weight="700" fill="var(--warn)">④ 动态数据过滤器</text>
+  <text x="748" y="60" text-anchor="middle" font-size="11" fill="var(--ink-soft)">§13.4　Hibernate 私有</text>
+  <text x="670" y="86" font-size="11.5" fill="var(--ink)">给 Hibernate 生成的 SELECT</text>
+  <text x="670" y="102" font-size="11.5" fill="var(--ink)"><tspan font-weight="700">自动追加自定义限制条件</tspan></text>
+  <text x="670" y="126" font-size="11" fill="var(--ink-soft)">在应用层定义一个</text>
+  <text x="670" y="140" font-size="11" fill="var(--ink-soft)"><tspan font-weight="700">受限的数据视图</tspan>（按销售大区、</text>
+  <text x="670" y="152" font-size="11" fill="var(--ink-soft)">或其他授权条件）</text>
+
+  <rect x="20" y="180" width="820" height="52" rx="8" fill="var(--panel)" stroke="var(--line-strong)"/>
+  <text x="430" y="202" text-anchor="middle" font-size="12.5" font-weight="700" fill="var(--ink)">「事件监听与拦截」这一类里，本章给出<tspan font-weight="700">三套逐层深入的 API</tspan></text>
+  <text x="430" y="222" text-anchor="middle" font-size="11.5" fill="var(--ink)">JPA 标准生命周期回调与实体监听器　→　私有的 <tspan font-family="monospace">org.hibernate.Interceptor</tspan>　→　核心引擎的 <tspan font-family="monospace">org.hibernate.event</tspan> SPI</text>
+
+  <rect x="20" y="248" width="820" height="66" rx="8" fill="var(--sql-soft)" stroke="var(--sql)" stroke-width="1.6"/>
+  <text x="430" y="270" text-anchor="middle" font-size="12.5" font-weight="700" fill="var(--sql)">选择建议</text>
+  <text x="38" y="292" font-size="11.5" fill="var(--ink)">• <tspan font-weight="700">大多数时候 <tspan font-family="monospace">org.hibernate.Interceptor</tspan> 就足够灵活了</tspan> —— 比 JPA 回调能拿到多得多的上下文信息</text>
+  <text x="38" y="310" font-size="11.5" fill="var(--ink)">• <tspan font-weight="700">很少需要</tspan>用自己的功能去扩展 Hibernate 核心事件系统；但「能以模块化方式替换核心引擎的任何一块」这件事本身很有用</text>
+</svg>
+</div><figcaption>图 13-A　四种过滤/介入手段及其定位。运行示例前先执行 <code>Ch13/Ch13.sql</code></figcaption></figure>
+
+<h2 id="s1"><span class="num">13.1</span>级联状态转换</h2>
+
+<div class="note"><b>默认不启用</b><p>实体实例状态变化时，<b>关联实体实例也可能被纳入这次状态转换</b>。<b>这种级联默认是不启用的</b> —— 每个实体实例有独立的生命周期。但对某些实体间关联，我们希望实现<b>细粒度的生命周期依赖</b>。§8.3 已经讲过 <code>PERSIST</code>、<code>REMOVE</code>、<code>orphanRemoval</code> 与数据库级 <code>ON DELETE</code>；本节讲<b>其余那些较少用到</b>的选项。</p></div>
+
+<h3 id="s11">13.1.1　可用的级联选项</h3>
+<div class="tablewrap"><table>
+<thead><tr><th style="width:230px">选项</th><th>说明（注意每一项都<b>对应一个 EntityManager 或 Session 操作</b>）</th></tr></thead>
+<tbody>
+<tr><td><code>CascadeType.PERSIST</code></td><td>用 <code>persist()</code> 存储实体实例时，<b>刷新时</b>任何关联实体实例也被持久化</td></tr>
+<tr><td><code>CascadeType.REMOVE</code></td><td>用 <code>remove()</code> 删除实体实例时，<b>刷新时</b>任何关联实体实例也被删除</td></tr>
+<tr><td><code>CascadeType.DETACH</code></td><td>用 <code>detach()</code> 从上下文逐出实体实例时，任何关联实体实例也被游离</td></tr>
+<tr><td><code>CascadeType.MERGE</code></td><td>用 <code>merge()</code> 把瞬时或游离实例合并进上下文时，任何关联的瞬时/游离实例也被合并</td></tr>
+<tr><td><code>CascadeType.REFRESH</code></td><td>用 <code>refresh()</code> 刷新持久实例时，任何关联的持久实体实例也被刷新</td></tr>
+<tr><td><code>CascadeType.REPLICATE</code></td><td>用 <code>Session#replicate()</code> 把游离实例复制进数据库时，任何关联的游离实例也被复制</td></tr>
+<tr><td><code>CascadeType.ALL</code></td><td>为该映射关联启用<b>全部</b>级联选项的简写</td></tr>
+</tbody></table></div>
+
+<div class="tip"><p><code>org.hibernate.annotations.CascadeType</code> 枚举里还定义了更多选项，<b>但如今唯一有意思的只有 <code>REPLICATE</code></b> 及 <code>Session#replicate()</code> —— 其他 <code>Session</code> 操作在 <code>EntityManager</code> API 上都有标准化的等价物或替代品，<b>可以忽略</b>。</p></div>
+
+<h3 id="s12">13.1.2　传递性游离与合并</h3>
+
+<pre><code><span class="ann">@Entity</span>
+<span class="kw">public class</span> Item {
+    <span class="ann">@OneToMany</span>(mappedBy = <span class="str">"item"</span>,
+               cascade = {CascadeType.<span class="hl">DETACH</span>, CascadeType.<span class="hl">MERGE</span>})
+    <span class="kw">private</span> Set&lt;Bid&gt; bids = <span class="kw">new</span> HashSet&lt;&gt;();
+}
+
+<span class="cmt">// ① 加载并初始化集合，然后级联游离</span>
+Item item = em.find(Item.class, ITEM_ID);
+assertEquals(2, item.getBids().size());   <span class="cmt">// 访问 getBids() 触发懒初始化</span>
+em.detach(item);   <span class="cmt">// 级联：Item 及集合中<b>所有已加载的</b> bid 都被逐出上下文
+                   // （<b>没加载的 bid 不会被游离</b>；当然也可以直接 close() 游离一切）</span>
+
+<span class="cmt">// ② 游离态下修改并新增</span>
+item.setName(<span class="str">"New Name"</span>);
+Bid bid = <span class="kw">new</span> Bid(<span class="kw">new</span> BigDecimal(<span class="str">"101.00"</span>), item);
+item.addBid(bid);
+
+<span class="cmt">// ③ 在新上下文中合并</span>
+Item mergedItem = em.merge(item);
+<span class="cmt">// select i.*, b.* from ITEM i left outer join BID b on i.ID = b.ITEM_ID where i.ID = ?</span>
+<span class="kw">for</span> (Bid b : mergedItem.getBids()) assertNotNull(b.getId());  <span class="cmt">// 新 Bid 已被赋予标识符</span>
+em.flush();
+<span class="cmt">// update ITEM set NAME = ? where ID = ?
+// insert into BID values (?, ?, ?, …)</span></code></pre>
+
+<div class="pit"><b>游离态下务必重写 <code>equals()</code> / <code>hashCode()</code></b>
+<p>因为在处理游离实体状态与集合（§10.3），必须格外注意标识与相等性：</p>
+<pre style="margin:8px 0 0"><code><span class="ann">@Entity</span>
+<span class="kw">public class</span> Bid {
+    <span class="ann">@Override</span> <span class="kw">public boolean</span> equals(Object o) {
+        <span class="kw">if</span> (<span class="kw">this</span> == o) <span class="kw">return true</span>;
+        <span class="kw">if</span> (o <span class="kw">instanceof</span> Bid bid)
+            <span class="kw">return</span> Objects.equals(id, bid.id)
+                &amp;&amp; Objects.equals(amount, bid.amount)
+                &amp;&amp; Objects.equals(item, bid.item);
+        <span class="kw">return false</span>;
+    }
+    <span class="ann">@Override</span> <span class="kw">public int</span> hashCode() { <span class="kw">return</span> Objects.hash(id, amount, item); }
+}
+<span class="cmt">// 两个 Bid 相等：id 相同、金额相同、且关联同一个 Item</span></code></pre></div>
+
+<div class="warn"><b>合并时会<u>急切</u>抓取关联 —— 一个容易忽视的行为</b>
+<p><b>只要关联启用了 <code>CascadeType.MERGE</code>，Hibernate 在合并时<u>总是</u>用 JOIN 急切加载实体关联。</b></p>
+<p style="margin-top:6px">对上面这种「bids 已初始化、已游离、已修改」的场景，这是聪明且必要的最优做法。<b>但如果你合并的 Item 带着<u>未初始化</u>的 bids 集合或 seller 代理，Hibernate 同样会用 JOIN 把它们抓过来</b> —— merge 会在它返回的受管 Item 上把这些关联初始化掉。</p>
+<p style="margin-top:6px"><b><code>CascadeType.MERGE</code> 会让 Hibernate 忽略并实际覆盖任何 <code>FetchType.LAZY</code> 映射</b>（JPA 规范允许这样做）。</p></div>
+
+<div class="tip"><b>merge 的内部流程</b><p>先检查持久化上下文中是否已有该标识符值的实体；没有就<b>从数据库加载</b>。<b>Hibernate 足够聪明，知道合并时也会需要被引用的实体，于是在<u>同一条 SQL</u> 里把它们一起取出来。</b>刷新上下文时，它检测合并过程中哪些属性发生了变化。<b>「级联合并 + 集合」是个强大特性 —— 想想没有 Hibernate 时要写多少代码才能实现同样的功能。」</b></p></div>
+
+<h3 id="s13">13.1.3　级联刷新</h3>
+
+<pre><code><span class="ann">@Entity</span> <span class="ann">@Table</span>(name = <span class="str">"USERS"</span>)
+<span class="kw">public class</span> User {
+    <span class="ann">@OneToMany</span>(cascade = {CascadeType.PERSIST, CascadeType.<span class="hl">REFRESH</span>})
+    <span class="ann">@JoinColumn</span>(name = <span class="str">"USER_ID"</span>, nullable = <span class="kw">false</span>)
+    <span class="kw">private</span> Set&lt;BillingDetails&gt; billingDetails = <span class="kw">new</span> HashSet&lt;&gt;();
+}
+
+<span class="cmt">// PERSIST：把 BillingDetails 加进一个已持久 User 的集合，它就变持久 —— 简化了存储
+// REFRESH：重新加载 User 状态时，Hibernate 也刷新链接到它的每个 BillingDetails</span>
+User user = em.find(User.class, USER_ID);
+assertEquals(2, user.getBillingDetails().size());   <span class="cmt">// 遍历或 size() 触发懒集合初始化</span>
+<span class="cmt">// …别人在数据库里改了账单信息…</span>
+em.refresh(user);
+<span class="cmt">// select * from CREDITCARD  join BILLINGDETAILS where ID = ?      ← 每个实例一条
+// select * from BANKACCOUNT join BILLINGDETAILS where ID = ?
+// select * from USERS left outer join BILLINGDETAILS
+//                     left outer join CREDITCARD
+//                     left outer join BANKACCOUNT where ID = ?    ← 再整体重载集合以发现新增的</span></code></pre>
+
+<div class="warn"><b>这是 Hibernate 「不够聪明」的一处</b><p>它先为上下文中被集合引用的<b>每个</b> <code>BillingDetails</code> 实例执行一条 SQL SELECT，<b>然后又把整个集合重新加载一遍</b>以找出新增的 <code>BillingDetails</code>。<b>Hibernate 显然可以用一条 SELECT 做完。</b>另外：如果这些实例在数据库中已不存在，会抛 <code>EntityNotFoundException</code>。</p></div>
+
+<div class="pit"><b>要复现这个例子必须注意隔离级别</b>
+<p>我们想在<b>另一个事务修改了记录之后</b>刷新它。<b>MySQL 的默认事务隔离级别是 <code>REPEATABLE_READ</code>，而大多数其他数据库是 <code>READ_COMMITTED</code>。</b>第一个事务要能看到第二个事务提交的改动，就必须在 JDBC 驱动上改隔离级别：</p>
+<pre style="margin:8px 0 0"><code>&lt;property name=<span class="str">"javax.persistence.jdbc.url"</span>
+  value=<span class="str">"jdbc:mysql://localhost:3306/CH13_CASCADE?<span class="hl">sessionVariables=transaction_isolation='READ-COMMITTED'</span>&amp;amp;serverTimezone=UTC"</span>/&gt;</code></pre>
+<p style="margin-top:6px"><b>因为改动只发生在配置层面，只要 <code>persistence.xml</code> 配置正确，代码在不同数据库上都能继续正常工作。</b></p></div>
+
+<h3 id="s14">13.1.4　级联复制</h3>
+<pre><code><span class="ann">@Entity</span>
+<span class="kw">public class</span> Item {
+    <span class="ann">@ManyToOne</span>(fetch = FetchType.LAZY)
+    <span class="ann">@JoinColumn</span>(name = <span class="str">"SELLER_ID"</span>, nullable = <span class="kw">false</span>)
+    <span class="ann">@org.hibernate.annotations.Cascade</span>(
+        org.hibernate.annotations.CascadeType.<span class="hl">REPLICATE</span>)   <span class="cmt">// Hibernate 注解</span>
+    <span class="kw">private</span> User seller;
+}
+
+<span class="cmt">// ① 从源数据库加载 Item 及其 seller，然后关闭上下文 → 二者都变游离</span>
+Item item = em.find(Item.class, ITEM_ID);
+assertNotNull(item.getSeller().getUsername());   <span class="cmt">// 懒初始化 seller</span>
+
+<span class="cmt">// ② 连到<b>另一个</b>数据库，写入游离数据</span>
+otherDatabase.unwrap(Session.class).replicate(item, ReplicationMode.OVERWRITE);
+<span class="cmt">// select ID from ITEM  where ID = ?     ← 先查目标库里是否已存在
+// select ID from USERS where ID = ?</span>
+otherDatabase.getTransaction().commit();
+<span class="cmt">// update ITEM  set NAME = ?, SELLER_ID = ?, … where ID = ?    ← 已存在 → UPDATE 覆盖
+// update USERS set USERNAME = ?, …            where ID = ?
+// （目标库若没有这些行，则执行两条 INSERT）</span></code></pre>
+
+<h2 id="s2"><span class="num">13.2</span>监听与拦截事件</h2>
+
+<h3 id="s21">13.2.1　JPA 事件监听器与回调方法</h3>
+
+<div class="cols">
+<div>
+<div class="filename">独立的实体监听器类</div>
+<pre><code><span class="kw">public class</span> PersistEntityListener {
+    <span class="ann">@PostPersist</span>
+    <span class="kw">public void</span> logMessage(Object entityInstance) {   <span class="cmt">// ← <b>有一个参数</b></span>
+        User currentUser = CurrentUser.INSTANCE.get();
+        Log log = Log.INSTANCE;
+        log.save(<span class="str">"Entity instance persisted by "</span>
+            + currentUser.getUsername() + <span class="str">": "</span> + entityInstance);
+    }
+}
+
+<span class="ann">@Entity</span>
+<span class="ann">@EntityListeners</span>(PersistEntityListener.class)   <span class="cmt">// 可传数组；<b>多个监听器按声明顺序调用</b></span>
+<span class="kw">public class</span> Item { … }</code></pre>
+</div>
+<div>
+<div class="filename">或直接写在实体类上</div>
+<pre><code><span class="ann">@Entity</span> <span class="ann">@Table</span>(name = <span class="str">"USERS"</span>)
+<span class="kw">public class</span> User {
+    <span class="ann">@PostPersist</span>
+    <span class="kw">public void</span> logMessage() {            <span class="cmt">// ← <b>没有参数</b>，当前实体就是 this</span>
+        …log.save(<span class="str">"…"</span> + <span class="kw">this</span>);
+    }
+}</code></pre>
+<div class="keyhint" style="margin-top:12px"><span class="k">上下文信息怎么拿</span><span><b>实体监听器是无状态的</b>，由 JPA 引擎自动创建和销毁 —— <b>因此需要更多上下文信息时会比较困难</b>。书中示例用的是<b>线程局部变量 + 单例</b>这种原始方案（<code>CurrentUser</code>、<code>Log</code>）。</span></div>
+</div>
+</div>
+
+<div class="tablewrap"><table>
+<thead><tr><th style="width:210px">回调注解</th><th>触发时机</th></tr></thead>
+<tbody>
+<tr><td><code>@PostLoad</code></td><td>实体实例<b>被加载进持久化上下文之后</b> —— 无论是按标识符查找、通过导航与代理/集合初始化，还是通过查询。<b>刷新一个已持久实例之后也会调用</b></td></tr>
+<tr><td><code>@PrePersist</code></td><td>对实体实例调 <code>persist()</code> 时<b>立即</b>调用。<b><code>merge()</code> 发现实体是瞬时的、把瞬时状态拷进持久实例之后也会调用</b>。启用 <code>CascadeType.PERSIST</code> 时，关联实体也会被调用</td></tr>
+<tr><td><code>@PostPersist</code></td><td>使实体持久化的数据库操作<b>执行完并已分配标识符值之后</b>。这可能发生在 <code>persist()</code>/<code>merge()</code> 时，也可能<b>晚到上下文刷新时（若标识符生成器不是「预插入」型，§5.2.5）</b></td></tr>
+<tr><td><code>@PreUpdate</code> / <code>@PostUpdate</code></td><td>持久化上下文与数据库同步（即刷新）<b>之前与之后</b>。<b>只有当实体状态确实需要同步时才触发</b>（例如它被认为变脏了）</td></tr>
+<tr><td><code>@PreRemove</code> / <code>@PostRemove</code></td><td>调 <code>remove()</code> 或实例被级联删除时触发；以及上下文刷新、数据库记录删除之后</td></tr>
+</tbody></table></div>
+
+<div class="pit"><b>回调方法的六条约束</b>
+<ol style="margin-bottom:0">
+<li><b>实体监听器类必须有隐式或显式的 public 无参构造器</b>；不必实现任何特殊接口。</li>
+<li>监听器类中的回调方法有<b>单个 <code>Object</code> 参数</b>；只为特定实体类型启用时，可以把参数声明为该具体类型。<b>实体类自身的回调方法没有参数。</b></li>
+<li>访问修饰符任意（<b>不必 public</b>），但<b>不能是 static 或 final</b>，且<b>不返回任何值</b>。</li>
+<li>回调方法抛出未受检的 <code>RuntimeException</code> → Hibernate <b>中止操作并把当前事务标记为回滚</b>；抛出受检 <code>Exception</code> → Hibernate 把它<b>包装成 <code>RuntimeException</code></b> 处理。</li>
+<li><b>同一个类里每个回调注解只能用一次</b>（不能有两个 <code>@PostPersist</code>）；但可以在<b>多个监听器类中、或监听器 + 实体类中</b>同时拦截同一个事件。</li>
+<li>可以在<b>实体超类</b>上加回调方法作用于整个层次。用 <code>@ExcludeSuperclassListeners</code> 为某个子类禁用超类回调；用 <code>@ExcludeDefaultListeners</code> 为某个实体禁用默认监听器。</li>
+</ol></div>
+
+<h3 id="s22">13.2.2　实现 Hibernate 拦截器（写审计日志）</h3>
+
+<div class="note"><b>需求</b><p>把数据修改的审计日志写进另一张数据库表：记录 <b>用户、事件的日期时间、发生了什么类型的事件、被改动 Item 的标识符</b>。「审计日志常常用<b>数据库触发器</b>处理。<b>但有时让应用来负责更好 —— 尤其是需要在不同数据库之间保持可移植性时。</b>」</p></div>
+
+<figure><div class="fig-box">
+<svg viewBox="0 0 840 330" xmlns="http://www.w3.org/2000/svg" font-family="Inter,system-ui,sans-serif">
+  <defs><marker id="i13" markerWidth="9" markerHeight="9" refX="8" refY="4.5" orient="auto"><path d="M0 0 L9 4.5 L0 9 z" fill="var(--accent)"/></marker></defs>
+  <rect x="20" y="16" width="250" height="120" rx="8" fill="var(--java-soft)" stroke="var(--java)" stroke-width="1.6"/>
+  <text x="145" y="38" text-anchor="middle" font-size="12.5" font-weight="700" fill="var(--java)">① 标记接口</text>
+  <g font-family="monospace" font-size="11" fill="var(--ink)">
+    <text x="36" y="60">public interface Auditable {</text>
+    <text x="52" y="76">Long getId();</text>
+    <text x="36" y="92">}</text>
+    <text x="36" y="116" fill="var(--accent)">@Entity public class Item</text>
+    <text x="52" y="130" fill="var(--accent)">    implements Auditable { … }</text>
+  </g>
+
+  <rect x="282" y="16" width="250" height="120" rx="8" fill="var(--sql-soft)" stroke="var(--sql)" stroke-width="1.6"/>
+  <text x="407" y="38" text-anchor="middle" font-size="12.5" font-weight="700" fill="var(--sql)">② 审计日志实体</text>
+  <g font-family="monospace" font-size="10.5" fill="var(--ink)">
+    <text x="298" y="58">@Entity class AuditLogRecord {</text>
+    <text x="310" y="72">  @Id @GeneratedValue Long id;</text>
+    <text x="310" y="86">  String message;  Long entityId;</text>
+    <text x="310" y="100">  Class&lt;? extends Auditable&gt; entityClass;</text>
+    <text x="310" y="114">  Long userId;</text>
+    <text x="310" y="128">  LocalDateTime createdOn = now(); }</text>
+  </g>
+
+  <rect x="544" y="16" width="296" height="120" rx="8" fill="var(--accent-soft)" stroke="var(--accent)" stroke-width="1.8"/>
+  <text x="692" y="38" text-anchor="middle" font-size="12.5" font-weight="700" fill="var(--accent)">③ 拦截器</text>
+  <text x="560" y="60" font-size="11.5" fill="var(--ink)">继承 <tspan font-family="monospace">EmptyInterceptor</tspan>，只重写需要的方法</text>
+  <text x="560" y="82" font-family="monospace" font-size="11" fill="var(--ink)">onSave(...)       → 收集进 inserts</text>
+  <text x="560" y="98" font-family="monospace" font-size="11" fill="var(--ink)">onFlushDirty(...) → 收集进 updates</text>
+  <text x="560" y="120" font-family="monospace" font-size="11" fill="var(--accent)">postFlush(...)    → <tspan font-weight="700">真正写审计轨迹</tspan></text>
+
+  <rect x="20" y="152" width="400" height="82" rx="8" fill="var(--warn-soft)" stroke="var(--warn)" stroke-width="1.6"/>
+  <text x="220" y="174" text-anchor="middle" font-size="12.5" font-weight="700" fill="var(--warn)">为什么在 postFlush 里写？</text>
+  <text x="36" y="196" font-size="11.5" fill="var(--ink)"><tspan font-family="monospace">onSave()</tspan> 时给定实体实例<tspan font-weight="700">可能还没有标识符值</tspan>。</text>
+  <text x="36" y="214" font-size="11.5" fill="var(--ink)"><tspan font-weight="700">Hibernate 保证在刷新期间设置好实体标识符</tspan>，</text>
+  <text x="36" y="230" font-size="11.5" fill="var(--ink)">所以真正的审计轨迹写在 <tspan font-family="monospace">postFlush()</tspan> 回调里 —— 它在<tspan font-weight="700">刷新完成之后</tspan>被调用</text>
+
+  <rect x="432" y="152" width="408" height="82" rx="8" fill="var(--danger-soft)" stroke="var(--danger)" stroke-width="1.6"/>
+  <text x="636" y="174" text-anchor="middle" font-size="12.5" font-weight="700" fill="var(--danger)">为什么要开一个临时 Session？</text>
+  <text x="448" y="196" font-size="11.5" fill="var(--ink)"><tspan font-weight="700">无法访问正在执行该拦截器的原始持久化上下文</tspan> ——</text>
+  <text x="448" y="212" font-size="11.5" fill="var(--ink)"><tspan font-weight="700">拦截器调用期间 Session 处于脆弱状态。</tspan></text>
+  <text x="448" y="230" font-size="11.5" fill="var(--sql)">用 <tspan font-family="monospace">sessionWithOptions().connection().openSession()</tspan> 新建一个 —— <tspan font-weight="700">它与原 Session 共用同一个事务和数据库连接</tspan></text>
+
+  <rect x="20" y="250" width="820" height="66" rx="8" fill="var(--panel)" stroke="var(--line-strong)"/>
+  <text x="430" y="272" text-anchor="middle" font-size="12.5" font-weight="700" fill="var(--ink)">启用方式与线程安全警告</text>
+  <text x="38" y="292" font-family="monospace" font-size="11" fill="var(--ink)">Session session = sessionFactory.withOptions().interceptor(new AuditLogInterceptor()).openSession();</text>
+  <text x="38" y="310" font-size="11.5" fill="var(--danger)">想给<tspan font-weight="700">所有</tspan> EntityManager 默认启用？在 persistence.xml 设 <tspan font-family="monospace">hibernate.ejb.interceptor</tspan>。<tspan font-weight="700">但与 session 作用域的拦截器不同，Hibernate 会<u>共享</u>这个默认拦截器，因此它必须线程安全！示例中的 AuditLogInterceptor 并不是线程安全的。</tspan></text>
+</svg>
+</div><figcaption>图 13-B　用 Hibernate 拦截器实现审计日志的三个组成部分</figcaption></figure>
+
+<pre><code><span class="kw">public class</span> AuditLogInterceptor <span class="kw">extends</span> EmptyInterceptor {
+    <span class="kw">private</span> Session currentSession;
+    <span class="kw">private</span> Long currentUserId;
+    <span class="kw">private</span> Set&lt;Auditable&gt; inserts = <span class="kw">new</span> HashSet&lt;&gt;();
+    <span class="kw">private</span> Set&lt;Auditable&gt; updates = <span class="kw">new</span> HashSet&lt;&gt;();
+
+    <span class="kw">public boolean</span> onSave(Object entity, Serializable id, Object[] state,
+                           String[] propertyNames, Type[] types) {   <span class="cmt">// 实体变持久时调用</span>
+        <span class="kw">if</span> (entity <span class="kw">instanceof</span> Auditable aud) inserts.add(aud);
+        <span class="kw">return false</span>;                                             <span class="cmt">// state 未被修改</span>
+    }
+
+    <span class="kw">public boolean</span> onFlushDirty(Object entity, Serializable id, Object[] currentState,
+            Object[] previousState, String[] propertyNames, Type[] types) {  <span class="cmt">// 刷新时发现变脏</span>
+        <span class="kw">if</span> (entity <span class="kw">instanceof</span> Auditable aud) updates.add(aud);
+        <span class="kw">return false</span>;                                             <span class="cmt">// currentState 未被修改</span>
+    }
+
+    <span class="kw">public void</span> postFlush(Iterator iterator) {
+        Session tempSession = currentSession.sessionWithOptions()
+                                 .connection().openSession();         <span class="cmt">// 共用事务与连接的临时 Session</span>
+        <span class="kw">try</span> {
+            <span class="kw">for</span> (Auditable e : inserts)
+                tempSession.persist(<span class="kw">new</span> AuditLogRecord(<span class="str">"insert"</span>, e, currentUserId));
+            <span class="kw">for</span> (Auditable e : updates)
+                tempSession.persist(<span class="kw">new</span> AuditLogRecord(<span class="str">"update"</span>, e, currentUserId));
+            tempSession.flush();
+        } <span class="kw">finally</span> {
+            tempSession.close();  inserts.clear();  updates.clear();   <span class="cmt">// 独立于原 Session 刷新并关闭</span>
+        }
+    }
+}
+
+<span class="cmt">// 还要给拦截器配上当前 Session 和登录用户 —— 需要一些到 Hibernate API 的类型转换</span>
+AuditLogInterceptor interceptor =
+    (AuditLogInterceptor) ((SessionImplementor) session).getInterceptor();
+interceptor.setCurrentSession(session);
+interceptor.setCurrentUserId(CURRENT_USER_ID);</code></pre>
+
+<h3 id="s23">13.2.3　核心事件系统</h3>
+
+<div class="tip"><b>Hibernate 核心引擎本身就建立在「事件 + 监听器」模型上</b><p>需要保存实体实例时，它<b>触发一个事件</b>；监听该类事件的人可以捕获它并负责保存数据。<b>因此 Hibernate 把它的全部核心功能实现为一组默认监听器</b>，处理所有 Hibernate 事件。</p>
+<p style="margin-top:6px"><b>Hibernate 的设计是开放的</b>：你可以写并启用自己的监听器 —— <b>替换</b>已有的默认监听器，或<b>扩展</b>它们并执行副作用/额外流程。<b>替换事件监听器很罕见</b>，那意味着你自己的实现要接管 Hibernate 的一块核心功能。</p>
+<p style="margin-top:6px"><b>本质上 <code>Session</code>（及其更窄的表亲 <code>EntityManager</code>）的所有方法都对应一个事件</b>：<code>find()</code> 和 <code>load()</code> 触发 <code>LoadEvent</code>，默认由 <code>DefaultLoadEventListener</code> 处理。</p></div>
+
+<div class="cols">
+<div>
+<pre><code><span class="kw">public class</span> SecurityLoadListener <span class="kw">extends</span> DefaultLoadEventListener {
+    <span class="kw">public void</span> onLoad(LoadEvent event, LoadType loadType) {
+        <span class="kw">boolean</span> authorized = MySecurity.isAuthorized(
+                event.getEntityClassName(), event.getEntityId());
+        <span class="kw">if</span> (!authorized)
+            <span class="kw">throw new</span> MySecurityException(<span class="str">"Unauthorized access"</span>);
+        <span class="kw">super</span>.onLoad(event, loadType);
+    }
+}</code></pre>
+</div>
+<div>
+<pre><code><span class="cmt">// persistence.xml 中按事件类型启用</span>
+&lt;property name=<span class="str">"hibernate.ejb.event.<span class="hl">load</span>"</span>
+   value=<span class="str">"com.manning…filtering.SecurityLoadListener"</span>/&gt;</code></pre>
+<p style="font-size:14px">属性名总是以 <code>hibernate.ejb.event</code> 开头，后跟要监听的<b>事件类型</b>（全部类型见 <code>org.hibernate.event.spi.EventType</code>）。<b>属性值可以是逗号分隔的监听器类名列表，Hibernate 按指定顺序逐个调用。</b></p>
+<div class="pit"><b>监听器应视为单例</b><p>它<b>在多个持久化上下文之间共享</b>，因此<b>不应把任何与事务相关的状态保存为实例变量</b>。所有事件与监听器接口见 <code>org.hibernate.event</code> 包的 Javadoc。</p></div>
+</div>
+</div>
+
+<h2 id="s3"><span class="num">13.3</span>用 Hibernate Envers 做审计与版本化</h2>
+
+<p>Envers 是 Hibernate 套件中<b>专注于审计日志与在数据库中保存多版本数据</b>的项目 —— 类似你熟悉的 Subversion、Git 这类版本控制系统。</p>
+
+<figure><div class="fig-box">
+<svg viewBox="0 0 840 340" xmlns="http://www.w3.org/2000/svg" font-family="Inter,system-ui,sans-serif">
+  <defs><marker id="e13" markerWidth="9" markerHeight="9" refX="8" refY="4.5" orient="auto"><path d="M0 0 L9 4.5 L0 9 z" fill="var(--accent)"/></marker></defs>
+  <rect x="140" y="16" width="140" height="70" rx="7" fill="var(--sql-soft)" stroke="var(--sql)" stroke-width="1.6"/>
+  <text x="210" y="38" text-anchor="middle" font-size="12" font-weight="700" fill="var(--ink)">ITEM</text>
+  <line x1="140" y1="46" x2="280" y2="46" stroke="var(--sql)"/>
+  <g font-family="monospace" font-size="10.5" fill="var(--ink-soft)">
+    <text x="152" y="62" fill="var(--accent)">ID «PK»</text>
+    <text x="152" y="78">NAME · SELLER_ID «FK»</text>
+  </g>
+
+  <rect x="560" y="16" width="140" height="70" rx="7" fill="var(--sql-soft)" stroke="var(--sql)" stroke-width="1.6"/>
+  <text x="630" y="38" text-anchor="middle" font-size="12" font-weight="700" fill="var(--ink)">USERS</text>
+  <line x1="560" y1="46" x2="700" y2="46" stroke="var(--sql)"/>
+  <g font-family="monospace" font-size="10.5" fill="var(--ink-soft)">
+    <text x="572" y="62" fill="var(--accent)">ID «PK»</text>
+    <text x="572" y="78">USERNAME</text>
+  </g>
+
+  <path d="M210 92 L210 122" stroke="var(--accent)" stroke-width="1.5" marker-end="url(#e13)" stroke-dasharray="4 3"/>
+  <path d="M630 92 L630 122" stroke="var(--accent)" stroke-width="1.5" marker-end="url(#e13)" stroke-dasharray="4 3"/>
+  <text x="420" y="108" text-anchor="middle" font-size="11.5" fill="var(--accent)">Envers 自动生成（或期待）以下审计表</text>
+
+  <rect x="110" y="126" width="200" height="94" rx="7" fill="var(--accent-soft)" stroke="var(--accent)" stroke-width="1.8"/>
+  <text x="210" y="148" text-anchor="middle" font-size="12" font-weight="700" fill="var(--ink)">ITEM_AUD</text>
+  <line x1="110" y1="156" x2="310" y2="156" stroke="var(--accent)"/>
+  <g font-family="monospace" font-size="10.5" fill="var(--ink-soft)">
+    <text x="122" y="172" fill="var(--accent)">ID «PK»</text>
+    <text x="122" y="188">NAME · SELLER_ID</text>
+    <text x="122" y="204" fill="var(--accent)">REV «PK» «FK»</text>
+    <text x="122" y="218" fill="var(--danger)">REVTYPE</text>
+  </g>
+
+  <rect x="360" y="126" width="140" height="94" rx="7" fill="var(--java-soft)" stroke="var(--java)" stroke-width="1.8"/>
+  <text x="430" y="148" text-anchor="middle" font-size="12" font-weight="700" fill="var(--ink)">REVINFO</text>
+  <line x1="360" y1="156" x2="500" y2="156" stroke="var(--java)"/>
+  <g font-family="monospace" font-size="10.5" fill="var(--ink-soft)">
+    <text x="372" y="176" fill="var(--accent)">REV «PK»</text>
+    <text x="372" y="196">REVTSTMP</text>
+  </g>
+  <text x="430" y="214" text-anchor="middle" font-size="10" fill="var(--ink-faint)">修订号 + 时间戳</text>
+
+  <rect x="530" y="126" width="200" height="94" rx="7" fill="var(--accent-soft)" stroke="var(--accent)" stroke-width="1.8"/>
+  <text x="630" y="148" text-anchor="middle" font-size="12" font-weight="700" fill="var(--ink)">USERS_AUD</text>
+  <line x1="530" y1="156" x2="730" y2="156" stroke="var(--accent)"/>
+  <g font-family="monospace" font-size="10.5" fill="var(--ink-soft)">
+    <text x="542" y="172" fill="var(--accent)">ID «PK»</text>
+    <text x="542" y="188">USERNAME</text>
+    <text x="542" y="204" fill="var(--accent)">REV «PK» «FK»</text>
+    <text x="542" y="218" fill="var(--danger)">REVTYPE</text>
+  </g>
+  <path d="M356 174 L316 174" stroke="var(--accent)" stroke-width="1.3"/>
+  <path d="M504 174 L526 174" stroke="var(--accent)" stroke-width="1.3"/>
+
+  <rect x="20" y="236" width="800" height="94" rx="8" fill="var(--panel)" stroke="var(--line-strong)"/>
+  <text x="430" y="258" text-anchor="middle" font-size="12.5" font-weight="700" fill="var(--ink)">工作机制</text>
+  <text x="38" y="280" font-size="11.5" fill="var(--ink)">• <tspan font-weight="700">Envers 内部使用上一节的 Hibernate 事件 SPI</tspan>：它监听事件，当 Hibernate 把改动存入数据库时，Envers <tspan font-weight="700">复制一份数据并在自己的表里记一个修订</tspan></text>
+  <text x="38" y="300" font-size="11.5" fill="var(--ink)">• Envers 把<tspan font-weight="700">一个工作单元（即一个事务）里的所有数据修改分为一个「变更集」，带一个修订号</tspan>；可用 Envers API 按修订号或时间戳查询历史数据</text>
+  <text x="38" y="320" font-size="11.5" fill="var(--ink)">• <tspan font-family="monospace">REVTYPE</tspan> 列记录变更类型（插入/更新/删除）。<tspan font-weight="700">Envers 从不自动删除任何修订信息或历史数据</tspan> —— 即使 <tspan font-family="monospace">remove()</tspan> 掉 Item，它此前的版本仍留在 ITEM_AUD 中</text>
+</svg>
+</div><figcaption>图 13-1　Item 与 User 的审计日志表结构</figcaption></figure>
+
+<div class="cols">
+<div>
+<div class="filename">启用（把 JAR 放到 classpath 上即可，无需额外配置）</div>
+<pre><code><span class="ann">@Entity</span>
+<span class="ann">@org.hibernate.envers.Audited</span>          <span class="cmt">// 为整个实体启用审计</span>
+<span class="kw">public class</span> Item {
+    <span class="ann">@NotNull</span> <span class="kw">private</span> String name;
+
+    <span class="ann">@OneToMany</span>(mappedBy = <span class="str">"item"</span>)
+    <span class="ann">@org.hibernate.envers.NotAudited</span>    <span class="cmt">// 排除某个属性</span>
+    <span class="kw">private</span> Set&lt;Bid&gt; bids = <span class="kw">new</span> HashSet&lt;&gt;();
+
+    <span class="ann">@ManyToOne</span>(fetch = FetchType.LAZY)
+    <span class="ann">@JoinColumn</span>(name = <span class="str">"SELLER_ID"</span>, nullable = <span class="kw">false</span>)
+    <span class="kw">private</span> User seller;                  <span class="cmt">// seller <b>会</b>被审计</span>
+}
+<span class="cmt">// 还必须在 User 类上也加 @Audited</span></code></pre>
+<div class="warn" style="margin-top:12px"><b>代价</b><p>「一旦启用，因为它基于注解，用起来很容易，<b>让你几乎不费力就能在数据库里保存多版本数据。代价是它会创建大量额外的表</b>（不过你可以控制想审计哪些表）。」</p></div>
+</div>
+<div>
+<div class="filename">三次事务后，Envers 记下三个变更集</div>
+<pre><code><span class="cmt">// ① 创建</span>
+User user = <span class="kw">new</span> User(<span class="str">"johndoe"</span>);   em.persist(user);
+Item item = <span class="kw">new</span> Item(<span class="str">"Foo"</span>, user);  em.persist(item);
+
+<span class="cmt">// ② 修改</span>
+Item item = em.find(Item.class, ITEM_ID);
+item.setName(<span class="str">"Bar"</span>);
+item.getSeller().setUsername(<span class="str">"doejohn"</span>);
+
+<span class="cmt">// ③ 删除</span>
+em.remove(em.find(Item.class, ITEM_ID));</code></pre>
+<div class="filename" style="margin-top:14px">找到修订号：<code>AuditReader</code> 是主 API</div>
+<pre><code>AuditReader auditReader = AuditReaderFactory.get(em);
+
+<span class="cmt">// 有时间戳 → 找该时刻或之前所做变更集的修订号</span>
+Number revCreate = auditReader.getRevisionNumberForDate(TIMESTAMP_CREATE);
+Number revUpdate = auditReader.getRevisionNumberForDate(TIMESTAMP_UPDATE);
+Number revDelete = auditReader.getRevisionNumberForDate(TIMESTAMP_DELETE);
+
+<span class="cmt">// 没时间戳 → 拿某实体涉及的全部修订号</span>
+List&lt;Number&gt; itemRevisions = auditReader.getRevisions(Item.class, ITEM_ID);
+assertEquals(<span class="hl">3</span>, itemRevisions.size());   <span class="cmt">// 创建、修改、删除</span>
+List&lt;Number&gt; userRevisions = auditReader.getRevisions(User.class, USER_ID);
+assertEquals(<span class="hl">2</span>, userRevisions.size());   <span class="cmt">// 创建、修改</span>
+
+<span class="cmt">// 有修订号 → 拿 Envers 记录该变更集的时间戳</span>
+Date ts = auditReader.getRevisionDate(itemRevision);</code></pre>
+</div>
+</div>
+
+<div class="filename">既不知道时间戳也不知道修订号时：用查询探索审计日志（也适合在 UI 上列出所有变更集）</div>
+<pre><code>AuditQuery query = auditReader.createQuery()
+    .forRevisionsOfEntity(Item.class, <span class="kw">false</span>, <span class="kw">false</span>);
+List&lt;Object[]&gt; result = query.getResultList();      <span class="cmt">// 每个元组三个元素 ↓</span>
+<span class="kw">for</span> (Object[] tuple : result) {
+    Item item                      = (Item) tuple[0];                    <span class="cmt">// 该修订下的实体实例</span>
+    DefaultRevisionEntity revision = (DefaultRevisionEntity) tuple[1];   <span class="cmt">// 修订详情（号 + 时间戳）</span>
+    RevisionType revisionType      = (RevisionType) tuple[2];            <span class="cmt">// 修订类型</span>
+
+    <span class="kw">if</span> (revision.getId() == 1) { assertEquals(RevisionType.<span class="hl">ADD</span>, revisionType); assertEquals(<span class="str">"Foo"</span>, item.getName()); }
+    <span class="kw">else if</span> (revision.getId() == 2) { assertEquals(RevisionType.<span class="hl">MOD</span>, revisionType); assertEquals(<span class="str">"Bar"</span>, item.getName()); }
+    <span class="kw">else if</span> (revision.getId() == 3) { assertEquals(RevisionType.<span class="hl">DEL</span>, revisionType); assertNull(item); }
+}
+<span class="cmt">// <b>修订号是顺序递增的：更高的修订号总是实体实例更近的版本</b></span></code></pre>
+
+<div class="cols">
+<div>
+<div class="filename">按修订号访问历史数据</div>
+<pre><code>Item item = auditReader.find(Item.class, ITEM_ID, revCreate);
+assertEquals(<span class="str">"Foo"</span>, item.getName());
+assertEquals(<span class="str">"johndoe"</span>, item.getSeller().getUsername());  <span class="cmt">// seller <b>自动一起取回</b></span>
+
+Item modified = auditReader.find(Item.class, ITEM_ID, revUpdate);
+assertEquals(<span class="str">"Bar"</span>, modified.getName());
+
+Item deleted = auditReader.find(Item.class, ITEM_ID, revDelete);
+assertNull(deleted);                     <span class="cmt">// 该修订中 Item 被删除 → 返回 null</span>
+
+User user = auditReader.find(User.class, USER_ID, revDelete);
+assertEquals(<span class="str">"doejohn"</span>, user.getUsername());  <span class="cmt">// 该修订没改 User → 返回<b>最接近的历史修订</b></span></code></pre>
+<div class="pit" style="margin-top:12px"><b>返回的实例<u>不是</u>持久态</b><p><code>AuditReader#find()</code> 像 <code>EntityManager#find()</code> 一样只取回单个实例，<b>但返回的实体实例不受持久化上下文管理</b>。修改一个旧版本的 Item，<b>Hibernate 不会更新数据库</b>。<b>把 <code>AuditReader</code> API 返回的实例视为游离的、只读的。</b></p></div>
+</div>
+<div>
+<div class="filename">任意查询（类似原生 Criteria API）与投影</div>
+<pre><code>AuditQuery query = auditReader.createQuery()
+    .forEntitiesAtRevision(Item.class, revUpdate);   <span class="cmt">// 限定到某个修订/变更集</span>
+query.add(AuditEntity.property(<span class="str">"name"</span>).like(<span class="str">"Ba"</span>, MatchMode.START));
+query.add(AuditEntity.relatedId(<span class="str">"seller"</span>).eq(USER_ID));   <span class="cmt">// 限制条件可含<b>实体关联</b></span>
+query.addOrder(AuditEntity.property(<span class="str">"name"</span>).desc());       <span class="cmt">// 排序</span>
+query.setFirstResult(0);  query.setMaxResults(10);           <span class="cmt">// 大结果集分页</span>
+
+<span class="cmt">// 投影：只取某个版本的 Item#name</span>
+query.addProjection(AuditEntity.property(<span class="str">"name"</span>));
+assertEquals(<span class="str">"Bar"</span>, (String) query.getSingleResult());</code></pre>
+<div class="filename" style="margin-top:14px">回滚到旧版本：用 <code>replicate()</code> 覆盖现有行</div>
+<pre><code>User user = auditReader.find(User.class, USER_ID, revCreate);
+em.unwrap(Session.class).replicate(user, ReplicationMode.OVERWRITE);
+em.flush();  em.clear();
+user = em.find(User.class, USER_ID);
+assertEquals(<span class="str">"johndoe"</span>, user.getUsername());
+<span class="cmt">// <b>Envers 会把这次改动也当作一次 update 记进审计日志 —— 它只是 User 的又一个新修订</b></span></code></pre>
+</div>
+</div>
+
+<h2 id="s4"><span class="num">13.4</span>动态数据过滤器</h2>
+
+<div class="note"><b>问题场景</b><p>你不想让当前登录用户看到数据库里的全部数据。通常做法是<b>给查询加条件、动态限制结果</b>；<b>但如果要处理的是「安全」这种横切关注点，就会很麻烦 —— 你得改造应用里的大多数查询。Hibernate 的动态数据过滤器可以把这些限制<u>集中化、隔离出来</u>。</b></p>
+<p style="margin-top:6px"><b>本例业务规则</b>：<code>User</code> 有一个 <code>ranking</code>（整数）属性。用户<b>只能对等级 ≤ 自己的其他用户所出售的商品出价</b> —— 业务上就是若干个由任意等级数字定义的用户组，用户只能与同级或更低级的人交易。</p></div>
+
+<figure><div class="fig-box">
+<svg viewBox="0 0 840 250" xmlns="http://www.w3.org/2000/svg" font-family="Inter,system-ui,sans-serif">
+  <defs><marker id="d13f" markerWidth="9" markerHeight="9" refX="8" refY="4.5" orient="auto"><path d="M0 0 L9 4.5 L0 9 z" fill="var(--accent)"/></marker></defs>
+  <rect x="20" y="24" width="250" height="120" rx="8" fill="var(--java-soft)" stroke="var(--java)" stroke-width="1.6"/>
+  <text x="145" y="46" text-anchor="middle" font-size="13" font-weight="700" fill="var(--java)">① 定义（Define）</text>
+  <text x="145" y="66" text-anchor="middle" font-family="monospace" font-size="11" fill="var(--accent)">@FilterDef</text>
+  <text x="36" y="90" font-size="11.5" fill="var(--ink)">给过滤器起<tspan font-weight="700">名字</tspan>并声明它接受的</text>
+  <text x="36" y="106" font-size="11.5" fill="var(--ink)"><tspan font-weight="700">动态运行期参数</tspan>（<tspan font-family="monospace">@ParamDef</tspan>）</text>
+  <text x="36" y="130" font-size="11" fill="var(--danger)"><tspan font-weight="700">名字在持久化单元内必须唯一</tspan></text>
+  <text x="36" y="142" font-size="11" fill="var(--ink-faint)">多个定义可包在 @FilterDefs 里；可放实体类或 package-info.java</text>
+
+  <path d="M276 84 L300 84" stroke="var(--accent)" stroke-width="1.8" marker-end="url(#d13f)"/>
+
+  <rect x="306" y="24" width="250" height="120" rx="8" fill="var(--sql-soft)" stroke="var(--sql)" stroke-width="1.6"/>
+  <text x="431" y="46" text-anchor="middle" font-size="13" font-weight="700" fill="var(--sql)">② 应用（Apply）</text>
+  <text x="431" y="66" text-anchor="middle" font-family="monospace" font-size="11" fill="var(--accent)">@Filter(condition = "…")</text>
+  <text x="322" y="90" font-size="11.5" fill="var(--ink)">把它<tspan font-weight="700">应用到要过滤的类或集合</tspan>上，</text>
+  <text x="322" y="106" font-size="11.5" fill="var(--ink)">写出 SQL 条件</text>
+  <text x="322" y="130" font-size="11" fill="var(--ink-soft)">多个过滤器可包在 @Filters 里</text>
+
+  <path d="M562 84 L586 84" stroke="var(--accent)" stroke-width="1.8" marker-end="url(#d13f)"/>
+
+  <rect x="592" y="24" width="248" height="120" rx="8" fill="var(--accent-soft)" stroke="var(--accent)" stroke-width="1.8"/>
+  <text x="716" y="46" text-anchor="middle" font-size="13" font-weight="700" fill="var(--accent)">③ 启用（Enable）</text>
+  <text x="716" y="66" text-anchor="middle" font-family="monospace" font-size="10.5" fill="var(--accent)">session.enableFilter(name)</text>
+  <text x="608" y="90" font-size="11.5" fill="var(--ink)"><tspan font-weight="700">需要 Session API</tspan>；为某个工作单元</text>
+  <text x="608" y="106" font-size="11.5" fill="var(--ink)">启用并<tspan font-weight="700">动态设置参数</tspan></text>
+  <text x="608" y="130" font-size="11" fill="var(--ink-soft)">定义好、应用了但没启用 → <tspan font-weight="700">什么也不过滤</tspan></text>
+
+  <rect x="20" y="160" width="820" height="80" rx="8" fill="var(--danger-soft)" stroke="var(--danger)" stroke-width="1.6"/>
+  <text x="430" y="182" text-anchor="middle" font-size="12.5" font-weight="700" fill="var(--danger)">新手最容易踩的坑：按标识符检索<u>不会</u>被过滤</text>
+  <text x="38" y="204" font-size="11.5" fill="var(--ink)">• <tspan font-family="monospace">em.find(Item.class, ITEM_ID)</tspan> <tspan font-weight="700">不会</tspan>被过滤。原因之一：数据过滤条件是 <tspan font-weight="700">SQL 片段</tspan>，而按标识符查找<tspan font-weight="700">可能完全在一级缓存里解析掉</tspan></text>
+  <text x="38" y="224" font-size="11.5" fill="var(--ink)">• <tspan font-weight="700">多对一/一对一关联同理</tspan>：如果多对一被过滤（比如 <tspan font-family="monospace">anItem.getSeller()</tspan> 返回 null），<tspan font-weight="700">关联的多重性就变了！</tspan>你分不清是这个 item 没有卖家，还是你没权限看它</text>
+  <text x="38" y="238" font-size="11.5" fill="var(--sql)">• <tspan font-weight="700">但集合访问是可以动态过滤的</tspan> —— 见下</text>
+</svg>
+</div><figcaption>图 13-C　动态数据过滤器的三步走，以及它的作用边界</figcaption></figure>
+
+<div class="cols">
+<div>
+<div class="filename">① 定义　…/dynamic/package-info.java</div>
+<pre><code><span class="ann">@org.hibernate.annotations.FilterDef</span>(
+    name = <span class="str">"limitByUserRanking"</span>,
+    parameters = {
+        <span class="ann">@org.hibernate.annotations.ParamDef</span>(
+            name = <span class="str">"currentUserRanking"</span>, type = <span class="str">"int"</span>)
+    })</code></pre>
+<div class="filename" style="margin-top:14px">② 应用到实体类　…/dynamic/Item.java</div>
+<pre><code><span class="ann">@Entity</span>
+<span class="ann">@org.hibernate.annotations.Filter</span>(
+    name = <span class="str">"limitByUserRanking"</span>,
+    condition = <span class="str">"""
+        :currentUserRanking &gt;= (
+                 select u.RANKING from USERS u
+                 where u.ID = SELLER_ID
+            )"""</span>)
+<span class="kw">public class</span> Item { … }</code></pre>
+<p style="font-size:14px">条件是<b>直接透传给数据库系统的 SQL 表达式</b>，因此可以用任何 SQL 运算符或函数。<b>它必须在记录应当通过过滤时求值为 true。</b>这里用<b>子查询</b>取卖家等级；<b>未限定的列名（如 <code>SELLER_ID</code>）指的是该实体类所映射的表的列</b>。</p>
+</div>
+<div>
+<div class="filename">③ 启用与使用</div>
+<pre><code>org.hibernate.Filter filter = em.unwrap(Session.class)
+    .enableFilter(<span class="str">"limitByUserRanking"</span>);
+filter.setParameter(<span class="str">"currentUserRanking"</span>, 0);
+
+<span class="cmt">// 现在该上下文中执行的任何 JPQL 或 criteria 查询都会被限制</span>
+List&lt;Item&gt; items = em.createQuery(<span class="str">"select i from Item i"</span>, Item.class).getResultList();
+<span class="cmt">// select * from ITEM where <b>0 &gt;= (select u.RANKING from USERS u where u.ID = SELLER_ID)</b>
+// ← Hibernate <b>动态地把 SQL 限制条件追加到它生成的语句上</b></span></code></pre>
+<div class="keyhint" style="margin-top:12px"><span class="k">Filter 的其他方法</span><span><code>getFilterDefinition()</code> 遍历参数名与类型；<code>validate()</code> 在忘记设参数时抛 <code>HibernateException</code>；<code>setParameterList()</code> 设一组参数（<b>主要用于 SQL 限制中含量词运算符（如 <code>IN</code>）的表达式</b>）。</span></div>
+<div class="filename" style="margin-top:14px">④ 过滤集合访问　…/dynamic/Category.java</div>
+<pre><code><span class="ann">@Entity</span>
+<span class="kw">public class</span> Category {
+    <span class="ann">@OneToMany</span>(mappedBy = <span class="str">"category"</span>)
+    <span class="ann">@org.hibernate.annotations.Filter</span>(
+        name = <span class="str">"limitByUserRanking"</span>, condition = <span class="str">"""…"""</span>)
+    <span class="kw">private</span> Set&lt;Item&gt; items = <span class="kw">new</span> HashSet&lt;&gt;();
+}
+
+filter.setParameter(<span class="str">"currentUserRanking"</span>, 0);
+assertEquals(<span class="hl">1</span>, em.find(Category.class, CATEGORY_ID).getItems().size());
+filter.setParameter(<span class="str">"currentUserRanking"</span>, 100);
+assertEquals(<span class="hl">2</span>, em.find(Category.class, CATEGORY_ID).getItems().size());</code></pre>
+</div>
+</div>
+
+<div class="tip"><b>条件重复时用 <code>defaultCondition</code></b>
+<pre style="margin:8px 0"><code><span class="ann">@org.hibernate.annotations.FilterDef</span>(
+    name = <span class="str">"limitByUserRankingDefault"</span>,
+    <span class="hl">defaultCondition</span> = <span class="str">"""
+            :currentUserRanking &gt;= (select u.RANKING from USERS u where u.ID = SELLER_ID)"""</span>,
+    parameters = { <span class="ann">@ParamDef</span>(name = <span class="str">"currentUserRanking"</span>, type = <span class="str">"int"</span>) })</code></pre>
+<p><b>其他优秀用例</b>：按任意安全相关条件限制数据访问（用户等级、必须属于的用户组、被赋予的角色）；数据带地区编码（如某销售团队的全部业务联系人）；或每个销售人员只处理覆盖自己区域的数据。</p></div>
+
+<div class="summary" id="s5">
+<h3>本章小结</h3>
+<ul>
+<li><b>级联状态转换</b>是持久化引擎中对生命周期事件的<b>预定义反应</b>；除了 PERSIST/REMOVE，还有<b>传递性游离与合并</b>、<b>级联刷新</b>与<b>级联复制</b>。注意 <code>CascadeType.MERGE</code> 会<b>覆盖 <code>FetchType.LAZY</code></b>。</li>
+<li>可以实现<b>事件监听器与拦截器</b>，在 Hibernate 加载和存储数据时加入自定义逻辑：JPA 标准回调（简单但上下文信息少）→ <code>org.hibernate.Interceptor</code>（灵活，<b>大多数时候够用</b>）→ 核心事件 SPI（可替换引擎的任意一块）。</li>
+<li>可以用 <b>Hibernate Envers</b> 做审计日志并在数据库中保存多版本数据（像版本控制系统一样），并<b>查询 Envers 取回历史数据</b>；返回的实例是<b>游离只读的</b>。</li>
+<li>可以用<b>动态数据过滤器</b>，让 Hibernate 自动把任意 SQL 限制条件追加到它生成的查询上：<b>定义 → 应用 → 启用</b>三步，还能过滤集合访问。<b>但按标识符检索与「to-one」关联不会被过滤。</b></li>
+</ul>
+</div>
+
+<div class="pager">
+  <a href="ch12.html">← 第 12 章　抓取计划、策略与剖面</a>
+  <a href="ch14.html">第 14 章　把 JPA 与 Hibernate 集成进 Spring →</a>
+</div>
+</main>
+</div>
+</body>
+</html>

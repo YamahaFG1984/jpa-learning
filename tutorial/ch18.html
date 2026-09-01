@@ -1,0 +1,548 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>第 18 章 · 使用 Hibernate OGM</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="topbar"><div class="topbar-inner">
+  <a class="brand" href="index.html">Java Persistence 讲义</a>
+  <span class="spacer"></span>
+  <a href="ch17.html">← 上一章</a>
+  <a href="index.html">目录</a>
+  <a href="ch19.html">下一章 →</a>
+</div></div>
+
+<div class="wrap">
+<nav class="toc">
+  <h4>本章目录</h4>
+  <a href="#s1">18.1 Hibernate OGM 简介</a>
+  <a class="sub" href="#s11">NoSQL 的四种类型</a>
+  <a class="sub" href="#s12">可移植性的延伸</a>
+  <a href="#s2">18.2 MongoDB 应用</a>
+  <a class="sub" href="#s21">配置</a>
+  <a class="sub" href="#s22">创建实体</a>
+  <a class="sub" href="#s23">用 JPA 操作</a>
+  <a class="sub" href="#s24">用 JPQL 查询</a>
+  <a href="#s3">18.3 切换到 Neo4j</a>
+  <a href="#s4">本章小结</a>
+</nav>
+
+<main>
+<div class="hero">
+  <div class="eyebrow">Part 5 · 用 Spring 连接 NoSQL 数据库</div>
+  <h1>第 18 章　使用 Hibernate OGM</h1>
+  <p>数据库的世界极其多样和复杂。除了与不同关系数据库系统打交道的挑战外，NoSQL 世界还会再添一层。<b>持久化框架的目标之一就是保证代码的可移植性</b>——本章看 Hibernate OGM 这个方案，以及它如何让 JPA 解决方案支持 NoSQL 数据库。本章的高潮是：<b>写一遍 JPA 代码，只改配置就从 MongoDB 切到 Neo4j。</b></p>
+</div>
+
+<div class="note"><b>本章的源码工程</b><p>只有一个：<code>Ch18/hibernate-ogm</code>。先用 MongoDB 跑通，然后把 <code>pom.xml</code> 里的依赖和 <code>persistence.xml</code> 里的配置一换，同一份代码就跑在 Neo4j 上了。<b>没有 <code>.sql</code> 脚本。</b></p></div>
+
+<h2 id="s1"><span class="num">18.1</span> Hibernate OGM 简介</h2>
+
+<h3 id="s11">NoSQL 数据库的四种类型</h3>
+
+<p><b>NoSQL 数据库是指以不同于关系表的格式保存数据的数据库。</b>一般来说，NoSQL 数据库的优势在于<b>灵活的模式</b>——数据库设计者不必在持久化数据之前就确定好 schema。在需求快速变化的应用中，这对开发速度可能是一个重要优势。</p>
+
+<figure>
+<div class="fig-box">
+<svg viewBox="0 0 820 420" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="NoSQL 数据库的四种类型">
+  <text x="410" y="24" text-anchor="middle" font-size="13.5" font-weight="700" fill="var(--ink)">按存储数据的格式给 NoSQL 分类</text>
+
+  <!-- document -->
+  <rect x="20" y="40" width="380" height="164" rx="8" fill="var(--accent-soft)" stroke="var(--accent)"/>
+  <text x="36" y="64" font-size="12.5" font-weight="700" fill="var(--ink)">① 面向文档（Document-oriented）</text>
+  <text x="36" y="84" font-size="11" fill="var(--ink-soft)">用类 JSON 的文档保存信息。第 17 章介绍过。</text>
+  <rect x="36" y="94" width="180" height="94" rx="6" fill="var(--panel)" stroke="var(--line-strong)"/>
+  <g font-size="9.5" font-family="var(--mono)" fill="var(--ink-soft)">
+    <text x="46" y="112">{ "_id": ...,</text>
+    <text x="46" y="128">  "username": "john",</text>
+    <text x="46" y="144">  "level": 1,</text>
+    <text x="46" y="160">  "address": { ... } }</text>
+    <text x="46" y="180" font-family="var(--sans)" font-size="10" fill="var(--ink-faint)">一个自包含的文档</text>
+  </g>
+  <rect x="230" y="118" width="150" height="46" rx="6" fill="var(--accent)" stroke="var(--accent)"/>
+  <text x="305" y="140" text-anchor="middle" font-size="13" font-weight="700" fill="#fff">MongoDB</text>
+  <text x="305" y="156" text-anchor="middle" font-size="10" fill="#fff">本章第一站</text>
+
+  <!-- graph -->
+  <rect x="420" y="40" width="380" height="164" rx="8" fill="var(--sql-soft)" stroke="var(--sql)"/>
+  <text x="436" y="64" font-size="12.5" font-weight="700" fill="var(--ink)">② 面向图（Graph-oriented）</text>
+  <text x="436" y="84" font-size="11" fill="var(--ink-soft)">用图存储信息。图由<tspan font-weight="700">节点</tspan>和<tspan font-weight="700">边</tspan>组成：</text>
+  <text x="436" y="100" font-size="11" fill="var(--ink-soft)">节点的角色是保存数据，边表示节点之间的关系。</text>
+  <g>
+    <circle cx="470" cy="140" r="17" fill="var(--panel)" stroke="var(--sql)" stroke-width="1.6"/>
+    <text x="470" y="144" text-anchor="middle" font-size="9.5" fill="var(--ink)">User</text>
+    <circle cx="550" cy="176" r="17" fill="var(--panel)" stroke="var(--sql)" stroke-width="1.6"/>
+    <text x="550" y="180" text-anchor="middle" font-size="9.5" fill="var(--ink)">Bid</text>
+    <circle cx="550" cy="110" r="17" fill="var(--panel)" stroke="var(--sql)" stroke-width="1.6"/>
+    <text x="550" y="114" text-anchor="middle" font-size="9.5" fill="var(--ink)">Item</text>
+    <path d="M485 150 L534 170" stroke="var(--sql)" stroke-width="1.4"/>
+    <path d="M566 166 L566 124" stroke="var(--sql)" stroke-width="1.4"/>
+    <text x="500" y="176" font-size="9" fill="var(--ink-faint)">边=关系</text>
+  </g>
+  <rect x="620" y="118" width="160" height="46" rx="6" fill="var(--sql)" stroke="var(--sql)"/>
+  <text x="700" y="140" text-anchor="middle" font-size="13" font-weight="700" fill="#fff">Neo4j</text>
+  <text x="700" y="156" text-anchor="middle" font-size="10" fill="#fff">本章第二站</text>
+
+  <!-- key/value -->
+  <rect x="20" y="216" width="380" height="130" rx="8" fill="var(--java-soft)" stroke="var(--java)"/>
+  <text x="36" y="240" font-size="12.5" font-weight="700" fill="var(--ink)">③ 键/值（Key/value）</text>
+  <text x="36" y="260" font-size="11" fill="var(--ink-soft)">用 map 结构存储数据：键标识记录，值表示数据。</text>
+  <g font-size="10" font-family="var(--mono)">
+    <rect x="36" y="272" width="150" height="24" rx="4" fill="var(--panel)" stroke="var(--line-strong)"/>
+    <text x="46" y="288" fill="var(--ink-soft)">"user:1"  →  {...}</text>
+    <rect x="36" y="300" width="150" height="24" rx="4" fill="var(--panel)" stroke="var(--line-strong)"/>
+    <text x="46" y="316" fill="var(--ink-soft)">"user:2"  →  {...}</text>
+  </g>
+  <rect x="230" y="282" width="150" height="36" rx="6" fill="var(--java)" stroke="var(--java)"/>
+  <text x="305" y="305" text-anchor="middle" font-size="12.5" font-weight="700" fill="#fff">Redis</text>
+
+  <!-- wide column -->
+  <rect x="420" y="216" width="380" height="130" rx="8" fill="var(--warn-soft)" stroke="var(--warn)"/>
+  <text x="436" y="240" font-size="12.5" font-weight="700" fill="var(--ink)">④ 宽列存储（Wide-column store）</text>
+  <text x="436" y="260" font-size="11" fill="var(--ink-soft)">用表、行、列存数据。与传统关系数据库的区别是：</text>
+  <text x="436" y="276" font-size="11" fill="var(--warn)"><tspan font-weight="700">同一张表的不同行，列名和列格式可以不一样</tspan>（动态列）。</text>
+  <g font-size="9.5" font-family="var(--mono)">
+    <rect x="436" y="286" width="170" height="20" rx="3" fill="var(--panel)" stroke="var(--line-strong)"/>
+    <text x="444" y="300" fill="var(--ink-soft)">行1: name | email | level</text>
+    <rect x="436" y="308" width="170" height="20" rx="3" fill="var(--panel)" stroke="var(--warn)"/>
+    <text x="444" y="322" fill="var(--ink-soft)">行2: name | phone | tags | vip</text>
+  </g>
+  <rect x="626" y="292" width="154" height="36" rx="6" fill="var(--warn)" stroke="var(--warn)"/>
+  <text x="703" y="315" text-anchor="middle" font-size="12" font-weight="700" fill="#fff">Apache Cassandra</text>
+
+  <rect x="20" y="360" width="780" height="50" rx="8" fill="var(--panel)" stroke="var(--line-strong)"/>
+  <text x="410" y="382" text-anchor="middle" font-size="12" fill="var(--ink)"><tspan font-weight="700">OGM = Object-Grid Mapper</tspan>（对象-网格映射器）。它<tspan font-weight="700">复用 Hibernate Core 引擎、API 和 JPQL</tspan>，</text>
+  <text x="410" y="400" text-anchor="middle" font-size="12" fill="var(--ink)">让同一套代码不仅能与关系数据库交互，也能与 NoSQL 数据库交互。</text>
+</svg>
+</div>
+<figcaption>图 18-A　NoSQL 的四种主要形态与代表产品。Hibernate OGM 支持其中一系列数据库，本章用 MongoDB 和 Neo4j。</figcaption>
+</figure>
+
+<h3 id="s12">可移植性从关系数据库延伸到 NoSQL</h3>
+
+<p>前面大部分演示用 JPA 和 Hibernate 与关系数据库交互，这让我们能写出<b>可移植、不依赖关系数据库厂商</b>的应用，把厂商之间的差异交给框架管理。</p>
+
+<p><b>Hibernate OGM 把可移植性的概念从关系数据库延伸到了 NoSQL 数据库。</b>可移植性可能会以<b>影响执行速度</b>为代价，但总体上它带来的优势多于缺点。</p>
+
+<figure>
+<div class="fig-box">
+<svg viewBox="0 0 820 320" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Hibernate OGM 的位置">
+  <defs><marker id="a18" markerWidth="9" markerHeight="9" refX="8" refY="4.5" orient="auto"><path d="M0 0 L9 4.5 L0 9 z" fill="var(--ink-faint)"/></marker></defs>
+
+  <rect x="220" y="30" width="380" height="52" rx="8" fill="var(--accent-soft)" stroke="var(--accent)" stroke-width="2"/>
+  <text x="410" y="52" text-anchor="middle" font-size="13" font-weight="700" fill="var(--ink)">你的应用代码</text>
+  <text x="410" y="72" text-anchor="middle" font-size="11.5" fill="var(--ink-soft)">@Entity · EntityManager · JPQL · 事务边界　—— 一个字都不用改</text>
+
+  <path d="M410 84 L410 106" stroke="var(--ink-faint)" stroke-width="1.6" marker-end="url(#a18)"/>
+
+  <rect x="220" y="108" width="380" height="44" rx="8" fill="var(--java-soft)" stroke="var(--java)"/>
+  <text x="410" y="126" text-anchor="middle" font-size="12.5" font-weight="700" fill="var(--ink)">JPA API（javax.persistence）</text>
+  <text x="410" y="144" text-anchor="middle" font-size="11" fill="var(--ink-soft)">标准接口，与实现无关</text>
+
+  <path d="M410 154 L410 176" stroke="var(--ink-faint)" stroke-width="1.6" marker-end="url(#a18)"/>
+
+  <rect x="180" y="178" width="460" height="52" rx="8" fill="var(--sql-soft)" stroke="var(--sql)" stroke-width="2"/>
+  <text x="410" y="198" text-anchor="middle" font-size="13" font-weight="700" fill="var(--ink)">provider 实现：换这一行就换了世界</text>
+  <text x="410" y="218" text-anchor="middle" font-size="11" font-family="var(--mono)" fill="var(--sql)">org.hibernate.jpa.HibernatePersistenceProvider　/　org.hibernate.ogm.jpa.HibernateOgmPersistence</text>
+
+  <path d="M300 232 L200 264" stroke="var(--ink-faint)" stroke-width="1.4" marker-end="url(#a18)"/>
+  <path d="M410 232 L410 264" stroke="var(--ink-faint)" stroke-width="1.4" marker-end="url(#a18)"/>
+  <path d="M520 232 L620 264" stroke="var(--ink-faint)" stroke-width="1.4" marker-end="url(#a18)"/>
+
+  <rect x="80" y="266" width="200" height="42" rx="6" fill="var(--panel)" stroke="var(--line-strong)"/>
+  <text x="180" y="284" text-anchor="middle" font-size="11.5" fill="var(--ink)">关系数据库</text>
+  <text x="180" y="300" text-anchor="middle" font-size="10.5" fill="var(--ink-soft)">MySQL / PostgreSQL / H2 …</text>
+
+  <rect x="310" y="266" width="200" height="42" rx="6" fill="var(--accent-soft)" stroke="var(--accent)"/>
+  <text x="410" y="284" text-anchor="middle" font-size="11.5" fill="var(--ink)">MongoDB</text>
+  <text x="410" y="300" text-anchor="middle" font-size="10.5" fill="var(--ink-soft)">hibernate-ogm-mongodb</text>
+
+  <rect x="540" y="266" width="200" height="42" rx="6" fill="var(--sql-soft)" stroke="var(--sql)"/>
+  <text x="640" y="284" text-anchor="middle" font-size="11.5" fill="var(--ink)">Neo4j</text>
+  <text x="640" y="300" text-anchor="middle" font-size="10.5" fill="var(--ink-soft)">hibernate-ogm-neo4j</text>
+</svg>
+</div>
+<figcaption>图 18-B　Hibernate OGM 是一个 JPA <b>provider</b>。它把 JPA 的可移植承诺从「不同 SQL 方言」扩展到「不同存储范式」。</figcaption>
+</figure>
+
+<h2 id="s2"><span class="num">18.2</span> 构建一个简单的 MongoDB Hibernate OGM 应用</h2>
+
+<h3 id="s21">18.2.1 配置</h3>
+
+<p>在 Maven 的 <code>pom.xml</code> 里，先往 <code>dependencyManagement</code> 部分加 <code>org.hibernate.ogm:hibernate-ogm-bom</code>。</p>
+
+<div class="note"><b>BOM 是什么</b><p>BOM 是 <b>bill of materials</b>（物料清单）的缩写。把一个 BOM 加进 <code>dependencyManagement</code> 块<b>并不会真的把依赖加进项目</b>，它只是一个<b>意图声明</b>：后面在 <code>dependencies</code> 部分出现的传递依赖，<b>版本都由这份初始声明来控制</b>。这样你就不用给每个 <code>hibernate-ogm-*</code> 依赖单独写版本号了。</p></div>
+
+<div class="filename">Ch18/hibernate-ogm/pom.xml</div>
+<pre><code>&lt;dependencyManagement&gt;
+    &lt;dependencies&gt;
+        &lt;dependency&gt;
+            &lt;groupId&gt;org.hibernate.ogm&lt;/groupId&gt;
+            <span class="hl">&lt;artifactId&gt;hibernate-ogm-bom&lt;/artifactId&gt;</span>
+            &lt;type&gt;pom&lt;/type&gt;
+            &lt;version&gt;4.2.0.Final&lt;/version&gt;
+            <span class="hl">&lt;scope&gt;import&lt;/scope&gt;</span>
+        &lt;/dependency&gt;
+    &lt;/dependencies&gt;
+&lt;/dependencyManagement&gt;
+
+&lt;dependencies&gt;
+    &lt;dependency&gt;
+        &lt;groupId&gt;org.hibernate.ogm&lt;/groupId&gt;
+        <span class="hl">&lt;artifactId&gt;hibernate-ogm-mongodb&lt;/artifactId&gt;</span>       <span class="cmt">&lt;!-- 与 MongoDB 打交道所需 --&gt;</span>
+    &lt;/dependency&gt;
+    &lt;dependency&gt;
+        &lt;groupId&gt;org.jboss.jbossts&lt;/groupId&gt;
+        <span class="hl">&lt;artifactId&gt;jbossjta&lt;/artifactId&gt;</span>                     <span class="cmt">&lt;!-- JTA 实现，OGM 支持事务需要它 --&gt;</span>
+    &lt;/dependency&gt;
+    &lt;dependency&gt;
+        &lt;groupId&gt;org.projectlombok&lt;/groupId&gt;
+        &lt;artifactId&gt;lombok&lt;/artifactId&gt;
+        &lt;version&gt;1.18.24&lt;/version&gt;
+    &lt;/dependency&gt;
+    &lt;dependency&gt;
+        &lt;groupId&gt;org.junit.jupiter&lt;/groupId&gt;
+        &lt;artifactId&gt;junit-jupiter-engine&lt;/artifactId&gt;
+        &lt;version&gt;5.8.2&lt;/version&gt;
+        &lt;scope&gt;test&lt;/scope&gt;
+    &lt;/dependency&gt;
+&lt;/dependencies&gt;</code></pre>
+
+<div class="tip"><b>为什么需要 JTA？</b><p><code>org.jboss.jbossts:jbossjta</code> 是一个 <b>JTA（Java Transaction API）实现</b>，Hibernate OGM 需要它来支持事务。回忆第 11 章：JPA 的所有操作都要在事务边界内进行——即使底层是不支持 ACID 事务的 NoSQL 数据库，这套 API 契约仍然要成立。</p></div>
+
+<p>接下来是持久化单元的标准配置文件：</p>
+
+<div class="filename">Ch18/hibernate-ogm/src/main/resources/META-INF/persistence.xml</div>
+<pre><code>&lt;persistence-unit name=<span class="str">"ch18.hibernate_ogm"</span>&gt;                          <span class="cmt">&lt;!-- A --&gt;</span>
+    <span class="hl">&lt;provider&gt;org.hibernate.ogm.jpa.HibernateOgmPersistence&lt;/provider&gt;</span>  <span class="cmt">&lt;!-- B --&gt;</span>
+    &lt;properties&gt;
+        &lt;property name=<span class="str">"hibernate.ogm.datastore.provider"</span> value=<span class="str">"mongodb"</span>/&gt;   <span class="cmt">&lt;!-- C --&gt;</span>
+        &lt;property name=<span class="str">"hibernate.ogm.datastore.database"</span>
+                  value=<span class="str">"hibernate_ogm"</span>/&gt;                                    <span class="cmt">&lt;!-- D --&gt;</span>
+        &lt;property name=<span class="str">"hibernate.ogm.datastore.create_database"</span>
+                  value=<span class="str">"true"</span>/&gt;                                            <span class="cmt">&lt;!-- E --&gt;</span>
+    &lt;/properties&gt;
+&lt;/persistence-unit&gt;</code></pre>
+
+<div class="keyhint">
+<div><span class="k">A</span> 配置名为 <code>ch18.hibernate_ogm</code> 的持久化单元。</div>
+<div><span class="k">B</span> API 的<b>厂商特定 provider 实现</b>是 Hibernate OGM。这一行是全章的枢纽。</div>
+<div><span class="k">C</span> 数据存储 provider 是 MongoDB。</div>
+<div><span class="k">D</span> 数据库名是 <code>hibernate_ogm</code>。</div>
+<div><span class="k">E</span> 如果数据库不存在就创建它。</div>
+</div>
+
+<h3 id="s22">18.2.2 创建实体</h3>
+
+<p>现在创建表示应用实体的类：<code>User</code>、<code>Bid</code>、<code>Item</code> 和 <code>Address</code>。它们之间的关系是<b>一对多、多对一或嵌入式</b>——注意这些术语，它们全部来自 JPA，与底层是不是关系数据库无关。</p>
+
+<div class="filename">Ch18/hibernate-ogm/.../model/User.java</div>
+<pre><code><span class="ann">@Entity</span>
+<span class="ann">@NoArgsConstructor</span>
+<span class="kw">public class</span> User {
+
+    <span class="ann">@Id</span>
+    <span class="ann">@GeneratedValue</span>(generator = <span class="str">"ID_GENERATOR"</span>)                             <span class="cmt">// A</span>
+    <span class="hl">@GenericGenerator(name = "ID_GENERATOR", strategy = "uuid2")</span>
+    <span class="ann">@Getter</span>
+    <span class="kw">private</span> String id;
+
+    <span class="hl">@Embedded</span>                                                            <span class="cmt">// B</span>
+    <span class="ann">@Getter</span> <span class="ann">@Setter</span>
+    <span class="kw">private</span> Address address;
+
+    <span class="ann">@OneToMany</span>(mappedBy = <span class="str">"user"</span>, cascade = CascadeType.PERSIST)         <span class="cmt">// C</span>
+    <span class="kw">private</span> Set&lt;Bid&gt; bids = <span class="kw">new</span> HashSet&lt;&gt;();
+}</code></pre>
+
+<div class="keyhint">
+<div><span class="k">A</span> id 字段由 <code>ID_GENERATOR</code> 生成器生成，用的是 <b><code>uuid2</code> 策略</b>——产生一个唯一的 128 位 UUID。生成器策略请回顾 5.2.5 节。</div>
+<div><span class="k">B</span> address <b>没有自己的身份标识</b>，它是可嵌入的（embeddable）。</div>
+<div><span class="k">C</span> <code>User</code> 与 <code>Bid</code> 之间是一对多关系，由 <code>Bid</code> 一侧的 <code>user</code> 字段来映射。<code>CascadeType.PERSIST</code> 表示 persist 操作会从父 <code>User</code> 传播到子 <code>Bid</code>。</div>
+</div>
+
+<div class="pit"><b>为什么用 <code>uuid2</code> 而不是自增序列？</b><p>回顾 5.2.5 节的生成器策略表：<code>identity</code> 依赖数据库的自增列、<code>enhanced-sequence</code> 依赖数据库序列——<b>这两样 NoSQL 数据库都没有</b>。<code>uuid2</code> 完全在应用端生成，因此是跨存储范式最安全的选择。这是从关系型迁移到 NoSQL 时<b>必须改的少数几个地方之一</b>。</p></div>
+
+<div class="cols">
+<div class="card"><h4>Address（可嵌入）</h4>
+<pre><code><span class="ann">@Embeddable</span>
+<span class="ann">@NoArgsConstructor</span>
+<span class="kw">public class</span> Address {
+    <span class="cmt">// 带 Lombok 注解的字段、构造器</span>
+}</code></pre>
+<p><code>Address</code> 类<b>没有自己的持久化身份</b>，它是可嵌入的。</p></div>
+<div class="card"><h4>Item</h4>
+<pre><code><span class="ann">@Entity</span>
+<span class="ann">@NoArgsConstructor</span>
+<span class="kw">public class</span> Item {
+    <span class="ann">@Id</span>
+    <span class="ann">@GeneratedValue</span>(generator = <span class="str">"ID_GENERATOR"</span>)
+    <span class="ann">@GenericGenerator</span>(name = <span class="str">"ID_GENERATOR"</span>,
+                      strategy = <span class="str">"uuid2"</span>)
+    <span class="ann">@Getter</span>
+    <span class="kw">private</span> String id;
+
+    <span class="ann">@OneToMany</span>(mappedBy = <span class="str">"item"</span>,
+               cascade = CascadeType.PERSIST)
+    <span class="kw">private</span> Set&lt;Bid&gt; bids = <span class="kw">new</span> HashSet&lt;&gt;();
+}</code></pre></div>
+</div>
+
+<h3 id="s23">18.2.3 用 JPA 操作 MongoDB</h3>
+
+<p>要把应用中的实体持久化到 MongoDB，我们写的代码<b>使用的是常规的 JPA 类和 JPQL</b>。这意味着我们的应用<b>既能与关系数据库工作，也能与各种 NoSQL 数据库工作</b>——只需要改一些配置。</p>
+
+<div class="filename">Ch18/hibernate-ogm/src/test/.../HibernateOGMTest.java</div>
+<pre><code><span class="kw">public class</span> HibernateOGMTest {
+
+    <span class="kw">private static</span> EntityManagerFactory entityManagerFactory;
+
+    <span class="ann">@BeforeAll</span>
+    <span class="kw">static void</span> setUp() {
+        entityManagerFactory =
+              Persistence.createEntityManagerFactory(<span class="str">"ch18.hibernate_ogm"</span>);
+    }
+
+    <span class="ann">@AfterAll</span>
+    <span class="kw">static void</span> tearDown() {
+        entityManagerFactory.close();
+    }
+}</code></pre>
+
+<div class="tip"><b>停下来看一眼这段代码</b><p><code>Persistence.createEntityManagerFactory("ch18.hibernate_ogm")</code>——这是<b>第 2 章开始就一直在写的那一行</b>。底下现在是 MongoDB，代码却完全没变。这就是 Hibernate OGM 的整个卖点。</p></div>
+
+<p>每个测试执行前，往 MongoDB 里持久化几个实体。<b>我们的代码用 JPA 完成这些操作，而 JPA 并不知道自己在和关系型还是非关系型数据库交互：</b></p>
+
+<pre><code><span class="ann">@BeforeEach</span>
+<span class="kw">void</span> beforeEach() {
+    EntityManager entityManager =
+                 entityManagerFactory.createEntityManager();          <span class="cmt">// A</span>
+    <span class="kw">try</span> {
+        entityManager.getTransaction().begin();                       <span class="cmt">// B 操作必须是事务性的</span>
+
+        john = <span class="kw">new</span> User(<span class="str">"John"</span>, <span class="str">"Smith"</span>);                          <span class="cmt">// C</span>
+        john.setAddress(<span class="kw">new</span> Address(<span class="str">"Flowers Street"</span>, <span class="str">"12345"</span>, <span class="str">"Boston"</span>));
+
+        bid1 = <span class="kw">new</span> Bid(BigDecimal.valueOf(<span class="str">1000</span>));
+        bid2 = <span class="kw">new</span> Bid(BigDecimal.valueOf(<span class="str">2000</span>));
+
+        item = <span class="kw">new</span> Item(<span class="str">"Item1"</span>);
+
+        bid1.setItem(item);   item.addBid(bid1);       <span class="cmt">// 双向关联的两端都要设（第 3 章）</span>
+        bid2.setItem(item);   item.addBid(bid2);
+        bid1.setUser(john);   john.addBid(bid1);
+        bid2.setUser(john);   john.addBid(bid2);
+
+        entityManager.persist(item);                                 <span class="cmt">// D</span>
+        entityManager.persist(john);
+
+        entityManager.getTransaction().commit();                     <span class="cmt">// E</span>
+    } <span class="kw">finally</span> {
+        entityManager.close();                                       <span class="cmt">// F</span>
+    }
+}</code></pre>
+
+<div class="keyhint">
+<div><span class="k">D</span> 持久化 <code>Item</code> 和 <code>User</code> 实体。由于 <code>Item</code> 和 <code>User</code> 里的 <code>Bid</code> 用 <code>CascadeType.PERSIST</code> 引用，<b>persist 操作会从父传播到子</b>——所以不用单独 persist 两个 Bid。</div>
+</div>
+
+<p>查询也一样用 <code>entityManager.find</code>。注意：<b>与数据库的每一次交互都应该发生在事务边界内，哪怕只是读数据</b>：</p>
+
+<pre><code><span class="ann">@Test</span>
+<span class="kw">void</span> testCRUDOperations() {
+    EntityManager entityManager = entityManagerFactory.createEntityManager();
+    <span class="kw">try</span> {
+        entityManager.getTransaction().begin();
+
+        User fetchedUser = entityManager.find(User.class, john.getId());     <span class="cmt">// C</span>
+        Item fetchedItem = entityManager.find(Item.class, item.getId());
+        Bid  fetchedBid1 = entityManager.find(Bid.class,  bid1.getId());
+        Bid  fetchedBid2 = entityManager.find(Bid.class,  bid2.getId());
+
+        assertAll(
+            () -&gt; assertNotNull(fetchedUser),
+            () -&gt; assertEquals(<span class="str">"John"</span>,  fetchedUser.getFirstName()),
+            () -&gt; assertEquals(<span class="str">"Smith"</span>, fetchedUser.getLastName()),
+            () -&gt; assertNotNull(fetchedItem),
+            () -&gt; assertEquals(<span class="str">"Item1"</span>, fetchedItem.getName()),
+            () -&gt; assertNotNull(fetchedBid1),
+            () -&gt; assertEquals(<span class="kw">new</span> BigDecimal(<span class="str">1000</span>), fetchedBid1.getAmount()),
+            () -&gt; assertNotNull(fetchedBid2),
+            () -&gt; assertEquals(<span class="kw">new</span> BigDecimal(<span class="str">2000</span>), fetchedBid2.getAmount()));
+
+        entityManager.getTransaction().commit();
+    } <span class="kw">finally</span> {
+        entityManager.close();
+    }
+}</code></pre>
+
+<p>执行完这个测试后，可以在 MongoDB Compass 里检查数据库内容：会看到<b>创建了三个集合</b>。这证明了用 JPA 写的代码<b>借助 Hibernate OGM 成功地与 NoSQL 的 MongoDB 交互了</b>。展开集合还能看到测试持久化进去的文档（要在 <code>afterEach()</code> 方法删掉它们之前看）——比如 <code>Bid</code> 集合里有两个文档。</p>
+
+<h3 id="s24">18.2.4 用 JPQL 查询</h3>
+
+<p>JPQL（Jakarta Persistence Query Language）是一种<b>与平台无关的面向对象查询语言</b>。之前我们用 JPQL 查询关系数据库、不依赖它们的 SQL 方言；<b>现在我们用 JPQL 来和 NoSQL 数据库交互。</b></p>
+
+<pre><code><span class="ann">@Test</span>
+<span class="kw">void</span> testJPQLQuery() {
+    EntityManager entityManager = entityManagerFactory.createEntityManager();
+    <span class="kw">try</span> {
+        entityManager.getTransaction().begin();
+
+        List&lt;Bid&gt; bids = entityManager.createQuery(
+             <span class="hl">"SELECT b FROM Bid b ORDER BY b.amount DESC"</span>, Bid.class)   <span class="cmt">// C</span>
+            .getResultList();
+
+        Item item = entityManager.createQuery(
+             <span class="hl">"SELECT i FROM Item i"</span>, Item.class).getSingleResult();      <span class="cmt">// D</span>
+
+        User user = entityManager.createQuery(
+             <span class="hl">"SELECT u FROM User u"</span>, User.class).getSingleResult();      <span class="cmt">// E</span>
+
+        assertAll(
+            () -&gt; assertEquals(<span class="str">2</span>, bids.size()),
+            () -&gt; assertEquals(<span class="kw">new</span> BigDecimal(<span class="str">2000</span>), bids.get(<span class="str">0</span>).getAmount()),
+            () -&gt; assertEquals(<span class="kw">new</span> BigDecimal(<span class="str">1000</span>), bids.get(<span class="str">1</span>).getAmount()),
+            () -&gt; assertEquals(<span class="str">"Item1"</span>, item.getName()),
+            () -&gt; assertEquals(<span class="str">"John"</span>,  user.getFirstName()),
+            () -&gt; assertEquals(<span class="str">"Smith"</span>, user.getLastName()));
+
+        entityManager.getTransaction().commit();
+    } <span class="kw">finally</span> {
+        entityManager.close();
+    }
+}</code></pre>
+
+<div class="note"><b>这才是最惊人的部分</b><p><code>"SELECT b FROM Bid b ORDER BY b.amount DESC"</code>——一句标准 JPQL，<b>被翻译成了 MongoDB 的查询</b>。回想第 17 章你要手写的那些 <code>{"$gte": ...}</code> 过滤器，对比一下就明白 OGM 抽象的分量了。当然，代价也在这里：<b>你放弃了对底层查询的直接控制，也放弃了 MongoDB 特有的能力</b>（聚合管道、地理索引等）。</p></div>
+
+<p>最后清理，保持数据库干净、测试相互独立：</p>
+
+<pre><code><span class="ann">@AfterEach</span>
+<span class="kw">void</span> afterEach() {
+    EntityManager entityManager = entityManagerFactory.createEntityManager();
+    <span class="kw">try</span> {
+        entityManager.getTransaction().begin();
+
+        User fetchedUser = entityManager.find(User.class, john.getId());
+        Item fetchedItem = entityManager.find(Item.class, item.getId());
+        Bid  fetchedBid1 = entityManager.find(Bid.class,  bid1.getId());
+        Bid  fetchedBid2 = entityManager.find(Bid.class,  bid2.getId());
+
+        entityManager.remove(fetchedBid1);
+        entityManager.remove(fetchedBid2);
+        entityManager.remove(fetchedItem);
+        entityManager.remove(fetchedUser);
+
+        entityManager.getTransaction().commit();
+    } <span class="kw">finally</span> {
+        entityManager.close();
+    }
+}</code></pre>
+
+<h2 id="s3"><span class="num">18.3</span> 切换到 Neo4j</h2>
+
+<p>Neo4j 也是一个 NoSQL 数据库，具体说是<b>面向图的数据库</b>。与用类 JSON 文档存数据的 MongoDB 不同，Neo4j 用图来存：<b>图由保存数据的节点和表示关系的边组成</b>。Neo4j 可以以桌面版或<b>嵌入式版</b>运行（我们的演示用嵌入式）。</p>
+
+<p>Hibernate OGM 的高效之处在于：<b>我们仍然可以使用之前展示的 JPA 代码来定义实体、描述与数据库的交互——那些代码保持不变。</b>我们只需要在配置层面做改动。</p>
+
+<figure>
+<div class="fig-box">
+<svg viewBox="0 0 820 400" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="从 MongoDB 切换到 Neo4j 只需改两处">
+  <defs><marker id="a18s" markerWidth="10" markerHeight="10" refX="9" refY="5" orient="auto"><path d="M0 0 L10 5 L0 10 z" fill="var(--accent)"/></marker></defs>
+
+  <text x="410" y="24" text-anchor="middle" font-size="13.5" font-weight="700" fill="var(--ink)">切换数据库要改的全部东西</text>
+
+  <!-- unchanged -->
+  <rect x="20" y="40" width="780" height="76" rx="8" fill="var(--sql-soft)" stroke="var(--sql)"/>
+  <text x="410" y="62" text-anchor="middle" font-size="12.5" font-weight="700" fill="var(--sql)">✓ 完全不动的部分</text>
+  <text x="410" y="84" text-anchor="middle" font-size="11.5" fill="var(--ink)">User / Bid / Item / Address 四个实体类　·　@Entity @Id @Embedded @OneToMany @GenericGenerator 全部注解</text>
+  <text x="410" y="104" text-anchor="middle" font-size="11.5" fill="var(--ink)">EntityManagerFactory / EntityManager 的每一行代码　·　所有 JPQL 查询　·　所有测试断言</text>
+
+  <!-- change 1 -->
+  <rect x="20" y="136" width="380" height="150" rx="8" fill="var(--accent-soft)" stroke="var(--accent)"/>
+  <text x="210" y="158" text-anchor="middle" font-size="12.5" font-weight="700" fill="var(--ink)">改动 ①　pom.xml 的依赖</text>
+  <rect x="36" y="170" width="348" height="42" rx="5" fill="var(--panel)" stroke="var(--danger)"/>
+  <text x="46" y="188" font-size="10.5" font-family="var(--mono)" fill="var(--ink-faint)">&lt;artifactId&gt;</text>
+  <text x="46" y="204" font-size="11" font-family="var(--mono)" fill="var(--danger)">   hibernate-ogm-mongodb</text>
+  <path d="M210 216 L210 234" stroke="var(--accent)" stroke-width="2" marker-end="url(#a18s)"/>
+  <rect x="36" y="236" width="348" height="42" rx="5" fill="var(--panel)" stroke="var(--sql)"/>
+  <text x="46" y="254" font-size="10.5" font-family="var(--mono)" fill="var(--ink-faint)">&lt;artifactId&gt;</text>
+  <text x="46" y="270" font-size="11" font-family="var(--mono)" fill="var(--sql)">   hibernate-ogm-neo4j</text>
+
+  <!-- change 2 -->
+  <rect x="420" y="136" width="380" height="150" rx="8" fill="var(--accent-soft)" stroke="var(--accent)"/>
+  <text x="610" y="158" text-anchor="middle" font-size="12.5" font-weight="700" fill="var(--ink)">改动 ②　persistence.xml 的属性</text>
+  <rect x="436" y="170" width="348" height="42" rx="5" fill="var(--panel)" stroke="var(--danger)"/>
+  <text x="446" y="188" font-size="10" font-family="var(--mono)" fill="var(--ink-faint)">datastore.provider =</text>
+  <text x="446" y="204" font-size="11" font-family="var(--mono)" fill="var(--danger)">   "mongodb"</text>
+  <path d="M610 216 L610 234" stroke="var(--accent)" stroke-width="2" marker-end="url(#a18s)"/>
+  <rect x="436" y="236" width="348" height="42" rx="5" fill="var(--panel)" stroke="var(--sql)"/>
+  <text x="446" y="254" font-size="10" font-family="var(--mono)" fill="var(--ink-faint)">datastore.provider =</text>
+  <text x="446" y="270" font-size="11" font-family="var(--mono)" fill="var(--sql)">   "neo4j_embedded"　+ neo4j.database_path</text>
+
+  <!-- paradigm shift -->
+  <rect x="20" y="306" width="780" height="86" rx="8" fill="var(--warn-soft)" stroke="var(--warn)"/>
+  <text x="410" y="328" text-anchor="middle" font-size="12.5" font-weight="700" fill="var(--ink)">而底层的存储范式，其实彻底变了</text>
+  <text x="200" y="352" text-anchor="middle" font-size="11.5" fill="var(--ink)">MongoDB：三个<tspan font-weight="700">集合</tspan>，每个文档自包含</text>
+  <text x="410" y="352" text-anchor="middle" font-size="14" fill="var(--accent)">→</text>
+  <text x="620" y="352" text-anchor="middle" font-size="11.5" fill="var(--ink)">Neo4j：<tspan font-weight="700">节点</tspan>与<tspan font-weight="700">边</tspan>构成的图</text>
+  <text x="410" y="378" text-anchor="middle" font-size="11.5" fill="var(--ink-soft)">应用的功能<tspan font-weight="700">完全一样</tspan>。代码没被碰过一下，JPA 却访问了两种完全不同的 NoSQL 数据库。</text>
+</svg>
+</div>
+<figcaption>图 18-C　这张图就是本章的全部结论：换存储范式 = 换两处配置。</figcaption>
+</figure>
+
+<div class="filename">Ch18/hibernate-ogm/pom.xml（改后）</div>
+<pre><code>&lt;dependency&gt;
+    &lt;groupId&gt;org.hibernate.ogm&lt;/groupId&gt;
+    <span class="hl">&lt;artifactId&gt;hibernate-ogm-neo4j&lt;/artifactId&gt;</span>
+&lt;/dependency&gt;</code></pre>
+
+<div class="filename">Ch18/hibernate-ogm/src/main/resources/META-INF/persistence.xml（改后）</div>
+<pre><code>&lt;persistence-unit name=<span class="str">"ch18.hibernate_ogm"</span>&gt;                          <span class="cmt">&lt;!-- A：名字都没变 --&gt;</span>
+    &lt;provider&gt;org.hibernate.ogm.jpa.HibernateOgmPersistence&lt;/provider&gt;  <span class="cmt">&lt;!-- B：provider 也没变 --&gt;</span>
+    &lt;properties&gt;
+        &lt;property name=<span class="str">"hibernate.ogm.datastore.provider"</span>
+                  <span class="hl">value="neo4j_embedded"</span> /&gt;                              <span class="cmt">&lt;!-- C：嵌入式 Neo4j --&gt;</span>
+        &lt;property name=<span class="str">"hibernate.ogm.datastore.database"</span>
+                  value=<span class="str">"hibernate_ogm"</span> /&gt;                                   <span class="cmt">&lt;!-- D --&gt;</span>
+        &lt;property name=<span class="str">"hibernate.ogm.neo4j.database_path"</span>
+                  value=<span class="str">"target/test_data_dir"</span> /&gt;                            <span class="cmt">&lt;!-- E --&gt;</span>
+    &lt;/properties&gt;
+&lt;/persistence-unit&gt;</code></pre>
+
+<div class="keyhint">
+<div><span class="k">C</span> 数据存储 provider 是 Neo4j，且数据库是<b>嵌入式</b>的（跑在同一个 JVM 里，不需要单独装服务）。</div>
+<div><span class="k">E</span> 数据库路径在 Maven 创建的 <code>target</code> 目录下的 <code>test_data_dir</code> 里。</div>
+</div>
+
+<p><b>应用的功能在 Neo4j 上和在 MongoDB 上完全一样。</b>使用 Hibernate OGM，代码原封不动，JPA 就能访问不同种类的 NoSQL 数据库——改动只发生在配置层面。</p>
+
+<div class="warn"><b>别忘了那个代价</b><p>18.1 节提过：<b>可移植性可能以影响执行速度为代价</b>。你还放弃了每种 NoSQL 数据库的原生特性——MongoDB 的聚合管道、Neo4j 的 Cypher 图遍历，用 JPQL 都表达不出来。所以真正的选择是：</p>
+<ul>
+<li><b>用 Hibernate OGM</b>：需要在多种存储间保持可移植、或团队只想维护一套 JPA 技能栈时</li>
+<li><b>用 Spring Data MongoDB（第 17 章）</b>：确定用 MongoDB 且想榨干它的原生能力时</li>
+</ul></div>
+
+<div class="summary" id="s4">
+<h3>本章小结</h3>
+<ul>
+<li>可以创建一个使用 MongoDB 的简单 Hibernate OGM 应用，并设置好与数据库交互所需的 Maven 依赖：<b>BOM（版本统一管理）+ <code>hibernate-ogm-mongodb</code> + JTA 实现</b>。</li>
+<li>可以用 MongoDB provider 和一个 MongoDB 数据库来<b>配置持久化单元</b>——关键是 <code>&lt;provider&gt;org.hibernate.ogm.jpa.HibernateOgmPersistence&lt;/provider&gt;</code> 和 <code>hibernate.ogm.datastore.provider</code>。</li>
+<li>可以创建<b>只使用 JPA 注解和功能</b>的实体（<code>@Entity</code> / <code>@Embedded</code> / <code>@OneToMany</code>），把它们持久化到 MongoDB，并验证插入结果。注意标识符要用 <b><code>uuid2</code> 策略</b>，因为 NoSQL 没有自增列和序列。</li>
+<li>可以<b>从面向文档的 MongoDB 切换到面向图的 Neo4j，只改 Maven 依赖和持久化单元配置</b>——这是本章的核心结论。</li>
+<li>可以把之前创建的、只使用 JPA 注解的实体持久化到 Neo4j 数据库，<b>完全不碰已有代码</b>。JPQL 查询也照旧工作。</li>
+<li>代价是<b>执行速度可能受影响</b>，以及<b>放弃各数据库的原生特性</b>。要不要接受这个交换，取决于你更看重可移植性还是极致性能。</li>
+</ul>
+</div>
+
+<div class="pager">
+  <a href="ch17.html">← 第 17 章　使用 Spring Data MongoDB</a>
+  <a href="ch19.html">第 19 章　用 Querydsl 查询 JPA →</a>
+</div>
+</main>
+</div>
+</body>
+</html>

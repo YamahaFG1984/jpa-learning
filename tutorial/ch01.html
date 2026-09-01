@@ -1,0 +1,532 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>第 1 章 · 理解对象/关系持久化</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="topbar"><div class="topbar-inner">
+  <a class="brand" href="index.html">Java Persistence 讲义</a>
+  <span class="spacer"></span>
+  <a href="index.html">目录</a>
+  <a href="ch02.html">下一章 →</a>
+</div></div>
+
+<div class="wrap">
+<nav class="toc">
+  <h4>本章目录</h4>
+  <a href="#s0">章前导读</a>
+  <a href="#s1">1.1 什么是持久化</a>
+  <a href="#s2">1.2 范式失配</a>
+  <a class="sub" href="#s21">粒度问题</a>
+  <a class="sub" href="#s22">继承问题</a>
+  <a class="sub" href="#s23">标识问题</a>
+  <a class="sub" href="#s24">关联问题</a>
+  <a class="sub" href="#s25">数据导航问题</a>
+  <a href="#s3">1.3 ORM / JPA / Hibernate / Spring Data</a>
+  <a href="#s4">源码对照</a>
+  <a href="#s5">本章小结</a>
+</nav>
+
+<main>
+<div class="hero">
+  <div class="eyebrow">Part 1 · 入门 ORM</div>
+  <h1>第 1 章　理解对象/关系持久化</h1>
+  <p>这一章不写一行框架代码，但它是全书的地基：它回答“<b>为什么我们需要 ORM</b>”。如果你能把这 5 个失配问题讲清楚，后面 19 章的所有设计取舍你都能自己推导出来。</p>
+</div>
+
+<h2 id="s0"><span class="num">§</span>章前导读：一张图看懂本章</h2>
+
+<p>Java 是<b>面向对象</b>的：类、继承、多态、引用、集合。关系数据库是<b>基于关系代数</b>的：表、行、列、外键、连接。这两套模型各自都很优秀，但把它们缝在一起时会出现结构性的裂缝——这就是<b>对象/关系范式失配（object/relational paradigm mismatch）</b>。</p>
+
+<figure><div class="fig-box">
+<svg viewBox="0 0 860 400" xmlns="http://www.w3.org/2000/svg" font-family="Inter,system-ui,sans-serif">
+  <!-- Java side -->
+  <rect x="20" y="20" width="330" height="360" rx="12" fill="var(--java-soft)" stroke="var(--java)" stroke-width="1.5"/>
+  <text x="185" y="48" text-anchor="middle" font-size="16" font-weight="700" fill="var(--java)">Java 对象世界</text>
+  <text x="185" y="68" text-anchor="middle" font-size="12" fill="var(--ink-soft)">面向对象范式</text>
+  <g font-size="13" fill="var(--ink)">
+    <rect x="45" y="86" width="280" height="34" rx="6" fill="var(--panel)" stroke="var(--line-strong)"/>
+    <text x="60" y="108">类 / 对象实例（细粒度、可任意嵌套）</text>
+    <rect x="45" y="128" width="280" height="34" rx="6" fill="var(--panel)" stroke="var(--line-strong)"/>
+    <text x="60" y="150">继承 + 多态方法分派</text>
+    <rect x="45" y="170" width="280" height="34" rx="6" fill="var(--panel)" stroke="var(--line-strong)"/>
+    <text x="60" y="192">同一性：<tspan font-family="monospace">a == b</tspan> 与 <tspan font-family="monospace">a.equals(b)</tspan></text>
+    <rect x="45" y="212" width="280" height="34" rx="6" fill="var(--panel)" stroke="var(--line-strong)"/>
+    <text x="60" y="234">引用：<tspan font-weight="700">有方向</tspan>的指针，可 M:N</text>
+    <rect x="45" y="254" width="280" height="34" rx="6" fill="var(--panel)" stroke="var(--line-strong)"/>
+    <text x="60" y="276">访问方式：顺着引用「走对象网」</text>
+    <rect x="45" y="296" width="280" height="34" rx="6" fill="var(--panel)" stroke="var(--line-strong)"/>
+    <text x="60" y="318">生命周期：随 JVM 进程消亡</text>
+  </g>
+
+  <!-- SQL side -->
+  <rect x="510" y="20" width="330" height="360" rx="12" fill="var(--sql-soft)" stroke="var(--sql)" stroke-width="1.5"/>
+  <text x="675" y="48" text-anchor="middle" font-size="16" font-weight="700" fill="var(--sql)">SQL 关系世界</text>
+  <text x="675" y="68" text-anchor="middle" font-size="12" fill="var(--ink-soft)">关系范式</text>
+  <g font-size="13" fill="var(--ink)">
+    <rect x="535" y="86" width="280" height="34" rx="6" fill="var(--panel)" stroke="var(--line-strong)"/>
+    <text x="550" y="108">只有两级粒度：表 + 内置列类型</text>
+    <rect x="535" y="128" width="280" height="34" rx="6" fill="var(--panel)" stroke="var(--line-strong)"/>
+    <text x="550" y="150">没有表继承，也没有多态</text>
+    <rect x="535" y="170" width="280" height="34" rx="6" fill="var(--panel)" stroke="var(--line-strong)"/>
+    <text x="550" y="192">同一性：只有<tspan font-weight="700">主键值</tspan>相等</text>
+    <rect x="535" y="212" width="280" height="34" rx="6" fill="var(--panel)" stroke="var(--line-strong)"/>
+    <text x="550" y="234">外键：<tspan font-weight="700">无方向</tspan>的键值副本，只能 N:1</text>
+    <rect x="535" y="254" width="280" height="34" rx="6" fill="var(--panel)" stroke="var(--line-strong)"/>
+    <text x="550" y="276">访问方式：一次 JOIN 取一个结果集</text>
+    <rect x="535" y="296" width="280" height="34" rx="6" fill="var(--panel)" stroke="var(--line-strong)"/>
+    <text x="550" y="318">生命周期：数据比应用活得久</text>
+  </g>
+
+  <!-- gap -->
+  <g>
+    <path d="M362 40 L362 380" stroke="var(--danger)" stroke-width="2" stroke-dasharray="6 5"/>
+    <path d="M498 40 L498 380" stroke="var(--danger)" stroke-width="2" stroke-dasharray="6 5"/>
+    <text x="430" y="120" text-anchor="middle" font-size="14" font-weight="700" fill="var(--danger)">范式</text>
+    <text x="430" y="140" text-anchor="middle" font-size="14" font-weight="700" fill="var(--danger)">失配</text>
+    <text x="430" y="168" text-anchor="middle" font-size="12" fill="var(--ink-faint)">mismatch</text>
+    <g font-size="11" fill="var(--ink-soft)" text-anchor="middle">
+      <text x="430" y="205">① 粒度</text>
+      <text x="430" y="228">② 继承</text>
+      <text x="430" y="251">③ 标识</text>
+      <text x="430" y="274">④ 关联</text>
+      <text x="430" y="297">⑤ 导航</text>
+    </g>
+    <rect x="392" y="188" width="76" height="122" rx="8" fill="none" stroke="var(--danger)" stroke-width="1" opacity=".5"/>
+  </g>
+</svg>
+</div><figcaption>图 1-0　两个世界之间的五道裂缝，ORM 的全部工作就是填平它们</figcaption></figure>
+
+<div class="note"><b>本章要点</b>
+<p>ORM 不是“帮你隐藏 SQL 的魔法”，而是<b>把这 5 类失配以可配置的方式系统性解决掉</b>的中间层。你依然必须懂 SQL —— 事实上，ORM 是“已经用硬办法做过一遍的人”才该用的高级技术。</p></div>
+
+<h2 id="s1"><span class="num">1.1</span>什么是持久化</h2>
+
+<p><b>对象持久化（object persistence）</b>的定义很朴素：让单个对象的寿命超过创建它的应用进程 —— 能存进数据存储，之后再被重建出来。在 Java 语境里，这几乎总是指“用 SQL 把对象实例映射并存进数据库”。</p>
+
+<h3>1.1.1　关系数据库：数据比应用活得久</h3>
+<p>选择关系型数据库最重要的理由之一叫<b>数据独立性（data independence）</b>：</p>
+<div class="tip"><b>核心原则</b><p>数据通常比应用活得更久。同一份数据可能同时被录入系统、报表系统、对账系统读写；关系模型是这些异构系统之间的<b>最大公约数</b>，因此它常常是企业级业务实体的权威表示。</p></div>
+
+<h3>1.1.2　理解 SQL 的四张面孔</h3>
+<p>SQL 这门语言在书中被拆成四个用途，后面章节会反复用到这些术语：</p>
+<div class="tablewrap"><table>
+<thead><tr><th>缩写</th><th>全称</th><th>做什么</th><th>典型语句</th></tr></thead>
+<tbody>
+<tr><td><b>DDL</b></td><td>Data Definition Language</td><td>定义/修改/删除表、约束等 schema 构件；schema 演进也靠它</td><td><code>CREATE TABLE</code> <code>ALTER</code> <code>DROP</code></td></tr>
+<tr><td><b>DML</b></td><td>Data Manipulation Language</td><td>对数据做增删改</td><td><code>INSERT</code> <code>UPDATE</code> <code>DELETE</code></td></tr>
+<tr><td><b>DQL</b></td><td>Data Query Language</td><td>限制、投影、笛卡儿积；连接、聚合、分组、子查询</td><td><code>SELECT … JOIN … GROUP BY</code></td></tr>
+<tr><td><b>DCL</b></td><td>Data Control Language</td><td>授权与回收访问权限</td><td><code>GRANT</code> <code>REVOKE</code></td></tr>
+</tbody></table></div>
+
+<h3>1.1.3　在 Java 里使用 SQL：JDBC 的层次太低</h3>
+<p>不用 ORM 时，你通过 JDBC 亲手做这些事：绑定查询参数 → 执行查询 → 滚动结果集 → 从 <code>ResultSet</code> 一列列取值 → 塞进对象。这些都是<b>低层数据访问</b>，而我们真正关心的是业务问题。</p>
+
+<div class="warn"><b>不要教条</b>
+<p>本书并不主张“任何场景都上 ORM”。<b>简单应用没有领域模型反而更好</b>：直接用 <code>ResultSet</code>、调存储过程、写报表 SQL 直出页面，都是完全正当的做法。ORM 的价值出现在<b>业务逻辑不平凡</b>、需要复用和长期维护领域模型的系统里。实践中两种策略往往并存。</p></div>
+
+<div class="note"><b>CAP 与互联网规模</b>
+<p>书中特意提醒：分布式系统无法同时满足一致性（C）、可用性（A）、分区容错（P）。搜索引擎、CDN、IM 这类超大规模系统常常接受弱一致性，此时 ACID 事务型 SQL 数据库、JDBC、Hibernate 只扮演次要角色。关系技术不是万能药，而是<b>唯一被充分验证的通用数据管理技术</b>。</p></div>
+
+<h2 id="s2"><span class="num">1.2</span>范式失配：从一个无害的例子开始</h2>
+
+<p>假设你要做一个电商系统，需要 <code>User</code>（用户）和 <code>BillingDetails</code>（账单信息）两个类。一开始一切都很和谐：</p>
+
+<div class="cols">
+<div>
+<div class="filename">Ch01/e-commerce/…/ch01/User.java</div>
+<pre><code><span class="kw">public class</span> User {
+    <span class="kw">private</span> String username;
+    <span class="kw">private</span> String address;
+    <span class="kw">private</span> Set&lt;BillingDetails&gt; billingDetails
+            = <span class="kw">new</span> HashSet&lt;&gt;();
+    <span class="cmt">// 构造器、getter/setter、业务方法</span>
+}</code></pre>
+</div>
+<div>
+<div class="filename">Ch01/e-commerce/…/ch01/BillingDetails.java</div>
+<pre><code><span class="kw">public class</span> BillingDetails {
+    <span class="kw">private</span> String account;
+    <span class="kw">private</span> String bankname;
+    <span class="kw">private</span> User user;
+    <span class="cmt">// 构造器、getter/setter、业务方法</span>
+}</code></pre>
+</div>
+</div>
+
+<div class="filename">Ch01/Ch01.sql　—— 对应的初版 schema（MySQL 语法）</div>
+<pre><code><span class="kw">CREATE TABLE</span> USERS (
+    USERNAME <span class="kw">VARCHAR</span>(15) <span class="kw">NOT NULL PRIMARY KEY</span>,
+    ADDRESS  <span class="kw">VARCHAR</span>(255) <span class="kw">NOT NULL</span>
+);
+
+<span class="kw">CREATE TABLE</span> BILLINGDETAILS (
+    ACCOUNT  <span class="kw">VARCHAR</span>(15) <span class="kw">NOT NULL PRIMARY KEY</span>,
+    BANKNAME <span class="kw">VARCHAR</span>(255) <span class="kw">NOT NULL</span>,
+    USERNAME <span class="kw">VARCHAR</span>(15) <span class="kw">NOT NULL</span>,
+    <span class="kw">FOREIGN KEY</span> (USERNAME) <span class="kw">REFERENCES</span> USERS(USERNAME)
+);</code></pre>
+
+<p>此刻手写 JDBC 毫无压力。<b>但这只是因为模型还太小。</b>下面我们逐条把它长大，裂缝就会一道道露出来。</p>
+
+<h3 id="s21">1.2.1　① 粒度问题（granularity）</h3>
+
+<p>把 <code>address</code> 从一个 <code>String</code> 拆成独立的 <code>Address</code> 类（街道/城市/邮编…），因为别的类也要复用地址。理想做法是在数据库里也建一个 <code>ADDRESS</code> 自定义类型（UDT）：</p>
+
+<figure><div class="fig-box">
+<svg viewBox="0 0 840 300" xmlns="http://www.w3.org/2000/svg" font-family="Inter,system-ui,sans-serif">
+  <text x="140" y="24" text-anchor="middle" font-size="13" font-weight="700" fill="var(--java)">Java：粒度可以无限细分</text>
+  <g font-size="12.5">
+    <rect x="30" y="40" width="220" height="30" rx="6" fill="var(--java-soft)" stroke="var(--java)"/>
+    <text x="42" y="60" fill="var(--ink)">User <tspan font-size="11" fill="var(--ink-faint)">（粗粒度实体）</tspan></text>
+    <path d="M140 70 L140 92" stroke="var(--java)" stroke-width="1.5"/>
+    <rect x="45" y="92" width="190" height="30" rx="6" fill="var(--java-soft)" stroke="var(--java)"/>
+    <text x="57" y="112" fill="var(--ink)">Address <tspan font-size="11" fill="var(--ink-faint)">（细粒度值）</tspan></text>
+    <path d="M140 122 L140 144" stroke="var(--java)" stroke-width="1.5"/>
+    <rect x="58" y="144" width="164" height="30" rx="6" fill="var(--java-soft)" stroke="var(--java)"/>
+    <text x="70" y="164" fill="var(--ink)">SwissZipCode</text>
+    <path d="M140 174 L140 196" stroke="var(--java)" stroke-width="1.5"/>
+    <rect x="40" y="196" width="200" height="30" rx="6" fill="var(--java-soft)" stroke="var(--java)"/>
+    <text x="52" y="216" fill="var(--ink)">AbstractNumericZipCode</text>
+    <text x="140" y="252" text-anchor="middle" font-size="11.5" fill="var(--ink-faint)">…想分几层就分几层</text>
+  </g>
+
+  <path d="M280 130 L340 130" stroke="var(--danger)" stroke-width="2" marker-end="url(#a1)"/>
+  <defs><marker id="a1" markerWidth="9" markerHeight="9" refX="8" refY="4.5" orient="auto"><path d="M0 0 L9 4.5 L0 9 z" fill="var(--danger)"/></marker></defs>
+  <text x="310" y="120" text-anchor="middle" font-size="11" fill="var(--danger)">压平</text>
+
+  <text x="590" y="24" text-anchor="middle" font-size="13" font-weight="700" fill="var(--sql)">SQL：只有两级粒度</text>
+  <rect x="360" y="40" width="460" height="90" rx="8" fill="var(--sql-soft)" stroke="var(--sql)"/>
+  <text x="376" y="62" font-size="12.5" fill="var(--ink)"><tspan font-weight="700">第 1 级：你建的关系类型</tspan> — USERS、BILLINGDETAILS</text>
+  <text x="376" y="86" font-size="12.5" fill="var(--ink)"><tspan font-weight="700">第 2 级：内置数据类型</tspan> — VARCHAR、BIGINT、TIMESTAMP</text>
+  <text x="376" y="112" font-size="12" fill="var(--danger)">✗ UDT（用户自定义类型）几乎不可移植，实践中不用</text>
+
+  <rect x="360" y="148" width="460" height="118" rx="8" fill="var(--panel)" stroke="var(--line-strong)"/>
+  <text x="376" y="170" font-size="12" font-weight="700" fill="var(--ink-soft)">务实的解法：把 Address 摊平成多列</text>
+  <g font-family="monospace" font-size="11.5" fill="var(--ink)">
+    <text x="376" y="192">CREATE TABLE USERS (</text>
+    <text x="392" y="210">USERNAME        VARCHAR(15) PRIMARY KEY,</text>
+    <text x="392" y="228" fill="var(--accent)">ADDRESS_STREET  VARCHAR(255) NOT NULL,</text>
+    <text x="392" y="246" fill="var(--accent)">ADDRESS_ZIPCODE VARCHAR(5)   NOT NULL, …</text>
+  </g>
+</svg>
+</div><figcaption>图 1-1　粒度失配：Java 侧层层细分，SQL 侧只能摊平成列</figcaption></figure>
+
+<p>为什么不用 UDT？因为 UDT 支持是各家 DBMS 的冷门特性、互不兼容、SQL 标准对它的定义也很弱；而且即便支持，你仍要<b>把类型定义写两遍</b>（Java 一遍、SQL 一遍）。</p>
+
+<div class="tip"><b>ORM 的答案 → 第 5.1.1 节 / 第 6 章</b><p>Hibernate 用 <code>@Embeddable</code>（可嵌入组件）解决粒度问题：Java 侧保留 <code>Address</code> 类，数据库侧自动摊成多列。这是最容易解决的一类失配。</p></div>
+
+<h3 id="s22">1.2.2　② 继承问题（inheritance）</h3>
+
+<p>现在支持信用卡付款，自然的建模是让 <code>BillingDetails</code> 成为超类，<code>CreditCard</code> 和 <code>BankAccount</code> 是子类。</p>
+
+<figure><div class="fig-box">
+<svg viewBox="0 0 840 300" xmlns="http://www.w3.org/2000/svg" font-family="Inter,system-ui,sans-serif">
+  <defs><marker id="inh" markerWidth="12" markerHeight="12" refX="11" refY="6" orient="auto">
+    <path d="M0 0 L12 6 L0 12 z" fill="var(--bg)" stroke="var(--java)" stroke-width="1.2"/></marker>
+    <marker id="ar2" markerWidth="9" markerHeight="9" refX="8" refY="4.5" orient="auto"><path d="M0 0 L9 4.5 L0 9 z" fill="var(--ink-soft)"/></marker>
+  </defs>
+  <text x="200" y="22" text-anchor="middle" font-size="13" font-weight="700" fill="var(--java)">Java：类层次 + 多态关联</text>
+  <rect x="20" y="40" width="120" height="34" rx="6" fill="var(--java-soft)" stroke="var(--java)"/>
+  <text x="80" y="62" text-anchor="middle" font-size="13" fill="var(--ink)">User</text>
+  <path d="M140 57 L235 57" stroke="var(--java)" stroke-width="1.5"/>
+  <text x="188" y="50" text-anchor="middle" font-size="10.5" fill="var(--ink-faint)">1:N ◆</text>
+  <rect x="235" y="40" width="145" height="34" rx="6" fill="var(--java-soft)" stroke="var(--java)" stroke-width="2"/>
+  <text x="307" y="62" text-anchor="middle" font-size="13" fill="var(--ink)">BillingDetails</text>
+  <path d="M180 150 L180 100 L307 100 L307 76" stroke="var(--java)" stroke-width="1.5" fill="none" marker-end="url(#inh)"/>
+  <path d="M330 150 L330 100" stroke="var(--java)" stroke-width="1.5" fill="none"/>
+  <rect x="118" y="150" width="124" height="34" rx="6" fill="var(--panel)" stroke="var(--java)"/>
+  <text x="180" y="172" text-anchor="middle" font-size="12.5" fill="var(--ink)">CreditCard</text>
+  <rect x="268" y="150" width="124" height="34" rx="6" fill="var(--panel)" stroke="var(--java)"/>
+  <text x="330" y="172" text-anchor="middle" font-size="12.5" fill="var(--ink)">BankAccount</text>
+  <text x="200" y="215" text-anchor="middle" font-size="11.5" fill="var(--ink-soft)">运行期 user.getBillingDetails() 里</text>
+  <text x="200" y="233" text-anchor="middle" font-size="11.5" fill="var(--ink-soft)">可以混放两种子类实例 → <tspan fill="var(--accent)" font-weight="700">多态</tspan></text>
+  <text x="200" y="256" text-anchor="middle" font-size="11.5" fill="var(--ink-soft)">还想写「查 BillingDetails 返回所有子类」的多态查询</text>
+
+  <path d="M410 150 L455 150" stroke="var(--ink-soft)" stroke-width="1.5" marker-end="url(#ar2)"/>
+
+  <text x="650" y="22" text-anchor="middle" font-size="13" font-weight="700" fill="var(--sql)">SQL：两个都办不到</text>
+  <rect x="470" y="40" width="350" height="72" rx="8" fill="var(--danger-soft)" stroke="var(--danger)"/>
+  <text x="486" y="64" font-size="12.5" fill="var(--ink)">✗ 主流 DBMS 没有<tspan font-weight="700">表继承</tspan>（有也不遵循标准语法）</text>
+  <text x="486" y="88" font-size="12.5" fill="var(--ink)">✗ 外键只能指向<tspan font-weight="700">唯一一张</tspan>目标表 → 无法表达多态关联</text>
+  <rect x="470" y="128" width="350" height="120" rx="8" fill="var(--sql-soft)" stroke="var(--sql)"/>
+  <text x="486" y="152" font-size="12.5" font-weight="700" fill="var(--sql)">ORM 提供 4 种继承映射策略（第 7 章）</text>
+  <g font-size="12" fill="var(--ink)">
+    <text x="486" y="176">① 每具体类一张表 + 隐式多态</text>
+    <text x="486" y="196">② 每具体类一张表 + UNION</text>
+    <text x="486" y="216">③ 整个层次一张表（判别列）</text>
+    <text x="486" y="236">④ 每子类一张表 + JOIN</text>
+  </g>
+</svg>
+</div><figcaption>图 1-2/1-3　继承失配：类层次必须被“翻译”成没有继承机制的表结构</figcaption></figure>
+
+<h3 id="s23">1.2.3　③ 标识问题（identity）</h3>
+
+<p>“两个东西是不是同一个”在两个世界里有<b>三套</b>不同答案：</p>
+
+<figure><div class="fig-box">
+<svg viewBox="0 0 840 250" xmlns="http://www.w3.org/2000/svg" font-family="Inter,system-ui,sans-serif">
+  <rect x="20" y="30" width="245" height="120" rx="9" fill="var(--java-soft)" stroke="var(--java)"/>
+  <text x="142" y="55" text-anchor="middle" font-size="13" font-weight="700" fill="var(--java)">① 实例同一性</text>
+  <text x="142" y="82" text-anchor="middle" font-family="monospace" font-size="15" fill="var(--ink)">a == b</text>
+  <text x="142" y="108" text-anchor="middle" font-size="11.5" fill="var(--ink-soft)">≈ 内存地址相同</text>
+  <text x="142" y="128" text-anchor="middle" font-size="11.5" fill="var(--ink-soft)">JVM 决定</text>
+
+  <rect x="295" y="30" width="245" height="120" rx="9" fill="var(--java-soft)" stroke="var(--java)"/>
+  <text x="417" y="55" text-anchor="middle" font-size="13" font-weight="700" fill="var(--java)">② 实例相等性</text>
+  <text x="417" y="82" text-anchor="middle" font-family="monospace" font-size="15" fill="var(--ink)">a.equals(b)</text>
+  <text x="417" y="108" text-anchor="middle" font-size="11.5" fill="var(--ink-soft)">按值相等，由你实现</text>
+  <text x="417" y="128" text-anchor="middle" font-size="11.5" fill="var(--ink-soft)">写对它比想象中难（§10.3）</text>
+
+  <rect x="570" y="30" width="250" height="120" rx="9" fill="var(--sql-soft)" stroke="var(--sql)"/>
+  <text x="695" y="55" text-anchor="middle" font-size="13" font-weight="700" fill="var(--sql)">③ 数据库行同一性</text>
+  <text x="695" y="82" text-anchor="middle" font-family="monospace" font-size="15" fill="var(--ink)">PK 值相等</text>
+  <text x="695" y="108" text-anchor="middle" font-size="11.5" fill="var(--ink-soft)">同一行可能同时被多个</text>
+  <text x="695" y="128" text-anchor="middle" font-size="11.5" fill="var(--ink-soft)">不同 Java 实例代表（多线程）</text>
+
+  <rect x="20" y="172" width="800" height="60" rx="9" fill="var(--warn-soft)" stroke="var(--warn)"/>
+  <text x="36" y="196" font-size="13" font-weight="700" fill="var(--warn)">三者互不等价</text>
+  <text x="36" y="218" font-size="12.5" fill="var(--ink)">ORM 必须靠「持久化上下文（persistence context）」在一个工作单元内保证：同一行 ⇒ 同一个 Java 实例（§10.1.2）</text>
+</svg>
+</div><figcaption>图 1-A　三种“同一性”，以及 ORM 用持久化上下文把它们对齐</figcaption></figure>
+
+<p>顺带暴露另一个坑：初版把 <code>USERNAME</code> 当主键，结果<b>用户改名</b>就得同时改 <code>USERS</code> 的行和 <code>BILLINGDETAILS</code> 中所有外键值。所以书里的建议是：</p>
+
+<div class="tip"><b>代理键（surrogate key）</b><p>找不到好的自然键时，用一个<b>对业务用户毫无意义、也永不展示给用户</b>的主键列（如自增 <code>ID BIGINT</code>），它唯一的职责就是在应用内部标识数据。</p></div>
+
+<div class="filename">Ch01/Ch01.sql　—— 改用代理键之后</div>
+<pre><code><span class="kw">CREATE TABLE</span> USERS (
+    ID <span class="kw">BIGINT NOT NULL PRIMARY KEY</span>,          <span class="cmt">-- ← 代理键，系统生成</span>
+    USERNAME <span class="kw">VARCHAR</span>(15) <span class="kw">NOT NULL UNIQUE</span>,   <span class="cmt">-- 自然键降级为唯一约束</span>
+    ADDRESS_STREET  <span class="kw">VARCHAR</span>(255) <span class="kw">NOT NULL</span>,
+    ADDRESS_ZIPCODE <span class="kw">VARCHAR</span>(5) <span class="kw">NOT NULL</span>,
+    ADDRESS_CITY    <span class="kw">VARCHAR</span>(255) <span class="kw">NOT NULL</span>
+);
+<span class="kw">CREATE TABLE</span> BILLINGDETAILS (
+    ID <span class="kw">BIGINT NOT NULL PRIMARY KEY</span>,
+    ACCOUNT  <span class="kw">VARCHAR</span>(15) <span class="kw">NOT NULL</span>,
+    BANKNAME <span class="kw">VARCHAR</span>(255) <span class="kw">NOT NULL</span>,
+    USER_ID  <span class="kw">BIGINT NOT NULL</span>,                 <span class="cmt">-- ← 引用代理键，改名不影响它</span>
+    <span class="kw">FOREIGN KEY</span> (USER_ID) <span class="kw">REFERENCES</span> USERS(ID)
+);</code></pre>
+
+<p>新问题随之而来：这个纯为数据模型而生的 <code>ID</code> 列，在 Java 领域模型里<b>该不该出现、怎么出现</b>？答案在 §5.2。</p>
+
+<h3 id="s24">1.2.4　④ 关联问题（associations）</h3>
+
+<p>对象引用<b>天生有方向</b>——它就是指针。要双向可导航，你必须在两个类里各定义一次。而外键是<b>键值的副本</b>，方向对关系模型毫无意义（用 JOIN 和投影可以任意组合）。</p>
+
+<figure><div class="fig-box">
+<svg viewBox="0 0 840 400" xmlns="http://www.w3.org/2000/svg" font-family="Inter,system-ui,sans-serif">
+  <defs><marker id="ah" markerWidth="9" markerHeight="9" refX="8" refY="4.5" orient="auto"><path d="M0 0 L9 4.5 L0 9 z" fill="var(--java)"/></marker></defs>
+  <!-- 1:N -->
+  <text x="20" y="24" font-size="13" font-weight="700" fill="var(--java)">一对多：双向 = 定义两次</text>
+  <rect x="20" y="38" width="170" height="62" rx="7" fill="var(--java-soft)" stroke="var(--java)"/>
+  <text x="105" y="60" text-anchor="middle" font-size="13" fill="var(--ink)">User</text>
+  <text x="105" y="82" text-anchor="middle" font-family="monospace" font-size="10" fill="var(--ink-soft)">Set&lt;BillingDetails&gt;</text>
+  <rect x="300" y="38" width="170" height="62" rx="7" fill="var(--java-soft)" stroke="var(--java)"/>
+  <text x="385" y="60" text-anchor="middle" font-size="13" fill="var(--ink)">BillingDetails</text>
+  <text x="385" y="82" text-anchor="middle" font-family="monospace" font-size="10" fill="var(--ink-soft)">User user</text>
+  <path d="M192 58 L298 58" stroke="var(--java)" stroke-width="1.6" marker-end="url(#ah)"/>
+  <text x="245" y="52" text-anchor="middle" font-size="10.5" fill="var(--ink-faint)">1:N</text>
+  <path d="M298 88 L192 88" stroke="var(--java)" stroke-width="1.6" marker-end="url(#ah)"/>
+  <text x="245" y="104" text-anchor="middle" font-size="10.5" fill="var(--ink-faint)">N:1（反向）</text>
+
+  <rect x="510" y="38" width="310" height="62" rx="7" fill="var(--sql-soft)" stroke="var(--sql)"/>
+  <text x="524" y="60" font-size="12.5" font-weight="700" fill="var(--sql)">数据库只需一列外键</text>
+  <text x="524" y="84" font-family="monospace" font-size="11" fill="var(--ink)">BILLINGDETAILS.USER_ID → USERS.ID</text>
+
+  <!-- M:N -->
+  <text x="20" y="160" font-size="13" font-weight="700" fill="var(--java)">多对多：Java 可以直接表达</text>
+  <rect x="20" y="174" width="170" height="62" rx="7" fill="var(--java-soft)" stroke="var(--java)"/>
+  <text x="105" y="196" text-anchor="middle" font-size="13" fill="var(--ink)">User</text>
+  <text x="105" y="218" text-anchor="middle" font-family="monospace" font-size="10" fill="var(--ink-soft)">Set&lt;BillingDetails&gt;</text>
+  <rect x="300" y="174" width="170" height="62" rx="7" fill="var(--java-soft)" stroke="var(--java)"/>
+  <text x="385" y="196" text-anchor="middle" font-size="13" fill="var(--ink)">BillingDetails</text>
+  <text x="385" y="218" text-anchor="middle" font-family="monospace" font-size="10" fill="var(--ink-soft)">Set&lt;User&gt;</text>
+  <path d="M192 194 L298 194" stroke="var(--java)" stroke-width="1.6" marker-end="url(#ah)"/>
+  <path d="M298 222 L192 222" stroke="var(--java)" stroke-width="1.6" marker-end="url(#ah)"/>
+  <text x="245" y="188" text-anchor="middle" font-size="10.5" fill="var(--ink-faint)">M:N</text>
+
+  <rect x="510" y="150" width="310" height="112" rx="7" fill="var(--danger-soft)" stroke="var(--danger)"/>
+  <text x="524" y="174" font-size="12.5" font-weight="700" fill="var(--danger)">数据库做不到 —— 外键天然是 N:1</text>
+  <text x="524" y="198" font-size="12.5" fill="var(--ink)">必须引入一张<tspan font-weight="700">链接表（link table）</tspan>，</text>
+  <text x="524" y="220" font-size="12.5" fill="var(--ink)">而这张表<tspan font-weight="700">通常不出现在领域模型里</tspan>。</text>
+  <text x="524" y="246" font-size="12" fill="var(--ink-soft)">→ 又一处需要 ORM 帮你隐藏的结构差异</text>
+
+  <!-- link table -->
+  <rect x="20" y="286" width="800" height="98" rx="8" fill="var(--panel)" stroke="var(--line-strong)"/>
+  <g font-family="monospace" font-size="11.5" fill="var(--ink)">
+    <text x="38" y="308">CREATE TABLE USER_BILLINGDETAILS (</text>
+    <text x="54" y="326">USER_ID BIGINT,  BILLINGDETAILS_ID BIGINT,</text>
+    <text x="54" y="344" fill="var(--accent)">PRIMARY KEY (USER_ID, BILLINGDETAILS_ID),</text>
+    <text x="54" y="362">FOREIGN KEY (USER_ID) REFERENCES USERS(ID),  FOREIGN KEY (BILLINGDETAILS_ID) REFERENCES BILLINGDETAILS(ID) );</text>
+  </g>
+</svg>
+</div><figcaption>图 1-4/1-5　关联失配：方向性差异，以及 M:N 必须靠链接表落地</figcaption></figure>
+
+<div class="note"><b>真正的难点</b><p>挑战在于：把一个<b>完全开放、与应用无关</b>的数据模型，映射到一个<b>受限于本应用需要</b>的导航式对象模型上。第 8、9 章会把所有关联映射形态讲透。</p></div>
+
+<h3 id="s25">1.2.5　⑤ 数据导航问题（data navigation）—— 最难的一个</h3>
+
+<p>前四个问题都是<b>结构性的</b>，静态看模型就能发现。第五个是<b>动态的</b>：运行时数据怎么被访问。</p>
+
+<figure><div class="fig-box">
+<svg viewBox="0 0 840 420" xmlns="http://www.w3.org/2000/svg" font-family="Inter,system-ui,sans-serif">
+  <defs><marker id="rd" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0 0 L8 4 L0 8 z" fill="var(--danger)"/></marker>
+  <marker id="gr" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0 0 L8 4 L0 8 z" fill="var(--sql)"/></marker></defs>
+
+  <text x="20" y="22" font-size="13.5" font-weight="700" fill="var(--java)">Java 的自然写法：走对象网（walking the object network）</text>
+  <rect x="20" y="34" width="800" height="46" rx="7" fill="var(--java-soft)" stroke="var(--java)"/>
+  <text x="36" y="62" font-family="monospace" font-size="12" fill="var(--ink)">someUser.getBillingDetails().stream().filter(cond).map(f).forEach(...)</text>
+
+  <text x="20" y="112" font-size="13.5" font-weight="700" fill="var(--danger)">但它翻译成 SQL 就是 n+1 次查询</text>
+  <rect x="20" y="126" width="390" height="220" rx="8" fill="var(--danger-soft)" stroke="var(--danger)"/>
+  <rect x="44" y="146" width="120" height="30" rx="5" fill="var(--panel)" stroke="var(--danger)"/>
+  <text x="104" y="166" text-anchor="middle" font-size="12" fill="var(--ink)">加载 User</text>
+  <text x="180" y="166" font-family="monospace" font-size="10.5" fill="var(--danger)">SELECT #1</text>
+  <path d="M104 176 L104 196" stroke="var(--danger)" stroke-width="1.4" marker-end="url(#rd)"/>
+  <text x="120" y="192" font-size="10.5" fill="var(--ink-faint)">首次访问集合 → 懒加载触发</text>
+  <g>
+    <rect x="44" y="200" width="120" height="26" rx="5" fill="var(--panel)" stroke="var(--danger)"/>
+    <text x="104" y="218" text-anchor="middle" font-size="11.5" fill="var(--ink)">BillingDetails 1</text>
+    <text x="180" y="218" font-family="monospace" font-size="10.5" fill="var(--danger)">SELECT #2</text>
+    <rect x="44" y="232" width="120" height="26" rx="5" fill="var(--panel)" stroke="var(--danger)"/>
+    <text x="104" y="250" text-anchor="middle" font-size="11.5" fill="var(--ink)">BillingDetails 2</text>
+    <text x="180" y="250" font-family="monospace" font-size="10.5" fill="var(--danger)">SELECT #3</text>
+    <text x="104" y="274" text-anchor="middle" font-size="14" fill="var(--ink-faint)">⋮</text>
+    <rect x="44" y="284" width="120" height="26" rx="5" fill="var(--panel)" stroke="var(--danger)"/>
+    <text x="104" y="302" text-anchor="middle" font-size="11.5" fill="var(--ink)">BillingDetails n</text>
+    <text x="180" y="302" font-family="monospace" font-size="10.5" fill="var(--danger)">SELECT #n+1</text>
+  </g>
+  <text x="215" y="332" text-anchor="middle" font-size="13" font-weight="700" fill="var(--danger)">= 臭名昭著的 n+1 selects 问题</text>
+
+  <text x="430" y="112" font-size="13.5" font-weight="700" fill="var(--sql)">SQL 的高效写法：先想好要多深，再一次 JOIN</text>
+  <rect x="430" y="126" width="390" height="220" rx="8" fill="var(--sql-soft)" stroke="var(--sql)"/>
+  <text x="446" y="150" font-size="12" fill="var(--ink)">只要 User：</text>
+  <text x="446" y="172" font-family="monospace" font-size="11" fill="var(--ink)">SELECT * FROM USERS WHERE ID = 123</text>
+  <text x="446" y="204" font-size="12" fill="var(--ink)">还要账单：</text>
+  <text x="446" y="226" font-family="monospace" font-size="11" fill="var(--ink)">SELECT * FROM USERS, BILLINGDETAILS</text>
+  <text x="446" y="244" font-family="monospace" font-size="11" fill="var(--ink)">WHERE USERS.ID = 123 AND …</text>
+  <text x="446" y="278" font-size="12" fill="var(--warn)">⚠ 但 JOIN 太多 → <tspan font-weight="700">笛卡儿积爆炸</tspan></text>
+  <text x="446" y="300" font-size="12" fill="var(--warn)">   取太多数据 → 白白浪费应用层内存</text>
+  <text x="446" y="330" font-size="12.5" font-weight="700" fill="var(--sql)">JOIN 的表数 = 你能在内存里走多深</text>
+
+  <rect x="20" y="360" width="800" height="52" rx="8" fill="var(--accent-soft)" stroke="var(--accent)"/>
+  <text x="36" y="382" font-size="12.5" font-weight="700" fill="var(--accent)">这就是 Java 信息系统最常见的单一性能问题来源。</text>
+  <text x="36" y="402" font-size="12.5" fill="var(--ink)">Hibernate 用「抓取计划 / 抓取策略 / 抓取剖面」（第 12 章）在两个极端之间给你精细的旋钮。</text>
+</svg>
+</div><figcaption>图 1-B　导航失配：懒加载导致 n+1，急加载导致笛卡儿积——两头都是坑</figcaption></figure>
+
+<div class="pit"><b>记住这条铁律</b><p>提升数据访问性能，<b>最重要的一件事是减少对数据库的请求次数</b>，最直接的手段就是减少 SQL 查询数。缓存等手段是第二步。</p></div>
+
+<h2 id="s3"><span class="num">1.3</span>ORM、JPA、Hibernate 与 Spring Data</h2>
+
+<p>把四个名词的关系一次讲清 —— 这是最容易混淆的地方：</p>
+
+<figure><div class="fig-box">
+<svg viewBox="0 0 800 430" xmlns="http://www.w3.org/2000/svg" font-family="Inter,system-ui,sans-serif">
+  <defs><marker id="dn" markerWidth="9" markerHeight="9" refX="8" refY="4.5" orient="auto"><path d="M0 0 L9 4.5 L0 9 z" fill="var(--ink-faint)"/></marker></defs>
+  <rect x="120" y="20" width="560" height="52" rx="9" fill="var(--panel)" stroke="var(--line-strong)"/>
+  <text x="400" y="43" text-anchor="middle" font-size="14" font-weight="700" fill="var(--ink)">你的应用代码（领域模型 + 业务逻辑）</text>
+  <text x="400" y="62" text-anchor="middle" font-size="11.5" fill="var(--ink-faint)">Item、Bid、User…　只和对象打交道</text>
+  <path d="M400 72 L400 94" stroke="var(--ink-faint)" stroke-width="1.4" marker-end="url(#dn)"/>
+
+  <rect x="120" y="96" width="560" height="72" rx="9" fill="var(--accent-soft)" stroke="var(--accent)" stroke-width="1.6"/>
+  <text x="400" y="120" text-anchor="middle" font-size="14" font-weight="700" fill="var(--accent)">Spring Data（可选，最省代码的一层）</text>
+  <text x="400" y="140" text-anchor="middle" font-size="11.5" fill="var(--ink)">Spring Data Commons：技术中立的 Repository 抽象 + 元数据模型</text>
+  <text x="400" y="158" text-anchor="middle" font-size="11.5" fill="var(--ink)">Spring Data JPA（坐在 JPA 上）　|　Spring Data JDBC（直接坐在 JDBC 上）</text>
+  <path d="M400 168 L400 190" stroke="var(--ink-faint)" stroke-width="1.4" marker-end="url(#dn)"/>
+
+  <rect x="120" y="192" width="560" height="60" rx="9" fill="var(--java-soft)" stroke="var(--java)" stroke-width="1.6"/>
+  <text x="400" y="216" text-anchor="middle" font-size="14" font-weight="700" fill="var(--java)">JPA（Jakarta Persistence API）—— 规范：规定「要做什么」</text>
+  <text x="400" y="238" text-anchor="middle" font-size="11.5" fill="var(--ink)">映射元数据 · EntityManager · JPQL/Criteria · 脏检查与缓存策略</text>
+  <path d="M400 252 L400 274" stroke="var(--ink-faint)" stroke-width="1.4" marker-end="url(#dn)"/>
+
+  <rect x="120" y="276" width="560" height="52" rx="9" fill="var(--java-soft)" stroke="var(--java)"/>
+  <text x="400" y="300" text-anchor="middle" font-size="14" font-weight="700" fill="var(--java)">Hibernate —— 实现：决定「怎么做」（最流行的 JPA 提供者）</text>
+  <text x="400" y="319" text-anchor="middle" font-size="11.5" fill="var(--ink-soft)">同时提供大量 JPA 之外的原生扩展</text>
+  <path d="M400 328 L400 350" stroke="var(--ink-faint)" stroke-width="1.4" marker-end="url(#dn)"/>
+
+  <rect x="120" y="352" width="560" height="34" rx="9" fill="var(--bg-soft)" stroke="var(--line-strong)"/>
+  <text x="400" y="374" text-anchor="middle" font-size="13" fill="var(--ink-soft)">JDBC</text>
+  <path d="M400 386 L400 400" stroke="var(--ink-faint)" stroke-width="1.4" marker-end="url(#dn)"/>
+  <rect x="240" y="400" width="320" height="28" rx="9" fill="var(--sql-soft)" stroke="var(--sql)"/>
+  <text x="400" y="419" text-anchor="middle" font-size="13" font-weight="700" fill="var(--sql)">SQL 数据库</text>
+
+  <!-- side note -->
+  <text x="30" y="130" font-size="11.5" fill="var(--ink-faint)">越往上</text>
+  <text x="30" y="148" font-size="11.5" fill="var(--ink-faint)">代码越少</text>
+  <text x="30" y="300" font-size="11.5" fill="var(--ink-faint)">越往下</text>
+  <text x="30" y="318" font-size="11.5" fill="var(--ink-faint)">控制越强</text>
+  <path d="M60 160 L60 290" stroke="var(--line-strong)" stroke-width="1" stroke-dasharray="4 4"/>
+</svg>
+</div><figcaption>图 1-C　四层关系：Spring Data → JPA 规范 → Hibernate 实现 → JDBC → 数据库</figcaption></figure>
+
+<div class="tablewrap"><table>
+<thead><tr><th>名词</th><th>它是什么</th><th>一句话记住</th></tr></thead>
+<tbody>
+<tr><td><b>ORM</b></td><td>一种技术/思想</td><td>用<b>元数据</b>描述类与表的映射，自动、透明、<b>可逆</b>地在两种表示之间转换数据</td></tr>
+<tr><td><b>JPA</b></td><td>规范（接口）</td><td>规定<b>做什么</b>：怎么写映射元数据、EntityManager 提供哪些 CRUD、查询语言是 JPQL</td></tr>
+<tr><td><b>Hibernate</b></td><td>JPA 的实现</td><td>规定<b>怎么做</b>：最流行的持久化提供者，另有丰富的原生扩展</td></tr>
+<tr><td><b>Spring Data</b></td><td>Spring 系的伞形项目</td><td>再往上加一层：<b>连 DAO 实现都不用写</b>，接口声明完就有实现</td></tr>
+</tbody></table></div>
+
+<h3>JPA 规范定义了什么</h3>
+<ul>
+<li><b>映射元数据机制</b>——持久化类及其属性如何对应到数据库 schema。JPA 重度依赖领域类上的<b>注解</b>，也支持 XML 文件（第 3 章）。</li>
+<li><b>基本 CRUD 的 API</b>——最核心的是 <code>EntityManager</code>（第 10 章）。</li>
+<li><b>查询语言与 API</b>——<b>JPQL</b>（长得像 SQL，但引用的是<b>类和属性</b>而非表和列），以及可程序化构造、无需拼字符串的 <b>Criteria API</b>。</li>
+<li><b>持久化引擎的行为</b>——如何对事务中的实例做<b>脏检查</b>、关联抓取及其他优化，还有基本缓存策略。</li>
+</ul>
+
+<h3>Hibernate 带来的四个收益</h3>
+<div class="keyhint"><span class="k">Productivity 生产力</span><span>消除大量重复劳动；无论自顶向下（从领域模型出发）还是自底向上（从既有 schema 出发）都能显著缩短开发时间。</span></div>
+<div class="keyhint"><span class="k">Maintainability 可维护性</span><span>代码行数变少 ⇒ 更易理解、更易重构；并在领域模型和 SQL schema 之间形成<b>缓冲层</b>，一侧的小改动不会立刻冲击另一侧。</span></div>
+<div class="keyhint"><span class="k">Performance 性能</span><span>手写持久化理论上可以更快（就像汇编快过 Java），但自动化方案能<b>始终</b>启用大量优化（如应用层可调缓存），让你把精力集中在真正剩下的瓶颈上，而不是过早优化一切。</span></div>
+<div class="keyhint"><span class="k">Vendor independence 厂商无关</span><span>缓解厂商锁定风险；即便你永不换 DBMS，本地用轻量库开发、测试与生产用另一套系统的场景也很常见。</span></div>
+
+<h3>Spring Data 再叠加的五个收益</h3>
+<div class="keyhint"><span class="k">共享基础设施</span><span>Spring Data Commons 提供元数据模型和技术中立的 Repository 接口，供家族内所有项目复用。</span></div>
+<div class="keyhint"><span class="k">干掉 DAO 实现</span><span>JPA 方案通常用 DAO 模式；Spring Data JPA 让你<b>完全不写 DAO 实现类</b>。</span></div>
+<div class="keyhint"><span class="k">自动生成实现类</span><span>DAO 接口只要继承 <code>JpaRepository</code>，Spring Data 会以<b>代理类</b>的形式自动生成实现。</span></div>
+<div class="keyhint"><span class="k">默认方法实现</span><span>基础 CRUD 不用再写 —— 少了样板代码，也就少了引入 bug 的机会。</span></div>
+<div class="keyhint"><span class="k">按方法名生成查询</span><span>按命名模式声明方法，Spring Data 解析方法名并<b>替你造出查询</b>（第 4 章重点）。</span></div>
+<div class="keyhint"><span class="k">需要时贴近数据库</span><span>Spring Data JDBC 绕开 JPA 的“魔法”直连数据库，但仍用 Spring 设施消除样板代码（第 15 章）。</span></div>
+
+<div class="pit"><b>本书的立场，请务必记牢</b>
+<p>“ORM 让开发者不必接触讨厌的 SQL”——<b>这个观点是错的</b>。恰恰相反：要用好 Hibernate 和 Spring Data，你必须能<b>看懂并解读它发出的 SQL</b>、判断其性能影响；要用好 Spring Data，你必须能<b>预判它生成了什么样板代码和查询</b>。ORM 是给已经用硬办法做过一遍的人准备的高级技术。</p></div>
+
+<h2 id="s4"><span class="num">§</span>源码对照：本章仓库里有什么</h2>
+<div class="tablewrap"><table>
+<thead><tr><th>路径</th><th>内容</th></tr></thead>
+<tbody>
+<tr><td><code>Ch01/Ch01.sql</code></td><td>三段 schema 演进：① 自然键初版 → ② 代理键 + 地址摊平 → ③ M:N 链接表</td></tr>
+<tr><td><code>Ch01/e-commerce/…/User.java</code></td><td>纯 POJO，无任何注解。注意 <code>getBillingDetails()</code> 返回 <code>Collections.unmodifiableSet(...)</code>，通过 <code>addBillingDetails()</code> 管理集合——这是第 3 章“防御性集合访问”的伏笔</td></tr>
+<tr><td><code>Ch01/e-commerce/…/BillingDetails.java</code></td><td>纯 POJO，持有反向的 <code>User user</code> 引用</td></tr>
+</tbody></table></div>
+
+<div class="tip"><b>动手建议</b><p>用编辑器打开这两个 POJO，然后对照 <code>Ch01.sql</code> 自问：如果只给你 JDBC，你要写多少行代码才能把一个 <code>User</code> 连同它的 <code>Set&lt;BillingDetails&gt;</code> 存进去、再原样读出来（还要保证第二次读到的是<b>同一个</b> Java 实例）？这个数字就是 ORM 为你省下的东西。</p></div>
+
+<div class="summary" id="s5">
+<h3>本章小结</h3>
+<ul>
+<li><b>对象持久化</b>让对象活得比进程久；当存储是 SQL 数据库时，就出现对象/关系失配——对象网无法整体存入一张表，必须<b>拆解</b>成可移植 SQL 类型的列。</li>
+<li>五道裂缝：<b>粒度</b>（Java 无限细分 vs SQL 只有两级）、<b>继承</b>（无表继承、外键无法多态）、<b>标识</b>（<code>==</code> / <code>equals()</code> / 主键三套语义）、<b>关联</b>（引用有向、M:N 需链接表）、<b>导航</b>（走对象网 vs 一次 JOIN）。</li>
+<li><b>ORM 不是银弹</b>：它的职责是替开发者消化掉约 95% 的对象持久化工作——写复杂多表 JOIN、把 JDBC 结果集的值搬进对象网。</li>
+<li>成熟的 ORM 中间件还提供数据库可移植性、缓存等优化，这些用有限时间靠 SQL + JDBC 手写很难做好。在 Java 世界，这意味着 <b>JPA 规范 + 一个实现（当下最流行的是 Hibernate）</b>。</li>
+<li><b>Spring Data</b> 叠在 JPA 实现之上，遵循 Spring 框架理念，进一步简化：去掉 DAO 模式、自动生成代码、自动生成查询。</li>
+</ul>
+</div>
+
+<div class="pager">
+  <span>← 已是第一章</span>
+  <a href="ch02.html">第 2 章　启动一个项目 →</a>
+</div>
+</main>
+</div>
+</body>
+</html>

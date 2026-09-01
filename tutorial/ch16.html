@@ -1,0 +1,738 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>第 16 章 · 使用 Spring Data REST</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="topbar"><div class="topbar-inner">
+  <a class="brand" href="index.html">Java Persistence 讲义</a>
+  <span class="spacer"></span>
+  <a href="ch15.html">← 上一章</a>
+  <a href="index.html">目录</a>
+  <a href="ch17.html">下一章 →</a>
+</div></div>
+
+<div class="wrap">
+<nav class="toc">
+  <h4>本章目录</h4>
+  <a href="#s1">16.1 REST 应用简介</a>
+  <a href="#s2">16.2 创建应用</a>
+  <a class="sub" href="#s21">依赖与配置</a>
+  <a class="sub" href="#s22">实体、Bean 与仓库</a>
+  <a href="#s3">16.3 用 ETag 做条件请求</a>
+  <a href="#s4">16.4 限制访问</a>
+  <a href="#s5">16.5 REST 事件</a>
+  <a class="sub" href="#s51">注解处理器</a>
+  <a class="sub" href="#s52">应用监听器</a>
+  <a href="#s6">16.6 投影与摘录</a>
+  <a href="#s7">本章小结</a>
+</nav>
+
+<main>
+<div class="hero">
+  <div class="eyebrow">Part 4 · 用 Spring 构建持久化应用</div>
+  <h1>第 16 章　使用 Spring Data REST</h1>
+  <p>Spring Data REST 做的事情，用一句话说就是：<b>把你已经写好的 Spring Data 仓库，自动导出成一套 RESTful HTTP 接口</b>——你不写一行 Controller。本章从 REST 的六条架构约束讲起，然后搭一个应用，再依次讲 ETag 条件请求、访问限制、REST 事件、投影与摘录。</p>
+</div>
+
+<div class="note"><b>本章的三个源码工程</b><p><code>Ch16/spring-data-rest</code>（基础 + ETag + 访问限制）、<code>spring-data-rest-events</code>（REST 事件）、<code>spring-data-rest-projections</code>（投影与摘录）。运行前先执行 <code>Ch16/Ch16.sql</code>。</p></div>
+
+<h2 id="s1"><span class="num">16.1</span> REST 应用简介</h2>
+
+<p><b>表述性状态转移（Representational State Transfer，REST）</b>是一种创建 Web 服务的软件架构风格，同时也提供了一组约束。它由美国计算机科学家 Roy Fielding（同时也是 HTTP 规范的作者之一）在 2000 年的博士论文中首次定义。遵循这种风格的 Web 服务被称为 <b>RESTful Web 服务</b>。</p>
+
+<div class="cols">
+<div class="card"><h4>客户端（client）</h4><p>使用 RESTful API 的人或软件。用 API 操作 LinkedIn 的程序员是客户端；你打开 LinkedIn 网站时，<b>浏览器也是客户端</b>。</p></div>
+<div class="card"><h4>资源（resource）</h4><p>API 能获取信息的任何对象。在 LinkedIn API 里，一条消息、一张照片、一个用户都是资源。<b>每个资源都有唯一标识符（URL）。</b></p></div>
+</div>
+
+<figure>
+<div class="fig-box">
+<svg viewBox="0 0 820 400" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="REST 的六条架构约束">
+  <text x="410" y="26" text-anchor="middle" font-size="14" font-weight="700" fill="var(--ink)">REST 的六条架构约束</text>
+
+  <rect x="20" y="46" width="250" height="96" rx="8" fill="var(--java-soft)" stroke="var(--java)"/>
+  <text x="34" y="70" font-size="12.5" font-weight="700" fill="var(--ink)">① 客户端-服务器</text>
+  <text x="34" y="92" font-size="11" fill="var(--ink-soft)">各管各的关切：客户端关心「呈现给</text>
+  <text x="34" y="108" font-size="11" fill="var(--ink-soft)">用户的表现形式」，服务器关心「数据</text>
+  <text x="34" y="124" font-size="11" fill="var(--ink-soft)">存储与领域模型逻辑」。</text>
+
+  <rect x="285" y="46" width="250" height="96" rx="8" fill="var(--java-soft)" stroke="var(--java)"/>
+  <text x="299" y="70" font-size="12.5" font-weight="700" fill="var(--ink)">② 无状态</text>
+  <text x="299" y="92" font-size="11" fill="var(--ink-soft)">服务器<tspan font-weight="700">不在两次请求之间保存客户端</tspan></text>
+  <text x="299" y="108" font-size="11" fill="var(--ink-soft)"><tspan font-weight="700">的任何信息</tspan>。每个请求都自带响应它</text>
+  <text x="299" y="124" font-size="11" fill="var(--ink-soft)">所需的全部信息。状态由客户端保管。</text>
+
+  <rect x="550" y="46" width="250" height="96" rx="8" fill="var(--java-soft)" stroke="var(--java)"/>
+  <text x="564" y="70" font-size="12.5" font-weight="700" fill="var(--ink)">③ 统一接口</text>
+  <text x="564" y="92" font-size="11" fill="var(--ink-soft)">客户端和服务器可以<tspan font-weight="700">彼此独立地演进</tspan>。</text>
+  <text x="564" y="108" font-size="11" fill="var(--ink-soft)">两者之间的统一接口使它们保持</text>
+  <text x="564" y="124" font-size="11" fill="var(--ink-soft)">松耦合。</text>
+
+  <rect x="20" y="156" width="250" height="96" rx="8" fill="var(--sql-soft)" stroke="var(--sql)"/>
+  <text x="34" y="180" font-size="12.5" font-weight="700" fill="var(--ink)">④ 分层系统</text>
+  <text x="34" y="202" font-size="11" fill="var(--ink-soft)">客户端无法判断自己是在直接和服务器</text>
+  <text x="34" y="218" font-size="11" fill="var(--ink-soft)">通信还是和中间层通信。层可以动态</text>
+  <text x="34" y="234" font-size="11" fill="var(--ink-soft)">增删：安全、负载均衡、共享缓存。</text>
+
+  <rect x="285" y="156" width="250" height="96" rx="8" fill="var(--sql-soft)" stroke="var(--sql)"/>
+  <text x="299" y="180" font-size="12.5" font-weight="700" fill="var(--ink)">⑤ 可缓存</text>
+  <text x="299" y="202" font-size="11" fill="var(--ink-soft)">客户端能够缓存响应。响应<tspan font-weight="700">自己声明</tspan></text>
+  <text x="299" y="218" font-size="11" fill="var(--ink-soft)">自己是否可缓存。</text>
+  <text x="299" y="240" font-size="11" fill="var(--accent)">→ 16.3 节的 ETag 正是这条的落地</text>
+
+  <rect x="550" y="156" width="250" height="96" rx="8" fill="var(--panel)" stroke="var(--line-strong)" stroke-dasharray="4 3"/>
+  <text x="564" y="180" font-size="12.5" font-weight="700" fill="var(--ink-soft)">⑥ 按需代码（可选）</text>
+  <text x="564" y="202" font-size="11" fill="var(--ink-soft)">服务器可以临时定制或扩展客户端的</text>
+  <text x="564" y="218" font-size="11" fill="var(--ink-soft)">功能，把一段逻辑传给客户端执行，</text>
+  <text x="564" y="234" font-size="11" fill="var(--ink-soft)">例如 JavaScript 客户端脚本。</text>
+
+  <!-- request anatomy -->
+  <rect x="20" y="278" width="780" height="104" rx="8" fill="var(--accent-soft)" stroke="var(--accent)"/>
+  <text x="410" y="302" text-anchor="middle" font-size="12.5" font-weight="700" fill="var(--ink)">一次 REST 请求，客户端要告诉服务器两件事</text>
+  <rect x="60" y="316" width="330" height="50" rx="6" fill="var(--panel)" stroke="var(--line-strong)"/>
+  <text x="225" y="336" text-anchor="middle" font-size="11.5" fill="var(--ink)">① 资源的标识符（URL）</text>
+  <text x="225" y="356" text-anchor="middle" font-size="11.5" font-family="var(--mono)" fill="var(--accent)">http://localhost:8081/users/1</text>
+  <rect x="430" y="316" width="330" height="50" rx="6" fill="var(--panel)" stroke="var(--line-strong)"/>
+  <text x="595" y="336" text-anchor="middle" font-size="11.5" fill="var(--ink)">② 要执行的操作（HTTP 方法）</text>
+  <text x="595" y="356" text-anchor="middle" font-size="11.5" font-family="var(--mono)" fill="var(--accent)">GET POST PUT PATCH DELETE</text>
+</svg>
+</div>
+<figcaption>图 16-A　REST 的六条约束，以及一次请求的两个必要组成部分。状态的表述可以是 JSON、XML 或 HTML 格式。</figcaption>
+</figure>
+
+<div class="tip"><b>「无状态」的实际含义</b><p>无状态操作<b>不依赖任何先前的操作</b>；它必须包含服务器理解它所需的全部信息。这跟第 10 章讲的持久化上下文（有状态）形成鲜明对照——HTTP 请求之间没有「会话」可言，你不能指望服务器记得上一次你是谁、做了什么。</p></div>
+
+<h2 id="s2"><span class="num">16.2</span> 创建一个 Spring Data REST 应用</h2>
+
+<h3 id="s21">依赖与配置</h3>
+
+<p>在 Spring Initializr 上建项目，group <code>com.manning.javapersistence</code>，artifact <code>spring-data-rest</code>，勾选<b>四个</b>依赖：</p>
+
+<div class="tablewrap">
+<table>
+<thead><tr><th>Initializr 里勾的</th><th>加进 pom.xml 的</th><th>作用</th></tr></thead>
+<tbody>
+<tr><td>Spring Web</td><td><code>spring-boot-starter-web</code></td><td>构建 Web 应用的 starter</td></tr>
+<tr><td>Spring Data JPA</td><td><code>spring-boot-starter-data-jpa</code></td><td>通过 Spring Data JPA 连接关系数据库</td></tr>
+<tr><td><b>REST Repositories</b></td><td><code>spring-boot-starter-data-rest</code></td><td><b>Spring Data REST 的 starter，本章的主角</b></td></tr>
+<tr><td>MySQL Driver</td><td><code>mysql-connector-java</code>（runtime）</td><td>MySQL 的 JDBC 驱动</td></tr>
+</tbody>
+</table>
+</div>
+
+<div class="filename">Ch16/spring-data-rest/src/main/resources/application.properties</div>
+<pre><code><span class="hl">server.port=8081</span>                                                        <span class="cmt"># A</span>
+spring.datasource.url=jdbc:mysql://localhost:3306/CH16_SPRINGDATAREST?serverTimezone=UTC
+spring.datasource.username=root                                          <span class="cmt"># C</span>
+spring.datasource.password=
+spring.jpa.properties.hibernate.dialect=org.hibernate.dialect.MySQL8Dialect
+spring.jpa.show-sql=true                                                 <span class="cmt"># E</span>
+spring.jpa.hibernate.ddl-auto=create                                     <span class="cmt"># F</span></code></pre>
+
+<div class="keyhint">
+<div><span class="k">A</span> 应用启动在 8081 端口。</div>
+<div><span class="k">C</span> 访问数据库的凭证。换成你机器上的凭证，<b>真实项目里请一定设密码</b>。</div>
+<div><span class="k">E</span> 执行 SQL 查询时打印出来。</div>
+<div><span class="k">F</span> 每次运行应用都重建表。注意这里用了 Spring Data JPA，所以 <b>schema 是自动生成的</b>——和上一章的 Spring Data JDBC 正好相反。</div>
+</div>
+
+<h3 id="s22">实体、Bean 与仓库</h3>
+
+<p><code>User</code> 类多了一个 <code>@Version</code> 字段。回忆 11.2.2 节：每当被修改的 <code>User</code> 实例被持久化，这个字段的值就会递增。<b>16.3 节会展示这个字段如何被用作 ETag。</b></p>
+
+<div class="filename">Ch16/spring-data-rest/.../model/User.java 与 Auction.java</div>
+<pre><code><span class="ann">@Entity</span>
+<span class="kw">public class</span> User {
+    <span class="ann">@Id</span> <span class="ann">@GeneratedValue</span> <span class="kw">private</span> Long id;
+
+    <span class="hl">@Version</span>
+    <span class="kw">private</span> Long version;              <span class="cmt">// 乐观锁版本号，同时也是 ETag 的来源</span>
+
+    <span class="kw">private</span> String name;
+    <span class="kw">private boolean</span> isRegistered;
+    <span class="kw">private boolean</span> isCitizen;
+}
+
+<span class="cmt">// 用户参与拍卖，拍卖由 Auction 类表示：拍卖编号、席位数、参与用户集合</span>
+<span class="kw">public class</span> Auction {
+    <span class="kw">private</span> String auctionNumber;
+    <span class="kw">private int</span> seats;
+    <span class="kw">private</span> Set&lt;User&gt; users = <span class="kw">new</span> HashSet&lt;&gt;();
+}</code></pre>
+
+<p>参与拍卖的用户从一个 CSV 文件读入，由 <code>CsvDataLoader</code> 类负责。这里用 <code>@Bean</code> 注解创建一个交给 Spring 管理并注入应用的 bean：</p>
+
+<div class="filename">Ch16/spring-data-rest/.../beans/CsvDataLoader.java</div>
+<pre><code><span class="kw">public class</span> CsvDataLoader {
+
+    <span class="ann">@Bean</span>                                                          <span class="cmt">// A：方法的返回值成为 Spring 管理的 bean</span>
+    <span class="kw">public</span> Auction buildAuctionFromCsv() <span class="kw">throws</span> IOException {   <span class="cmt">// B</span>
+        Auction auction = <span class="kw">new</span> Auction(<span class="str">"1234"</span>, <span class="str">20</span>);
+        <span class="kw">try</span> (BufferedReader reader = <span class="kw">new</span> BufferedReader(          <span class="cmt">// C</span>
+             <span class="kw">new</span> FileReader(<span class="str">"src/main/resources/users_information.csv"</span>))) {
+            String line = <span class="kw">null</span>;
+            <span class="kw">do</span> {                                                  <span class="cmt">// D：逐行读</span>
+                line = reader.readLine();
+                <span class="kw">if</span> (line != <span class="kw">null</span>) {
+                    User user = <span class="kw">new</span> User(line);                    <span class="cmt">// E</span>
+                    user.setIsRegistered(<span class="kw">false</span>);
+                    auction.addUser(user);
+                }
+            } <span class="kw">while</span> (line != <span class="kw">null</span>);
+        }
+        <span class="kw">return</span> auction;                                            <span class="cmt">// F</span>
+    }
+}</code></pre>
+
+<p>仓库接口<b>什么都不用写</b>——这正是 Spring Data REST 的魔力所在：</p>
+
+<div class="filename">Ch16/spring-data-rest/.../repositories/UserRepository.java</div>
+<pre><code><span class="kw">public interface</span> UserRepository <span class="kw">extends</span> JpaRepository&lt;User, Long&gt; {
+
+}</code></pre>
+
+<div class="filename">Ch16/spring-data-rest/.../Application.java</div>
+<pre><code><span class="ann">@SpringBootApplication</span>
+<span class="ann">@Import</span>(CsvDataLoader.class)                    <span class="cmt">// A：导入 CsvDataLoader 及它创建的 Auction bean</span>
+<span class="kw">public class</span> Application {
+
+    <span class="ann">@Autowired</span>                                  <span class="cmt">// B：注入这个 Auction bean</span>
+    <span class="kw">private</span> Auction auction;
+
+    <span class="kw">public static void</span> main(String[] args) {
+        SpringApplication.run(Application.class, args);
+    }
+
+    <span class="ann">@Bean</span>
+    ApplicationRunner configureRepository(UserRepository userRepository) {   <span class="cmt">// C</span>
+        <span class="kw">return</span> args -&gt; {
+            <span class="kw">for</span> (User user : auction.getUsers()) {
+                userRepository.save(user);
+            }
+        };
+    }
+}</code></pre>
+
+<div class="note"><b><code>ApplicationRunner</code> 是什么</b><p>这是 Spring Boot 的一个<b>函数式接口</b>（只有一个抽象方法的接口），能拿到应用的启动参数。这个接口的实例会被创建，并且它的唯一方法会<b>在 <code>SpringApplication.run()</code> 方法即将完成之前被执行</b>——正好用来做数据预填充。</p></div>
+
+<figure>
+<div class="fig-box">
+<svg viewBox="0 0 820 380" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Spring Data REST 自动导出仓库为 REST 端点">
+  <defs><marker id="a16" markerWidth="9" markerHeight="9" refX="8" refY="4.5" orient="auto"><path d="M0 0 L9 4.5 L0 9 z" fill="var(--ink-faint)"/></marker>
+  <marker id="a16r" markerWidth="9" markerHeight="9" refX="8" refY="4.5" orient="auto"><path d="M0 0 L9 4.5 L0 9 z" fill="var(--accent)"/></marker></defs>
+
+  <text x="410" y="24" text-anchor="middle" font-size="13.5" font-weight="700" fill="var(--ink)">你写了什么　vs　你得到了什么</text>
+
+  <!-- what you write -->
+  <rect x="20" y="44" width="240" height="150" rx="8" fill="var(--java-soft)" stroke="var(--java)"/>
+  <text x="140" y="66" text-anchor="middle" font-size="12.5" font-weight="700" fill="var(--ink)">你写的全部代码</text>
+  <text x="34" y="92" font-size="10.5" font-family="var(--mono)" fill="var(--ink)">@Entity</text>
+  <text x="34" y="108" font-size="10.5" font-family="var(--mono)" fill="var(--ink)">class User { ... }</text>
+  <text x="34" y="134" font-size="10.5" font-family="var(--mono)" fill="var(--ink)">interface UserRepository</text>
+  <text x="34" y="150" font-size="10.5" font-family="var(--mono)" fill="var(--ink)">  extends JpaRepository</text>
+  <text x="34" y="166" font-size="10.5" font-family="var(--mono)" fill="var(--ink)">        &lt;User, Long&gt; { }</text>
+  <text x="140" y="186" text-anchor="middle" font-size="11" fill="var(--danger)">零个 Controller</text>
+
+  <path d="M264 118 L316 118" stroke="var(--accent)" stroke-width="2" marker-end="url(#a16r)"/>
+  <text x="290" y="110" text-anchor="middle" font-size="10.5" fill="var(--accent)">自动</text>
+
+  <!-- what you get -->
+  <rect x="320" y="44" width="480" height="150" rx="8" fill="var(--sql-soft)" stroke="var(--sql)"/>
+  <text x="560" y="66" text-anchor="middle" font-size="12.5" font-weight="700" fill="var(--ink)">Spring Data REST 自动导出的端点</text>
+  <g font-size="11" font-family="var(--mono)">
+    <text x="336" y="90" fill="var(--sql)">GET</text>    <text x="392" y="90" fill="var(--ink)">/users</text>          <text x="560" y="90" font-family="var(--sans)" fill="var(--ink-soft)">列出全部（带分页 &amp; 链接）</text>
+    <text x="336" y="110" fill="var(--sql)">GET</text>    <text x="392" y="110" fill="var(--ink)">/users/1</text>        <text x="560" y="110" font-family="var(--sans)" fill="var(--ink-soft)">按 ID 读取单条</text>
+    <text x="336" y="130" fill="var(--accent)">POST</text> <text x="392" y="130" fill="var(--ink)">/users</text>          <text x="560" y="130" font-family="var(--sans)" fill="var(--ink-soft)">新建</text>
+    <text x="336" y="150" fill="var(--warn)">PUT</text>   <text x="392" y="150" fill="var(--ink)">/users/1</text>        <text x="560" y="150" font-family="var(--sans)" fill="var(--ink-soft)">整体替换</text>
+    <text x="336" y="170" fill="var(--warn)">PATCH</text> <text x="392" y="170" fill="var(--ink)">/users/1</text>        <text x="560" y="170" font-family="var(--sans)" fill="var(--ink-soft)">局部更新（只改请求里带的字段）</text>
+    <text x="336" y="188" fill="var(--danger)">DELETE</text><text x="392" y="188" fill="var(--ink)">/users/1</text>       <text x="560" y="188" font-family="var(--sans)" fill="var(--ink-soft)">删除</text>
+  </g>
+
+  <!-- PUT vs PATCH -->
+  <rect x="20" y="214" width="780" height="66" rx="8" fill="var(--warn-soft)" stroke="var(--warn)"/>
+  <text x="410" y="238" text-anchor="middle" font-size="12.5" font-weight="700" fill="var(--ink)">PUT 与 PATCH 的区别</text>
+  <text x="410" y="260" text-anchor="middle" font-size="11.5" fill="var(--ink)">PATCH <tspan font-weight="700">只更新请求里包含的字段</tspan>；PUT 则用一个新实体<tspan font-weight="700">整体替换</tspan>掉原来的实体。</text>
+  <text x="410" y="274" text-anchor="middle" font-size="11" fill="var(--ink-soft)">所以想改一个字段就用 PATCH，用 PUT 会把没写的字段清空。</text>
+
+  <!-- browsing -->
+  <rect x="20" y="298" width="780" height="66" rx="8" fill="var(--accent-soft)" stroke="var(--accent)"/>
+  <text x="410" y="322" text-anchor="middle" font-size="12" fill="var(--ink)">浏览器直接访问 <tspan font-family="var(--mono)">http://localhost:8081/users</tspan> 就能看到数据，</text>
+  <text x="410" y="344" text-anchor="middle" font-size="12" fill="var(--ink)">Spring Data REST 会<tspan font-weight="700">把 API 自身的信息也导出来</tspan>，为每条记录提供链接，可以顺着链接一路点下去。</text>
+</svg>
+</div>
+<figcaption>图 16-B　「零 Controller」的 REST API。一个空接口换来一整套端点，外加 HATEOAS 风格的自描述链接。</figcaption>
+</figure>
+
+<p>你也可以用 REST 客户端测试（IntelliJ IDEA Ultimate 自带一个，也可以用 cURL 或 Postman）：</p>
+
+<pre><code>GET http://localhost:8081/users/1</code></pre>
+
+<h2 id="s3"><span class="num">16.3</span> 用 ETag 做条件请求</h2>
+
+<p>任何跨网络的信息交换都要花时间——<b>信息越小，程序跑得越快</b>。但什么时候、怎样才能减少从服务器取回并在网络上传输的数据量？</p>
+
+<p>假设我们要反复执行同一条 <code>GET http://localhost:8081/users/1</code>。每次都会访问服务器，每次都把同样的信息传一遍——这很低效。</p>
+
+<p><b>ETag 是 Web 服务器返回的一个 HTTP 响应头。</b>它帮助我们判断某个 URL 上的内容是否被修改过，从而可以发出<b>条件请求</b>。在我们的 <code>User</code> 类里，那个 <code>@Version</code> 字段<b>就会被当作 ETag 使用</b>。</p>
+
+<figure>
+<div class="fig-box">
+<svg viewBox="0 0 820 470" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="ETag 条件请求的四步时序">
+  <defs><marker id="a16b" markerWidth="8" markerHeight="8" refX="7.5" refY="4" orient="auto"><path d="M0 0 L8 4 L0 8 z" fill="var(--ink-faint)"/></marker></defs>
+  <text x="150" y="24" text-anchor="middle" font-size="12.5" font-weight="700" fill="var(--java)">客户端</text>
+  <text x="670" y="24" text-anchor="middle" font-size="12.5" font-weight="700" fill="var(--sql)">服务器（DB 中 version 列）</text>
+  <path d="M150 32 L150 452" stroke="var(--line-strong)" stroke-width="1.5" stroke-dasharray="4 4"/>
+  <path d="M670 32 L670 452" stroke="var(--line-strong)" stroke-width="1.5" stroke-dasharray="4 4"/>
+
+  <!-- step 1 -->
+  <text x="20" y="58" font-size="11.5" font-weight="700" fill="var(--accent)">① 首次请求</text>
+  <path d="M152 74 L666 74" stroke="var(--ink-faint)" stroke-width="1.5" marker-end="url(#a16b)"/>
+  <text x="410" y="68" text-anchor="middle" font-size="11" font-family="var(--mono)" fill="var(--ink)">GET /users/1</text>
+  <path d="M668 106 L154 106" stroke="var(--sql)" stroke-width="1.5" marker-end="url(#a16b)"/>
+  <text x="410" y="100" text-anchor="middle" font-size="11" font-family="var(--mono)" fill="var(--sql)">HTTP/1.1 200　ETag: "0"　+ 完整 JSON</text>
+  <text x="700" y="90" font-size="11" fill="var(--ink-soft)">version = 0</text>
+
+  <!-- step 2 -->
+  <text x="20" y="150" font-size="11.5" font-weight="700" fill="var(--accent)">② 条件请求</text>
+  <path d="M152 166 L666 166" stroke="var(--ink-faint)" stroke-width="1.5" marker-end="url(#a16b)"/>
+  <text x="410" y="160" text-anchor="middle" font-size="11" font-family="var(--mono)" fill="var(--ink)">GET /users/1　If-None-Match: "0"</text>
+  <path d="M668 198 L154 198" stroke="var(--warn)" stroke-width="1.5" marker-end="url(#a16b)"/>
+  <text x="410" y="192" text-anchor="middle" font-size="11" font-family="var(--mono)" fill="var(--warn)">HTTP/1.1 304 Not Modified　ETag: "0"</text>
+  <text x="410" y="214" text-anchor="middle" font-size="11" font-weight="700" fill="var(--warn)">&lt;响应体为空&gt; ← 省下了整个 JSON 的传输</text>
+
+  <!-- step 3 -->
+  <text x="20" y="252" font-size="11.5" font-weight="700" fill="var(--accent)">③ 修改</text>
+  <path d="M152 268 L666 268" stroke="var(--ink-faint)" stroke-width="1.5" marker-end="url(#a16b)"/>
+  <text x="410" y="248" text-anchor="middle" font-size="11" font-family="var(--mono)" fill="var(--ink)">PATCH /users/1　Content-Type: application/json</text>
+  <text x="410" y="262" text-anchor="middle" font-size="10.5" font-family="var(--mono)" fill="var(--ink-soft)">{ "name": "Amelia Jones", "isRegistered": "true" }</text>
+  <path d="M668 302 L154 302" stroke="var(--sql)" stroke-width="1.5" marker-end="url(#a16b)"/>
+  <text x="410" y="296" text-anchor="middle" font-size="11" font-family="var(--mono)" fill="var(--sql)">HTTP/1.1 204 No Content　ETag: "1"</text>
+  <text x="700" y="286" font-size="11" font-weight="700" fill="var(--accent)">version → 1</text>
+
+  <!-- step 4 -->
+  <text x="20" y="346" font-size="11.5" font-weight="700" fill="var(--accent)">④ 再次条件请求</text>
+  <path d="M152 362 L666 362" stroke="var(--ink-faint)" stroke-width="1.5" marker-end="url(#a16b)"/>
+  <text x="410" y="356" text-anchor="middle" font-size="11" font-family="var(--mono)" fill="var(--ink)">GET /users/1　If-None-Match: "0"</text>
+  <path d="M668 394 L154 394" stroke="var(--sql)" stroke-width="1.5" marker-end="url(#a16b)"/>
+  <text x="410" y="388" text-anchor="middle" font-size="11" font-family="var(--mono)" fill="var(--sql)">HTTP/1.1 200　ETag: "1"　+ 完整 JSON</text>
+  <text x="410" y="410" text-anchor="middle" font-size="11" font-weight="700" fill="var(--sql)">ETag 从 0 变成了 1 ⇒ 内容确实变了 ⇒ 发完整数据</text>
+
+  <rect x="20" y="426" width="780" height="34" rx="6" fill="var(--accent-soft)" stroke="var(--accent)"/>
+  <text x="410" y="448" text-anchor="middle" font-size="12" fill="var(--ink)">一句话：<tspan font-weight="700">@Version 字段既是乐观锁的版本号（第 11 章），也是 HTTP 层的缓存校验符。</tspan>同一个数字，两个用途。</text>
+</svg>
+</div>
+<figcaption>图 16-C　ETag 条件请求的完整来回。<code>If-None-Match</code> 头把「有没有变」的判断交给服务器，没变就只回 304 空响应。</figcaption>
+</figure>
+
+<h2 id="s4"><span class="num">16.4</span> 限制对仓库、方法与字段的访问</h2>
+
+<p>Spring Data REST <b>默认会导出所有 public 的顶层仓库接口</b>。但真实场景经常需要限制对特定方法、字段甚至整个仓库的访问。</p>
+
+<figure>
+<div class="fig-box">
+<svg viewBox="0 0 820 300" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="三个粒度的访问限制">
+  <text x="410" y="24" text-anchor="middle" font-size="13.5" font-weight="700" fill="var(--ink)">三个粒度的访问限制</text>
+
+  <rect x="20" y="44" width="250" height="200" rx="8" fill="var(--danger-soft)" stroke="var(--danger)"/>
+  <text x="145" y="68" text-anchor="middle" font-size="12.5" font-weight="700" fill="var(--ink)">① 整个仓库</text>
+  <text x="34" y="96" font-size="10.5" font-family="var(--mono)" fill="var(--ink)">@RepositoryRestResource(</text>
+  <text x="34" y="112" font-size="10.5" font-family="var(--mono)" fill="var(--ink)">   path = "users",</text>
+  <text x="34" y="128" font-size="10.5" font-family="var(--mono)" fill="var(--danger)">   exported = false)</text>
+  <text x="34" y="144" font-size="10.5" font-family="var(--mono)" fill="var(--ink)">interface UserRepository</text>
+  <text x="145" y="176" text-anchor="middle" font-size="11.5" fill="var(--ink-soft)">任何针对它的命令都出错</text>
+  <rect x="44" y="188" width="202" height="40" rx="5" fill="var(--panel)" stroke="var(--danger)"/>
+  <text x="145" y="206" text-anchor="middle" font-size="11" font-family="var(--mono)" fill="var(--danger)">GET /users/1</text>
+  <text x="145" y="222" text-anchor="middle" font-size="11.5" font-weight="700" fill="var(--danger)">→ 404 Not Found</text>
+
+  <rect x="285" y="44" width="250" height="200" rx="8" fill="var(--warn-soft)" stroke="var(--warn)"/>
+  <text x="410" y="68" text-anchor="middle" font-size="12.5" font-weight="700" fill="var(--ink)">② 单个方法</text>
+  <text x="299" y="96" font-size="10.5" font-family="var(--mono)" fill="var(--ink)">@Override</text>
+  <text x="299" y="112" font-size="10.5" font-family="var(--mono)" fill="var(--warn)">@RestResource(exported=false)</text>
+  <text x="299" y="128" font-size="10.5" font-family="var(--mono)" fill="var(--ink)">void deleteById(Long id);</text>
+  <text x="410" y="160" text-anchor="middle" font-size="11.5" fill="var(--ink-soft)">该方法不再被导出</text>
+  <rect x="309" y="172" width="202" height="58" rx="5" fill="var(--panel)" stroke="var(--warn)"/>
+  <text x="410" y="190" text-anchor="middle" font-size="11" font-family="var(--mono)" fill="var(--warn)">DELETE /users/1</text>
+  <text x="410" y="206" text-anchor="middle" font-size="11.5" font-weight="700" fill="var(--warn)">→ 405 Method Not Allowed</text>
+  <text x="410" y="223" text-anchor="middle" font-size="10" font-family="var(--mono)" fill="var(--ink-soft)">Allow: GET,HEAD,PUT,PATCH,OPTIONS</text>
+
+  <rect x="550" y="44" width="250" height="200" rx="8" fill="var(--java-soft)" stroke="var(--java)"/>
+  <text x="675" y="68" text-anchor="middle" font-size="12.5" font-weight="700" fill="var(--ink)">③ 单个字段</text>
+  <text x="564" y="96" font-size="10.5" font-family="var(--mono)" fill="var(--java)">@JsonIgnore</text>
+  <text x="564" y="112" font-size="10.5" font-family="var(--mono)" fill="var(--ink)">public boolean isRegistered() {</text>
+  <text x="564" y="128" font-size="10.5" font-family="var(--mono)" fill="var(--ink)">   return isRegistered;</text>
+  <text x="564" y="144" font-size="10.5" font-family="var(--mono)" fill="var(--ink)">}</text>
+  <text x="675" y="176" text-anchor="middle" font-size="11.5" fill="var(--ink-soft)">请求正常，但 JSON 里</text>
+  <rect x="574" y="188" width="202" height="40" rx="5" fill="var(--panel)" stroke="var(--java)"/>
+  <text x="675" y="206" text-anchor="middle" font-size="11" font-family="var(--mono)" fill="var(--java)">GET /users/1 → 200</text>
+  <text x="675" y="222" text-anchor="middle" font-size="11.5" font-weight="700" fill="var(--java)">没有 isRegistered 这一项</text>
+
+  <rect x="20" y="256" width="780" height="34" rx="6" fill="var(--accent-soft)" stroke="var(--accent)"/>
+  <text x="410" y="278" text-anchor="middle" font-size="12" fill="var(--ink)">注意三种粒度对应三种不同的失败方式：<tspan font-weight="700">资源不存在（404）</tspan>　<tspan font-weight="700">资源存在但动作不允许（405）</tspan>　<tspan font-weight="700">一切正常，只是字段被隐藏</tspan></text>
+</svg>
+</div>
+<figcaption>图 16-D　三个粒度的访问控制。<code>@JsonIgnore</code> 来自 Jackson，另外两个来自 Spring Data REST。</figcaption>
+</figure>
+
+<div class="filename">Ch16/spring-data-rest/.../repositories/UserRepository.java</div>
+<pre><code><span class="ann">@RepositoryRestResource</span>(path = <span class="str">"users"</span>)          <span class="cmt">// A：导出到 /users 路径，这就是默认值</span>
+<span class="kw">public interface</span> UserRepository <span class="kw">extends</span> JpaRepository&lt;User, Long&gt; {
+
+    <span class="ann">@Override</span>                                    <span class="cmt">// B</span>
+    <span class="hl">@RestResource(exported = false)</span>
+    <span class="kw">void</span> deleteById(Long id);
+
+    <span class="ann">@Override</span>                                    <span class="cmt">// B</span>
+    <span class="hl">@RestResource(exported = false)</span>
+    <span class="kw">void</span> delete(User entity);
+}</code></pre>
+
+<div class="pit"><b>两个删除方法都要挡</b><p><code>deleteById(Long)</code> 和 <code>delete(User)</code> 是两个不同的方法，<b>必须分别覆写、分别加注解</b>。只挡一个，另一条路依旧敞开。</p></div>
+
+<h2 id="s5"><span class="num">16.5</span> 使用 REST 事件</h2>
+
+<p>有时候需要在特定事件发生时给应用行为<b>加上副作用</b>。REST 应用在处理实体时可以发出 <b>10 种事件</b>，它们全部继承 <code>org.springframework.data.rest.core.event.RepositoryEvent</code>，且都在同一个包下：</p>
+
+<figure>
+<div class="fig-box">
+<svg viewBox="0 0 820 380" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="10 种 REST 事件与两种处理方式">
+  <rect x="250" y="30" width="320" height="40" rx="8" fill="var(--accent-soft)" stroke="var(--accent)"/>
+  <text x="410" y="55" text-anchor="middle" font-size="12.5" font-family="var(--mono)" fill="var(--ink)">RepositoryEvent</text>
+
+  <path d="M410 72 L410 90" stroke="var(--ink-faint)" stroke-width="1.4"/>
+  <path d="M110 90 L710 90" stroke="var(--ink-faint)" stroke-width="1.4"/>
+  <g stroke="var(--ink-faint)" stroke-width="1.4">
+    <path d="M110 90 L110 108"/><path d="M270 90 L270 108"/><path d="M430 90 L430 108"/><path d="M590 90 L590 108"/><path d="M710 90 L710 108"/>
+  </g>
+
+  <g font-size="10.5" font-family="var(--mono)" text-anchor="middle">
+    <rect x="34" y="110" width="152" height="52" rx="6" fill="var(--java-soft)" stroke="var(--java)"/>
+    <text x="110" y="128" fill="var(--ink)">BeforeCreateEvent</text>
+    <text x="110" y="146" fill="var(--ink)">AfterCreateEvent</text>
+
+    <rect x="194" y="110" width="152" height="52" rx="6" fill="var(--java-soft)" stroke="var(--java)"/>
+    <text x="270" y="128" fill="var(--ink)">BeforeSaveEvent</text>
+    <text x="270" y="146" fill="var(--ink)">AfterSaveEvent</text>
+
+    <rect x="354" y="110" width="152" height="52" rx="6" fill="var(--danger-soft)" stroke="var(--danger)"/>
+    <text x="430" y="128" fill="var(--ink)">BeforeDeleteEvent</text>
+    <text x="430" y="146" fill="var(--ink)">AfterDeleteEvent</text>
+
+    <rect x="514" y="110" width="152" height="52" rx="6" fill="var(--sql-soft)" stroke="var(--sql)"/>
+    <text x="590" y="128" fill="var(--ink)">BeforeLinkSaveEvent</text>
+    <text x="590" y="146" fill="var(--ink)">AfterLinkSaveEvent</text>
+
+    <rect x="660" y="176" width="152" height="52" rx="6" fill="var(--sql-soft)" stroke="var(--sql)"/>
+    <text x="736" y="194" fill="var(--ink)">BeforeLinkDelete</text>
+    <text x="736" y="212" fill="var(--ink)">AfterLinkDelete</text>
+  </g>
+  <path d="M710 108 L710 176 L656 176" stroke="var(--ink-faint)" stroke-width="1.4" fill="none"/>
+
+  <g font-size="10.5" text-anchor="middle" fill="var(--ink-soft)">
+    <text x="110" y="176">POST</text>
+    <text x="270" y="176">PUT / PATCH</text>
+    <text x="430" y="176">DELETE</text>
+    <text x="590" y="176">关联对象被保存</text>
+  </g>
+
+  <!-- two ways -->
+  <text x="410" y="250" text-anchor="middle" font-size="13" font-weight="700" fill="var(--ink)">两种处理方式</text>
+
+  <rect x="40" y="264" width="340" height="98" rx="8" fill="var(--accent-soft)" stroke="var(--accent)"/>
+  <text x="210" y="286" text-anchor="middle" font-size="12" font-weight="700" fill="var(--ink)">A. 写注解处理器（AnnotatedHandler）</text>
+  <text x="210" y="306" text-anchor="middle" font-size="11" fill="var(--ink-soft)">POJO 类 + @RepositoryEventHandler</text>
+  <text x="210" y="324" text-anchor="middle" font-size="11" fill="var(--ink-soft)">方法上标 @HandleBeforeCreate 等</text>
+  <text x="210" y="346" text-anchor="middle" font-size="11" font-weight="700" fill="var(--sql)">✓ 纯声明式，不占用继承位</text>
+
+  <rect x="440" y="264" width="340" height="98" rx="8" fill="var(--java-soft)" stroke="var(--java)"/>
+  <text x="610" y="286" text-anchor="middle" font-size="12" font-weight="700" fill="var(--ink)">B. 写应用监听器（ApplicationListener）</text>
+  <text x="610" y="306" text-anchor="middle" font-size="11" fill="var(--ink-soft)">extends AbstractRepositoryEventListener&lt;User&gt;</text>
+  <text x="610" y="324" text-anchor="middle" font-size="11" fill="var(--ink-soft)">覆写 onBeforeCreate 等方法</text>
+  <text x="610" y="346" text-anchor="middle" font-size="11" font-weight="700" fill="var(--danger)">✗ 必须继承，挂在已有层次里</text>
+</svg>
+</div>
+<figcaption>图 16-E　10 种 REST 事件（Before/After × Create/Save/Delete/LinkSave/LinkDelete）与两条处理路线。</figcaption>
+</figure>
+
+<h3 id="s51">16.5.1 写一个 AnnotatedHandler</h3>
+
+<p>创建一个 POJO 类，在类上加 <code>@RepositoryEventHandler</code>。这个注解告诉 Spring 管理的 <code>BeanPostProcessor</code>：<b>这个类需要被检查是否含有处理器方法</b>。<code>BeanPostProcessor</code> 会遍历带该注解的类的方法，检测对应不同事件的注解。</p>
+
+<p>事件处理器 bean 必须处于容器控制之下，所以我们把类标注为 <code>@Service</code>（一个 <code>@Component</code> 构造型），这样它就会被 <code>@ComponentScan</code> 或 <code>@SpringBootApplication</code> 扫描到。<b>我们跟踪的是哪个实体的事件，由被注解方法的第一个参数的类型决定。</b></p>
+
+<div class="tablewrap">
+<table>
+<caption>表 16.1　AnnotatedHandler 注解与对应事件</caption>
+<thead><tr><th>注解</th><th>事件</th></tr></thead>
+<tbody>
+<tr><td><code>@HandleBeforeCreate</code> / <code>@HandleAfterCreate</code></td><td>POST 事件</td></tr>
+<tr><td><code>@HandleBeforeSave</code> / <code>@HandleAfterSave</code></td><td>PUT 与 PATCH 事件</td></tr>
+<tr><td><code>@HandleBeforeDelete</code> / <code>@HandleAfterDelete</code></td><td>DELETE 事件</td></tr>
+<tr><td><code>@HandleBeforeLinkSave</code> / <code>@HandleAfterLinkSave</code></td><td>关联对象被保存进仓库</td></tr>
+<tr><td><code>@HandleBeforeLinkDelete</code> / <code>@HandleAfterLinkDelete</code></td><td>关联对象从仓库被删除</td></tr>
+</tbody>
+</table>
+</div>
+
+<div class="filename">Ch16/spring-data-rest-events/.../events/UserRepositoryEventHandler.java</div>
+<pre><code><span class="hl">@RepositoryEventHandler</span>                     <span class="cmt">// A：告诉 BeanPostProcessor 来检查处理器方法</span>
+<span class="ann">@Service</span>                                     <span class="cmt">// B：纳入容器管理</span>
+<span class="kw">public class</span> UserRepositoryEventHandler {
+
+    <span class="kw">private final static</span> Logger logger =
+            Logger.getLogger(UserRepositoryEventHandler.class);
+
+    <span class="ann">@HandleBeforeCreate</span>                       <span class="cmt">// C：关联到 POST 事件</span>
+    <span class="kw">public void</span> handleUserBeforeCreate(User user) {   <span class="cmt">// D：第一个参数的类型决定跟踪哪个实体</span>
+        <span class="kw">if</span> ((user.getName().toUpperCase().charAt(<span class="str">0</span>) &gt;= <span class="str">'A'</span>) &amp;&amp;
+            (user.getName().toUpperCase().charAt(<span class="str">0</span>) &lt;= <span class="str">'M'</span>)) {
+            logger.info(<span class="str">"User "</span> + user.getName() +
+                        <span class="str">" is to be created, goes to the first part of the alphabet"</span>);
+        } <span class="kw">else</span> {
+            logger.info(<span class="str">"User "</span> + user.getName() +
+                        <span class="str">" is to be created, goes to the second part of the alphabet"</span>);
+        }
+    }
+
+    <span class="ann">@HandleAfterCreate</span>
+    <span class="kw">public void</span> handleUserAfterCreate(User user) {
+        logger.info(<span class="str">"I am so tired to have created "</span> + user.getName());
+    }
+
+    <span class="ann">@HandleBeforeDelete</span>
+    <span class="kw">public void</span> handleUserBeforeDelete(User user) {
+        logger.warn(<span class="str">"This is just to let you know that "</span> + user.getName() +
+                    <span class="str">" is about to be deleted"</span>);
+    }
+
+    <span class="ann">@HandleAfterDelete</span>
+    <span class="kw">public void</span> handleUserAfterDelete(User user) {
+        logger.warn(<span class="str">"Sad but true, "</span> + user.getName() + <span class="str">" has been deleted"</span>);
+    }
+}</code></pre>
+
+<h3 id="s52">16.5.2 写一个 ApplicationListener</h3>
+
+<p>第二条路是继承 <code>AbstractRepositoryEventListener</code> 抽象类。<b>这个类按「事件发生在哪个实体上」被泛型化</b>，它会监听事件并调用相应的方法。同样标注 <code>@Service</code> 让容器管理它。</p>
+
+<p>这个抽象类已经包含了一系列空的 <code>protected</code> 方法来应对各种事件，<b>我们只需要覆写并把我们关心的那些改成 <code>public</code></b>。</p>
+
+<div class="tablewrap">
+<table>
+<caption>表 16.2　ApplicationListener 方法与对应事件</caption>
+<thead><tr><th>方法</th><th>事件</th></tr></thead>
+<tbody>
+<tr><td><code>onBeforeCreate</code> / <code>onAfterCreate</code></td><td>POST 事件</td></tr>
+<tr><td><code>onBeforeSave</code> / <code>onAfterSave</code></td><td>PUT 与 PATCH 事件</td></tr>
+<tr><td><code>onBeforeDelete</code> / <code>onAfterDelete</code></td><td>DELETE 事件</td></tr>
+<tr><td><code>onBeforeLinkSave</code> / <code>onAfterLinkSave</code></td><td>关联对象被保存进仓库</td></tr>
+<tr><td><code>onBeforeLinkDelete</code> / <code>onAfterLinkDelete</code></td><td>关联对象从仓库被删除</td></tr>
+</tbody>
+</table>
+</div>
+
+<div class="filename">Ch16/spring-data-rest-events/.../events/RepositoryEventListener.java</div>
+<pre><code><span class="ann">@Service</span>                                                     <span class="cmt">// A</span>
+<span class="kw">public class</span> RepositoryEventListener <span class="kw">extends</span>
+        <span class="hl">AbstractRepositoryEventListener&lt;User&gt;</span> {                 <span class="cmt">// B：按 User 实体泛型化</span>
+
+    <span class="kw">private final static</span> Logger logger =
+            Logger.getLogger(RepositoryEventListener.class);
+
+    <span class="ann">@Override</span>
+    <span class="kw">public void</span> onBeforeCreate(User user) {                   <span class="cmt">// C</span>
+        logger.info(<span class="str">"I'll make an effort to create this user "</span> + user.getName());
+    }
+
+    <span class="ann">@Override</span>
+    <span class="kw">public void</span> onAfterCreate(User user) {
+        logger.info(<span class="str">"I did my best and I was able to create "</span> + user.getName());
+    }
+
+    <span class="ann">@Override</span>
+    <span class="kw">public void</span> onBeforeSave(User user) {
+        logger.info(<span class="str">"I'll take a breath and I will save "</span> + user.getName());
+    }
+
+    <span class="ann">@Override</span>
+    <span class="kw">public void</span> onAfterSave(User user) {
+        logger.info(<span class="str">"Hard, hard to save "</span> + user.getName());
+    }
+
+    <span class="ann">@Override</span>
+    <span class="kw">public void</span> onBeforeDelete(User user) {
+        logger.warn(<span class="str">"I'll delete "</span> + user.getName() + <span class="str">", you might never see him/her again"</span>);
+    }
+
+    <span class="ann">@Override</span>
+    <span class="kw">public void</span> onAfterDelete(User user) {
+        logger.warn(<span class="str">"Say good-bye to "</span> + user.getName() + <span class="str">", I deleted him/her"</span>);
+    }
+}</code></pre>
+
+<p>现在运行应用并执行一条 REST 命令：</p>
+
+<pre><code>POST http://localhost:8081/users
+Content-Type: application/json
+{
+  "name": "John Smith"
+}</code></pre>
+
+<p>处理器和监听器<b>都会</b>对事件做出反应，产生额外行为作为副作用。</p>
+
+<div class="tip"><b>两种方式怎么选？</b><p>两种方式提供<b>相似的行为</b>，处理<b>相同类型</b>的事件。在其他条件相同的情况下：</p>
+<ul>
+<li><b>处理器（handler）的优势是只工作在声明层面</b>——类上和方法上的注解而已。</li>
+<li><b>监听器（listener）要求你继承一个已有的抽象类</b>，于是你的类被挂进了一个已存在的层次结构里，<b>类层次设计的自由度就少了</b>（Java 单继承）。</li>
+</ul>
+<p>所以默认优先选处理器。</p></div>
+
+<h2 id="s6"><span class="num">16.6</span> 使用投影与摘录</h2>
+
+<p>Spring Data REST 提供了领域模型的<b>默认视图</b>，但真实场景常常需要修改或适配它。可以用<b>投影（projection）</b>和<b>摘录（excerpt）</b>来提供导出信息的特定视图。</p>
+
+<p>先往项目里加一个 <code>Address</code> 类，并希望用 <code>toString</code> 方法来展示它的内容：</p>
+
+<div class="filename">Ch16/spring-data-rest-projections/.../model/Address.java</div>
+<pre><code><span class="ann">@Entity</span>
+<span class="kw">public class</span> Address {
+    <span class="ann">@GeneratedValue</span> <span class="ann">@Id</span> <span class="kw">private</span> Long id;
+    <span class="kw">private</span> String street, zipCode, city, state;
+
+    <span class="kw">public</span> String toString() {
+        <span class="kw">return</span> String.format(<span class="str">"%s, %s %s, %s"</span>, street, zipCode, city, state);
+    }
+}</code></pre>
+
+<p><code>User</code> 与 <code>Address</code> 之间是一对一关系，<code>User</code> 里新增一个字段：</p>
+
+<pre><code><span class="ann">@OneToOne</span>(cascade = CascadeType.ALL, orphanRemoval = <span class="kw">true</span>)
+<span class="kw">private</span> Address address;</code></pre>
+
+<div class="note"><b>回顾第 8 章的两个选项</b><p><code>CascadeType.ALL</code> 让持久化操作级联到关联实体；<code>orphanRemoval = true</code> 表示当一个 <code>Address</code> 不再被任何 <code>User</code> 引用时，<b>把它永久删除</b>。</p></div>
+
+<figure>
+<div class="fig-box">
+<svg viewBox="0 0 820 400" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="默认视图、投影与摘录的对比">
+  <defs><marker id="a16c" markerWidth="9" markerHeight="9" refX="8" refY="4.5" orient="auto"><path d="M0 0 L9 4.5 L0 9 z" fill="var(--accent)"/></marker></defs>
+
+  <!-- default -->
+  <rect x="20" y="34" width="240" height="180" rx="8" fill="var(--panel)" stroke="var(--line-strong)"/>
+  <text x="140" y="56" text-anchor="middle" font-size="12" font-weight="700" fill="var(--ink)">默认视图</text>
+  <text x="140" y="74" text-anchor="middle" font-size="10.5" font-family="var(--mono)" fill="var(--ink-soft)">GET /users/1</text>
+  <g font-size="10" font-family="var(--mono)" fill="var(--ink-soft)">
+    <text x="34" y="98">{</text>
+    <text x="34" y="114">  "name": "Amelia Jones",</text>
+    <text x="34" y="130">  "isCitizen": true,</text>
+    <text x="34" y="146">  "address": {</text>
+    <text x="34" y="162">    "street": "Flowers Street 34",</text>
+    <text x="34" y="178">    "zipCode": "123456",</text>
+    <text x="34" y="194">    "city": "..." , "state": "..." }</text>
+  </g>
+  <text x="140" y="208" text-anchor="middle" font-size="10" fill="var(--ink-faint)">所有字段都摊开</text>
+
+  <path d="M266 124 L316 124" stroke="var(--accent)" stroke-width="1.8" marker-end="url(#a16c)"/>
+  <text x="291" y="116" text-anchor="middle" font-size="10" fill="var(--accent)">投影</text>
+
+  <!-- projection -->
+  <rect x="320" y="34" width="240" height="180" rx="8" fill="var(--accent-soft)" stroke="var(--accent)"/>
+  <text x="440" y="56" text-anchor="middle" font-size="12" font-weight="700" fill="var(--ink)">投影视图（单个资源）</text>
+  <text x="440" y="74" text-anchor="middle" font-size="10" font-family="var(--mono)" fill="var(--accent)">GET /users/1?projection=summary</text>
+  <g font-size="10.5" font-family="var(--mono)" fill="var(--ink)">
+    <text x="334" y="104">{</text>
+    <text x="334" y="124">  "name": "Amelia Jones",</text>
+    <text x="334" y="144">  "address":</text>
+    <text x="334" y="162">    "Flowers Street 34,</text>
+    <text x="334" y="178">     123456 Boston, MA"</text>
+    <text x="334" y="196">}</text>
+  </g>
+
+  <path d="M566 124 L616 124" stroke="var(--accent)" stroke-width="1.8" marker-end="url(#a16c)"/>
+  <text x="591" y="116" text-anchor="middle" font-size="10" fill="var(--accent)">摘录</text>
+
+  <!-- excerpt -->
+  <rect x="620" y="34" width="180" height="180" rx="8" fill="var(--sql-soft)" stroke="var(--sql)"/>
+  <text x="710" y="56" text-anchor="middle" font-size="12" font-weight="700" fill="var(--ink)">摘录（整个集合）</text>
+  <text x="710" y="74" text-anchor="middle" font-size="10.5" font-family="var(--mono)" fill="var(--sql)">GET /users/</text>
+  <text x="710" y="98" text-anchor="middle" font-size="10.5" fill="var(--ink-soft)">集合里的每一条</text>
+  <text x="710" y="116" text-anchor="middle" font-size="10.5" fill="var(--ink-soft)">都按投影渲染</text>
+  <text x="710" y="146" text-anchor="middle" font-size="10.5" fill="var(--ink-soft)">不用在 URL 上带</text>
+  <text x="710" y="164" text-anchor="middle" font-size="10.5" fill="var(--ink-soft)">?projection= 参数</text>
+  <text x="710" y="194" text-anchor="middle" font-size="10.5" font-weight="700" fill="var(--sql)">= 默认的集合视图</text>
+
+  <!-- code -->
+  <rect x="20" y="240" width="380" height="140" rx="8" fill="var(--java-soft)" stroke="var(--java)"/>
+  <text x="210" y="262" text-anchor="middle" font-size="11.5" font-weight="700" fill="var(--ink)">定义投影</text>
+  <g font-size="10.5" font-family="var(--mono)" fill="var(--ink)">
+    <text x="34" y="286">@Projection(name = "summary",</text>
+    <text x="34" y="302">            types = User.class)</text>
+    <text x="34" y="322">interface UserProjection {</text>
+    <text x="34" y="340">    String getName();</text>
+    <text x="34" y="358">    @Value("#{target.address.toString()}")</text>
+    <text x="34" y="374">    String getAddress();  }</text>
+  </g>
+
+  <rect x="420" y="240" width="380" height="140" rx="8" fill="var(--sql-soft)" stroke="var(--sql)"/>
+  <text x="610" y="262" text-anchor="middle" font-size="11.5" font-weight="700" fill="var(--ink)">让它成为集合的默认视图</text>
+  <g font-size="10.5" font-family="var(--mono)" fill="var(--ink)">
+    <text x="434" y="290">@RepositoryRestResource(</text>
+    <text x="434" y="308">   path = "users",</text>
+    <text x="434" y="326">   excerptProjection = UserProjection.class)</text>
+    <text x="434" y="348">interface UserRepository</text>
+    <text x="434" y="366">   extends JpaRepository&lt;User, Long&gt; { }</text>
+  </g>
+</svg>
+</div>
+<figcaption>图 16-F　投影作用于单个资源（要带 <code>?projection=</code> 参数），摘录把同一个投影提升为整个集合的默认视图。</figcaption>
+</figure>
+
+<div class="filename">Ch16/spring-data-rest-projections/.../model/UserProjection.java</div>
+<pre><code><span class="hl">@Projection(name = "summary", types = User.class)</span>       <span class="cmt">// A</span>
+<span class="kw">public interface</span> UserProjection {
+
+    String getName();                                    <span class="cmt">// B</span>
+
+    <span class="ann">@Value</span>(<span class="str">"#{target.address.toString()}"</span>)                 <span class="cmt">// C</span>
+    String getAddress();
+}</code></pre>
+
+<div class="keyhint">
+<div><span class="k">A</span> 这个投影名叫 <code>summary</code>，作用于 <code>User</code> 实体。</div>
+<div><span class="k">B</span> 因为字段叫 <code>name</code>，所以要按 getter 命名约定写一个 <code>getName</code> 方法来导出它。</div>
+<div><span class="k">C</span> 按 <code>toString</code> 的展示方式导出地址。这里用了 <code>@Value</code> 注解，里面是一段 <b>Spring 表达式语言（SpEL）</b>。同样要遵守 getter 命名约定，所以方法叫 <code>getAddress</code>。</div>
+</div>
+
+<div class="tip"><b>投影是接口，不是类</b><p>你只声明想暴露的 getter，Spring Data REST 会在运行时生成实现。<code>target</code> 在 SpEL 里指代<b>被投影的那个实体实例</b>，所以 <code>#{target.address.toString()}</code> 就是「拿这个 User 的 address，调它的 toString」。</p></div>
+
+<p>访问 <code>http://localhost:8081/users/1?projection=summary</code>，得到只含 <code>name</code> 和被 <code>toString</code> 格式化过的 <code>address</code> 的视图。若想把这个投影的默认视图<b>应用到整个集合</b>，就回到已定义的仓库上，用 <code>@RepositoryRestResource</code> 的 <code>excerptProjection</code> 选项：</p>
+
+<div class="filename">Ch16/spring-data-rest-projections/.../repositories/UserRepository.java</div>
+<pre><code><span class="ann">@RepositoryRestResource</span>(path = <span class="str">"users"</span>,
+                        <span class="hl">excerptProjection = UserProjection.class</span>)
+<span class="kw">public interface</span> UserRepository <span class="kw">extends</span> JpaRepository&lt;User, Long&gt; {
+}</code></pre>
+
+<p>此后访问 <code>http://localhost:8081/users/</code>，全部用户都按投影定义来展示。</p>
+
+<div class="summary" id="s7">
+<h3>本章小结</h3>
+<ul>
+<li>用 Spring Boot 可以<b>创建并配置一个 Spring Data REST 项目</b>，为与数据库交互、管理和持久化信息提供一套接口。核心在于：<b>一个空的仓库接口就能自动导出成完整的 REST 端点，你不写 Controller。</b></li>
+<li>可以用 <b>ETag</b> 发出高效的请求：服务器把 <code>@Version</code> 的值作为 ETag 返回，客户端下次带上 <code>If-None-Match</code>，内容没变就只收到 <b>304 + 空响应体</b>，避免传输客户端已经拥有的信息。</li>
+<li>可以<b>限制对仓库、方法和字段的访问</b>，只导出你愿意允许的信息和动作：<code>@RepositoryRestResource(exported = false)</code> 挡整个仓库（404）、<code>@RestResource(exported = false)</code> 挡单个方法（405）、<code>@JsonIgnore</code> 挡单个字段。</li>
+<li>可以<b>使用 REST 事件</b>并通过处理器和监听器来管理它们：处理器靠元信息（注解）工作，监听器靠继承已有类工作。共 10 种事件，覆盖 Create / Save / Delete / LinkSave / LinkDelete 的 Before 与 After。<b>处理器更优，因为不占用继承位。</b></li>
+<li>可以用<b>投影和摘录</b>为不同用户提供定制化的导出视图：<code>@Projection</code> 定义视图（配合 SpEL 的 <code>@Value</code>），<code>excerptProjection</code> 把它设为集合的默认视图。</li>
+</ul>
+</div>
+
+<div class="pager">
+  <a href="ch15.html">← 第 15 章　使用 Spring Data JDBC</a>
+  <a href="ch17.html">第 17 章　使用 Spring Data MongoDB →</a>
+</div>
+</main>
+</div>
+</body>
+</html>

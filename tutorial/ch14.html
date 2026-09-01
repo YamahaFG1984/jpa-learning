@@ -1,0 +1,527 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>第 14 章 · 把 JPA 与 Hibernate 集成进 Spring</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="topbar"><div class="topbar-inner">
+  <a class="brand" href="index.html">Java Persistence 讲义</a>
+  <span class="spacer"></span>
+  <a href="ch13.html">← 上一章</a>
+  <a href="index.html">目录</a>
+  <a href="ch15.html">下一章 →</a>
+</div></div>
+
+<div class="wrap">
+<nav class="toc">
+  <h4>本章目录</h4>
+  <a href="#s1">14.1 Spring 与依赖注入</a>
+  <a href="#s2">14.2 JPA + Spring + DAO</a>
+  <a class="sub" href="#s21">实体与 DAO 接口</a>
+  <a class="sub" href="#s22">DAO 实现</a>
+  <a class="sub" href="#s23">配置类</a>
+  <a class="sub" href="#s24">何时该用这套方案</a>
+  <a href="#s3">14.3 泛型化 JPA 版</a>
+  <a href="#s4">14.4 Hibernate + Spring + DAO</a>
+  <a href="#s5">14.5 泛型化 Hibernate 版</a>
+  <a href="#s6">本章小结</a>
+</nav>
+
+<main>
+<div class="hero">
+  <div class="eyebrow">Part 4 · 用 Spring 构建持久化应用</div>
+  <h1>第 14 章　把 JPA 与 Hibernate 集成进 Spring</h1>
+  <p>本章分析集成 Spring 与 Hibernate 的几种可能。<b>Spring 是轻量但灵活、通用的开源 Java 框架，可用于 Java 应用的任何一层。</b>我们会考察它背后的原理（依赖注入 / 控制反转），并用它配合 JPA 或 Hibernate 构建持久化应用。</p>
+</div>
+
+<div class="note"><b>本章的四个版本</b><p>同一套功能会写<b>四遍</b>，源码目录分别是：<code>spring-jpa-dao</code>（JPA + DAO）、<code>spring-jpa-dao-gen</code>（JPA + 泛型 DAO）、<code>spring-hibernate-dao</code>（Hibernate + DAO）、<code>spring-hibernate-dao-gen</code>（Hibernate + 泛型 DAO）。运行前先执行 <code>Ch14/Ch14.sql</code>。</p></div>
+
+<h2 id="s1"><span class="num">14.1</span>Spring 框架与依赖注入</h2>
+
+<figure><div class="fig-box">
+<svg viewBox="0 0 840 330" xmlns="http://www.w3.org/2000/svg" font-family="Inter,system-ui,sans-serif">
+  <defs><marker id="s14" markerWidth="9" markerHeight="9" refX="8" refY="4.5" orient="auto"><path d="M0 0 L9 4.5 L0 9 z" fill="var(--accent)"/></marker></defs>
+  <rect x="20" y="20" width="390" height="150" rx="8" fill="var(--java-soft)" stroke="var(--java)" stroke-width="1.6"/>
+  <text x="215" y="44" text-anchor="middle" font-size="13.5" font-weight="700" fill="var(--java)">库（Library）：<tspan font-weight="700">你</tspan>在控制</text>
+  <rect x="46" y="60" width="110" height="40" rx="6" fill="var(--panel)" stroke="var(--line-strong)"/>
+  <text x="101" y="85" text-anchor="middle" font-size="12" fill="var(--ink)">Library</text>
+  <rect x="270" y="60" width="110" height="40" rx="6" fill="var(--panel)" stroke="var(--java)" stroke-width="1.6"/>
+  <text x="325" y="85" text-anchor="middle" font-size="12" font-weight="700" fill="var(--java)">你的代码</text>
+  <path d="M264 80 L162 80" stroke="var(--accent)" stroke-width="1.8" marker-end="url(#s14)"/>
+  <text x="215" y="126" text-anchor="middle" font-size="11.5" fill="var(--ink)">你从自己的代码里<tspan font-weight="700">调用库函数</tspan></text>
+  <text x="215" y="150" text-anchor="middle" font-size="11" fill="var(--ink-soft)">你负责用设计模式（工厂、建造者、代理、装饰…）</text>
+  <text x="215" y="164" text-anchor="middle" font-size="11" fill="var(--ink-soft)">去组装类和对象 —— <tspan font-weight="700">这份负担在开发者一侧</tspan></text>
+
+  <rect x="430" y="20" width="390" height="150" rx="8" fill="var(--accent-soft)" stroke="var(--accent)" stroke-width="1.8"/>
+  <text x="625" y="44" text-anchor="middle" font-size="13.5" font-weight="700" fill="var(--accent)">框架（Framework）：<tspan font-weight="700">控制被反转</tspan></text>
+  <rect x="456" y="60" width="110" height="40" rx="6" fill="var(--panel)" stroke="var(--accent)" stroke-width="1.6"/>
+  <text x="511" y="85" text-anchor="middle" font-size="12" font-weight="700" fill="var(--accent)">你的代码</text>
+  <rect x="680" y="60" width="110" height="40" rx="6" fill="var(--panel)" stroke="var(--line-strong)"/>
+  <text x="735" y="85" text-anchor="middle" font-size="12" fill="var(--ink)">Framework</text>
+  <path d="M674 80 L572 80" stroke="var(--accent)" stroke-width="1.8" marker-end="url(#s14)"/>
+  <text x="625" y="126" text-anchor="middle" font-size="11.5" fill="var(--ink)"><tspan font-weight="700">框架调用你的代码</tspan>（框架内部也含有库函数）</text>
+  <text x="625" y="150" text-anchor="middle" font-size="11" fill="var(--ink-soft)"><tspan font-weight="700">框架定义骨架，你往里填特性</tspan>。你的代码在框架控制之下</text>
+  <text x="625" y="164" text-anchor="middle" font-size="11" fill="var(--sql)">→ 于是你可以<tspan font-weight="700">专注实现业务逻辑而不是设计</tspan></text>
+
+  <rect x="20" y="188" width="800" height="128" rx="8" fill="var(--sql-soft)" stroke="var(--sql)" stroke-width="1.6"/>
+  <text x="420" y="212" text-anchor="middle" font-size="13.5" font-weight="700" fill="var(--sql)">Spring IoC 容器：核心是「容器」</text>
+  <rect x="80" y="228" width="150" height="46" rx="6" fill="var(--panel)" stroke="var(--line-strong)"/>
+  <text x="155" y="248" text-anchor="middle" font-size="11.5" fill="var(--ink)">你的业务对象</text>
+  <text x="155" y="264" text-anchor="middle" font-size="11.5" fill="var(--ink)">（POJO）</text>
+  <rect x="80" y="284" width="150" height="24" rx="6" fill="var(--panel)" stroke="var(--line-strong)"/>
+  <text x="155" y="301" text-anchor="middle" font-size="11.5" fill="var(--ink)">配置元数据</text>
+  <path d="M236 250 L320 262" stroke="var(--accent)" stroke-width="1.6" marker-end="url(#s14)"/>
+  <path d="M236 296 L320 274" stroke="var(--accent)" stroke-width="1.6" marker-end="url(#s14)"/>
+  <rect x="326" y="242" width="180" height="52" rx="8" fill="var(--accent-soft)" stroke="var(--accent)" stroke-width="1.8"/>
+  <text x="416" y="266" text-anchor="middle" font-size="13" font-weight="700" fill="var(--accent)">Spring 容器</text>
+  <text x="416" y="284" text-anchor="middle" font-size="10.5" fill="var(--ink-soft)">管理对象的创建、注入与生命周期</text>
+  <path d="M512 268 L590 268" stroke="var(--accent)" stroke-width="1.8" marker-end="url(#s14)"/>
+  <text x="551" y="260" text-anchor="middle" font-size="10.5" fill="var(--accent)">产生</text>
+  <rect x="596" y="242" width="200" height="52" rx="8" fill="var(--panel)" stroke="var(--sql)" stroke-width="1.6"/>
+  <text x="696" y="266" text-anchor="middle" font-size="12.5" font-weight="700" fill="var(--sql)">完全配置好、可直接使用的系统</text>
+  <text x="696" y="284" text-anchor="middle" font-size="10.5" fill="var(--ink-soft)">容器管理的对象称为 <tspan font-family="monospace">bean</tspan>，是 Spring 应用的骨干</text>
+</svg>
+</div><figcaption>图 14-1/14-2　控制反转，以及 Spring IoC 容器的职能</figcaption></figure>
+
+<h2 id="s2"><span class="num">14.2</span>用 Spring + DAO 模式构建 JPA 应用</h2>
+
+<div class="tip"><b>DAO 是什么，以及为什么还要讲它</b>
+<p><b>DAO（data access object）设计模式为数据库创建一个抽象接口，支持访问操作而不暴露数据库的任何内部细节。</b></p>
+<p style="margin-top:6px">「你可能会说我们之前用的 Spring Data JPA repository 已经在做这件事了 —— <b>确实如此</b>。本章要演示如何<b>手工构建 DAO 类</b>，并讨论<b>什么时候应该优先选择这种方式而不是 Spring Data JPA</b>。」</p></div>
+
+<h3 id="s21">14.2.1　实体与 DAO 接口</h3>
+
+<div class="cols">
+<div>
+<div class="filename">Ch14/spring-jpa-dao/…/ch14/Item.java</div>
+<pre><code><span class="ann">@Entity</span>
+<span class="kw">public class</span> Item {
+    <span class="ann">@Id</span> <span class="ann">@GeneratedValue</span>(generator = <span class="str">"ID_GENERATOR"</span>)
+    <span class="kw">private</span> Long id;
+
+    <span class="ann">@NotNull</span>
+    <span class="ann">@Size</span>(min = 2, max = 255,
+        message = <span class="str">"Name is required, maximum 255 characters."</span>)
+    <span class="kw">private</span> String name;
+
+    <span class="ann">@Transient</span>                       <span class="cmt">// ← <b>被排除在持久化之外</b></span>
+    <span class="kw">private</span> Set&lt;Bid&gt; bids = <span class="kw">new</span> HashSet&lt;&gt;();
+}</code></pre>
+<p style="font-size:14px"><code>Item</code>–<code>Bid</code> 之间是一对多；关系通过 <b><code>BID</code> 表一侧的外键字段</b>维持。<code>bids</code> 集合标了 <code>@Transient</code>，所以<b>不参与持久化</b> —— DAO 会显式处理它。</p>
+</div>
+<div>
+<div class="filename">…/ch14/Bid.java</div>
+<pre><code><span class="ann">@Entity</span>
+<span class="kw">public class</span> Bid {
+    <span class="ann">@Id</span> <span class="ann">@GeneratedValue</span>(generator = <span class="str">"ID_GENERATOR"</span>)
+    <span class="kw">private</span> Long id;
+
+    <span class="ann">@NotNull</span>
+    <span class="kw">private</span> BigDecimal amount;
+
+    <span class="ann">@ManyToOne</span>(optional = <span class="kw">false</span>, fetch = FetchType.LAZY)
+    <span class="ann">@JoinColumn</span>(name = <span class="str">"ITEM_ID"</span>)
+    <span class="kw">private</span> Item item;
+}</code></pre>
+<div class="filename" style="margin-top:14px">…/ch14/dao/ItemDao.java 与 BidDao.java</div>
+<pre><code><span class="kw">public interface</span> ItemDao {
+    Item getById(<span class="kw">long</span> id);
+    List&lt;Item&gt; getAll();
+    <span class="kw">void</span> insert(Item item);
+    <span class="kw">void</span> update(<span class="kw">long</span> id, String name);
+    <span class="kw">void</span> delete(Item item);
+    Item findByName(String name);
+}
+<span class="kw">public interface</span> BidDao {
+    Bid getById(<span class="kw">long</span> id);   List&lt;Bid&gt; getAll();
+    <span class="kw">void</span> insert(Bid bid);  <span class="kw">void</span> update(<span class="kw">long</span> id, String amount);
+    <span class="kw">void</span> delete(Bid bid);  List&lt;Bid&gt; findByAmount(String amount);
+}</code></pre>
+</div>
+</div>
+
+<h3 id="s22">14.2.2　DAO 实现：三个注解各司其职</h3>
+
+<div class="tablewrap"><table>
+<thead><tr><th style="width:270px">注解</th><th>作用</th></tr></thead>
+<tbody>
+<tr><td><code>@Repository</code></td><td>标记该组件代表一个 DAO。<b>除了把被注解的类标记为 Spring 组件，它还会捕获持久化相关的异常并把它们翻译成 Spring 的非受检异常</b></td></tr>
+<tr><td><code>@Transactional</code></td><td>让类内<b>所有方法都成为事务性的</b>（§11.4.3）</td></tr>
+<tr><td><code>@PersistenceContext(type = PersistenceContextType.EXTENDED)</code></td><td><b><code>EntityManager</code> 本身不是线程安全的</b>；用 <code>@PersistenceContext</code> 让容器<b>注入一个线程安全的代理对象</b>。<b>把持久化类型设为 <code>EXTENDED</code>，可以让持久化上下文在 bean 的<u>整个生命周期</u>内保持</b></td></tr>
+</tbody></table></div>
+
+<div class="pit"><b>为什么必须用 <code>EXTENDED</code>？—— 一个具体的报错</b>
+<p><b>所有被注入的 <code>EntityManager</code> bean 都必须用 <code>PersistenceContextType.EXTENDED</code>。</b>如果用默认的 <code>PersistenceContextType.TRANSACTION</code>，<b>返回的对象会在一次事务执行结束时变成游离态</b>；再把它传给 delete 方法，就会得到：</p>
+<p style="margin-top:6px"><code>IllegalArgumentException: Removing a detached instance</code></p></div>
+
+<pre><code><span class="ann">@Repository</span>
+<span class="ann">@Transactional</span>
+<span class="kw">public class</span> ItemDaoImpl <span class="kw">implements</span> ItemDao {
+
+    <span class="ann">@PersistenceContext</span>(type = PersistenceContextType.EXTENDED)
+    <span class="kw">private</span> EntityManager em;
+
+    <span class="ann">@Override</span> <span class="kw">public</span> Item getById(<span class="kw">long</span> id) { <span class="kw">return</span> em.find(Item.class, id); }
+
+    <span class="ann">@Override</span> <span class="kw">public</span> List&lt;Item&gt; getAll() {
+        <span class="kw">return</span> em.createQuery(<span class="str">"from Item"</span>, Item.class).getResultList();
+    }
+
+    <span class="ann">@Override</span> <span class="kw">public void</span> insert(Item item) {
+        em.persist(item);
+        <span class="kw">for</span> (Bid bid : item.getBids()) em.persist(bid);   <span class="cmt">// bids 是 @Transient，必须手工持久化</span>
+    }
+
+    <span class="ann">@Override</span> <span class="kw">public void</span> update(<span class="kw">long</span> id, String name) {
+        Item item = em.find(Item.class, id);
+        item.setName(name);
+        em.persist(item);
+    }
+
+    <span class="ann">@Override</span> <span class="kw">public void</span> delete(Item item) {
+        <span class="kw">for</span> (Bid bid : item.getBids()) em.remove(bid);    <span class="cmt">// 先删所有 bid</span>
+        em.remove(item);
+    }
+
+    <span class="ann">@Override</span> <span class="kw">public</span> Item findByName(String name) {
+        <span class="kw">return</span> em.createQuery(<span class="str">"from Item where name=:name"</span>, Item.class)
+                 .setParameter(<span class="str">"name"</span>, name).getSingleResult();
+    }
+}
+<span class="cmt">// BidDaoImpl 结构完全对称，只是操作 Bid，并用 findByAmount 按金额查询</span></code></pre>
+
+<h3 id="s23">14.2.3　配置类与测试</h3>
+
+<div class="cols">
+<div>
+<div class="filename">…/ch14/configuration/SpringConfiguration.java</div>
+<pre><code><span class="ann">@EnableTransactionManagement</span>   <span class="cmt">// 启用 Spring 注解驱动的事务管理能力</span>
+<span class="kw">public class</span> SpringConfiguration {
+
+    <span class="ann">@Bean</span> <span class="kw">public</span> DataSource dataSource() {
+        DriverManagerDataSource ds = <span class="kw">new</span> DriverManagerDataSource();
+        ds.setDriverClassName(<span class="str">"com.mysql.cj.jdbc.Driver"</span>);
+        ds.setUrl(<span class="str">"jdbc:mysql://localhost:3306/CH14_SPRING_HIBERNATE?serverTimezone=UTC"</span>);
+        ds.setUsername(<span class="str">"root"</span>);  ds.setPassword(<span class="str">""</span>);
+        <span class="kw">return</span> ds;
+    }
+
+    <span class="ann">@Bean</span> <span class="kw">public</span> DatabaseService databaseService() { <span class="kw">return new</span> DatabaseService(); }
+
+    <span class="ann">@Bean</span> <span class="kw">public</span> JpaTransactionManager transactionManager(EntityManagerFactory emf) {
+        <span class="kw">return new</span> JpaTransactionManager(emf);      <span class="cmt">// 基于 EMF 的事务管理器</span>
+    }
+
+    <span class="ann">@Bean</span> <span class="kw">public</span> LocalContainerEntityManagerFactoryBean entityManagerFactory() {
+        LocalContainerEntityManagerFactoryBean b = <span class="kw">new</span> LocalContainerEntityManagerFactoryBean();
+        b.setPersistenceUnitName(<span class="str">"ch14"</span>);          <span class="cmt">// persistence.xml 里定义的单元名</span>
+        b.setDataSource(dataSource());
+        b.setPackagesToScan(<span class="str">"com.manning.javapersistence.ch14"</span>);
+        <span class="kw">return</span> b;
+    }
+
+    <span class="ann">@Bean</span> <span class="kw">public</span> ItemDao itemDao() { <span class="kw">return new</span> ItemDaoImpl(); }
+    <span class="ann">@Bean</span> <span class="kw">public</span> BidDao  bidDao()  { <span class="kw">return new</span> BidDaoImpl(); }
+}</code></pre>
+<div class="note" style="margin-top:12px"><b>XML 配置的等价物</b><p>可以改用 <code>application-context.xml</code>。要强调一点：<b>在 XML 里启用注解驱动的事务管理，用的是 <code>tx:annotation-driven</code> 元素并引用一个事务管理器 bean</b>：</p>
+<pre style="margin:8px 0 0"><code>&lt;tx:annotation-driven transaction-manager=<span class="str">"txManager"</span>/&gt;</code></pre></div>
+</div>
+<div>
+<div class="filename">…/ch14/DatabaseService.java —— 负责填充与清空数据库</div>
+<pre><code><span class="kw">public class</span> DatabaseService {
+    <span class="ann">@PersistenceContext</span>(type = PersistenceContextType.EXTENDED)
+    <span class="kw">private</span> EntityManager em;
+
+    <span class="ann">@Autowired</span>                          <span class="cmt">// ItemDaoImpl 标了 @Repository，</span>
+    <span class="kw">private</span> ItemDao itemDao;             <span class="cmt">// Spring 会创建对应 bean 注入这里</span>
+
+    <span class="ann">@Transactional</span> <span class="kw">public void</span> init() {
+        <span class="kw">for</span> (<span class="kw">int</span> i = 0; i &lt; 10; i++) {   <span class="cmt">// 10 个 Item，每个 2 个 Bid</span>
+            Item item = <span class="kw">new</span> Item();
+            item.setName(<span class="str">"Item "</span> + (i + 1));
+            <span class="kw">new</span> Bid(<span class="kw">new</span> BigDecimal(1000.0), item);
+            <span class="kw">new</span> Bid(<span class="kw">new</span> BigDecimal(1100.0), item);
+            itemDao.insert(item);
+        }
+    }
+
+    <span class="ann">@Transactional</span> <span class="kw">public void</span> clear() {
+        em.createQuery(<span class="str">"delete from Bid b"</span>).executeUpdate();
+        em.createQuery(<span class="str">"delete from Item i"</span>).executeUpdate();
+    }
+}</code></pre>
+<div class="filename" style="margin-top:14px">…/ch14/SpringJpaTest.java</div>
+<pre><code><span class="ann">@ExtendWith</span>(SpringExtension.class)
+<span class="ann">@ContextConfiguration</span>(classes = {SpringConfiguration.class})
+<span class="cmt">// 或者：@ContextConfiguration("classpath:application-context.xml")
+//       <b>两行只能启用其中一行</b></span>
+<span class="kw">public class</span> SpringJpaTest {
+    <span class="ann">@Autowired</span> <span class="kw">private</span> DatabaseService databaseService;
+    <span class="ann">@Autowired</span> <span class="kw">private</span> ItemDao itemDao;
+    <span class="ann">@Autowired</span> <span class="kw">private</span> BidDao bidDao;
+
+    <span class="ann">@BeforeEach</span> <span class="kw">public void</span> setUp()    { databaseService.init(); }
+    <span class="ann">@AfterEach</span>  <span class="kw">public void</span> dropDown() { databaseService.clear(); }
+
+    <span class="ann">@Test</span> <span class="kw">public void</span> testInsertItems() {
+        assertEquals(10, itemDao.getAll().size());
+        assertEquals(20, bidDao.getAll().size());
+        assertEquals(10, bidDao.findByAmount(<span class="str">"1000.00"</span>).size());
+    }
+
+    <span class="ann">@Test</span> <span class="kw">public void</span> testDeleteItem() {
+        itemDao.delete(itemDao.findByName(<span class="str">"Item 2"</span>));
+        assertThrows(NoResultException.class,
+                     () -&gt; itemDao.findByName(<span class="str">"Item 2"</span>));
+    }
+}</code></pre>
+</div>
+</div>
+
+<h3 id="s24">14.2.4　什么时候该用这套方案而不是 Spring Data JPA？</h3>
+
+<div class="tablewrap"><table>
+<thead><tr><th style="width:60px">场景</th><th>说明</th></tr></thead>
+<tbody>
+<tr><td><b>①</b></td><td>你想<b>把 EntityManager 与事务的控制权交给 Spring</b>（通过控制反转完成）。<b>代价是你失去了调试事务的可能性 —— 请对此有所准备。</b></td></tr>
+<tr><td><b>②</b></td><td>你想<b>创建自己的持久化管理 API</b>，而且<b>不能或不想使用 Spring Data</b>。这可能发生在：你有非常特定、必须自己控制的操作；或者你想<b>去掉 Spring Data 的开销</b> —— 包括团队上手它所需的爬坡时间、在既有项目里引入新依赖、以及 <b>§2.7 讨论过的 Spring Data 执行延迟</b>。</td></tr>
+<tr><td><b>③</b></td><td>某些特定情形下，你希望<b>把 EntityManager 和事务交给 Spring，但仍然不实现自己的 DAO 类</b>。</td></tr>
+</tbody></table></div>
+
+<h2 id="s3"><span class="num">14.3</span>泛型化 JPA 版：解决 DAO 的三个短板</h2>
+
+<figure><div class="fig-box">
+<svg viewBox="0 0 840 300" xmlns="http://www.w3.org/2000/svg" font-family="Inter,system-ui,sans-serif">
+  <defs><marker id="g14" markerWidth="13" markerHeight="13" refX="12" refY="6.5" orient="auto">
+    <path d="M0 0 L13 6.5 L0 13 z" fill="var(--bg)" stroke="var(--accent)" stroke-width="1.2"/></marker></defs>
+  <rect x="20" y="16" width="390" height="120" rx="8" fill="var(--danger-soft)" stroke="var(--danger)" stroke-width="1.6"/>
+  <text x="215" y="40" text-anchor="middle" font-size="13" font-weight="700" fill="var(--danger)">原来的三个短板</text>
+  <text x="38" y="64" font-size="11.5" fill="var(--ink)">① <tspan font-family="monospace">getById</tspan>、<tspan font-family="monospace">getAll</tspan>、<tspan font-family="monospace">insert</tspan>、<tspan font-family="monospace">delete</tspan> 等操作高度相似，</text>
+  <text x="52" y="80" font-size="11.5" fill="var(--ink)">   <tspan font-weight="700">差别主要只在参数类型或返回结果类型上</tspan></text>
+  <text x="38" y="102" font-size="11.5" fill="var(--ink)">② <tspan font-family="monospace">update</tspan> 的第二个参数是某个特定属性的值 —— <tspan font-weight="700">要更新</tspan></text>
+  <text x="52" y="116" font-size="11.5" fill="var(--ink)">   <tspan font-weight="700">不同属性就得写多个方法</tspan></text>
+  <text x="38" y="132" font-size="11.5" fill="var(--ink)">③ <tspan font-family="monospace">findByName</tspan>/<tspan font-family="monospace">findByAmount</tspan> <tspan font-weight="700">绑死在特定属性上</tspan></text>
+
+  <rect x="430" y="16" width="390" height="120" rx="8" fill="var(--sql-soft)" stroke="var(--sql)" stroke-width="1.6"/>
+  <text x="625" y="40" text-anchor="middle" font-size="13" font-weight="700" fill="var(--sql)">GenericDao&lt;T&gt; 接口</text>
+  <g font-family="monospace" font-size="11.5" fill="var(--ink)">
+    <text x="448" y="64">T       getById(long id);</text>
+    <text x="448" y="80">List&lt;T&gt; getAll();</text>
+    <text x="448" y="96">void    insert(T entity);   void delete(T entity);</text>
+    <text x="448" y="112" fill="var(--accent)">void    update(long id, String propertyName, Object propertyValue);</text>
+    <text x="448" y="128" fill="var(--accent)">List&lt;T&gt; findByProperty(String propertyName, Object propertyValue);</text>
+  </g>
+
+  <rect x="250" y="156" width="340" height="56" rx="8" fill="var(--accent-soft)" stroke="var(--accent)" stroke-width="1.8"/>
+  <text x="420" y="178" text-anchor="middle" font-size="13" font-weight="700" fill="var(--accent)">AbstractGenericDao&lt;T&gt;</text>
+  <text x="420" y="198" text-anchor="middle" font-size="11" fill="var(--ink)"><tspan font-family="monospace">@Repository @Transactional</tspan>　写<tspan font-weight="700">所有 DAO 的公共功能</tspan></text>
+
+  <path d="M180 254 L180 226 L420 226 L420 214" fill="none" stroke="var(--accent)" stroke-width="1.5" marker-end="url(#g14)"/>
+  <path d="M660 254 L660 226 L420 226" fill="none" stroke="var(--accent)" stroke-width="1.5"/>
+  <rect x="60" y="256" width="240" height="38" rx="7" fill="var(--java-soft)" stroke="var(--java)"/>
+  <text x="180" y="272" text-anchor="middle" font-size="12" font-weight="700" fill="var(--ink)">ItemDaoImpl extends …&lt;Item&gt;</text>
+  <text x="180" y="288" text-anchor="middle" font-size="10.5" fill="var(--ink-soft)">构造器 setClazz(Item.class)　+ <tspan font-weight="700">重写 insert/delete</tspan></text>
+  <rect x="540" y="256" width="240" height="38" rx="7" fill="var(--java-soft)" stroke="var(--java)"/>
+  <text x="660" y="272" text-anchor="middle" font-size="12" font-weight="700" fill="var(--ink)">BidDaoImpl extends …&lt;Bid&gt;</text>
+  <text x="660" y="288" text-anchor="middle" font-size="10.5" fill="var(--ink-soft)">构造器 setClazz(Bid.class)　<tspan font-weight="700">其余全部继承、完全复用</tspan></text>
+</svg>
+</div><figcaption>图 14-A　泛型 DAO 的类层次：公共功能上移，具体类只写自己的特殊之处</figcaption></figure>
+
+<pre><code><span class="ann">@Repository</span>
+<span class="ann">@Transactional</span>
+<span class="kw">public abstract class</span> AbstractGenericDao&lt;T&gt; <span class="kw">implements</span> GenericDao&lt;T&gt; {
+
+    <span class="ann">@PersistenceContext</span>(type = PersistenceContextType.EXTENDED)
+    <span class="kw">protected</span> EntityManager em;        <span class="cmt">// <b>protected</b>：供子类继承使用</span>
+    <span class="kw">private</span> Class&lt;T&gt; clazz;              <span class="cmt">// DAO 实际操作的 Class</span>
+    <span class="kw">public void</span> setClazz(Class&lt;T&gt; clazz) { <span class="kw">this</span>.clazz = clazz; }
+
+    <span class="ann">@Override</span> <span class="kw">public</span> T getById(<span class="kw">long</span> id) {
+        <span class="kw">return</span> em.createQuery(<span class="str">"SELECT e FROM "</span> + clazz.getName() + <span class="str">" e WHERE e.id = :id"</span>, clazz)
+                 .setParameter(<span class="str">"id"</span>, id).getSingleResult();
+    }
+    <span class="ann">@Override</span> <span class="kw">public</span> List&lt;T&gt; getAll() {
+        <span class="kw">return</span> em.createQuery(<span class="str">"from "</span> + clazz.getName(), clazz).getResultList();
+    }
+    <span class="ann">@Override</span> <span class="kw">public void</span> insert(T entity) { em.persist(entity); }
+    <span class="ann">@Override</span> <span class="kw">public void</span> delete(T entity) { em.remove(entity); }
+
+    <span class="ann">@Override</span> <span class="kw">public void</span> update(<span class="kw">long</span> id, String propertyName, Object propertyValue) {
+        em.createQuery(<span class="str">"UPDATE "</span> + clazz.getName() + <span class="str">" e SET e."</span> + propertyName
+                     + <span class="str">" = :propertyValue WHERE e.id = :id"</span>)
+          .setParameter(<span class="str">"propertyValue"</span>, propertyValue).setParameter(<span class="str">"id"</span>, id).executeUpdate();
+    }
+    <span class="ann">@Override</span> <span class="kw">public</span> List&lt;T&gt; findByProperty(String propertyName, Object propertyValue) {
+        <span class="kw">return</span> em.createQuery(<span class="str">"SELECT e FROM "</span> + clazz.getName() + <span class="str">" e WHERE e."</span>
+                            + propertyName + <span class="str">" = :propertyValue"</span>, clazz)
+                 .setParameter(<span class="str">"propertyValue"</span>, propertyValue).getResultList();
+    }
+}
+
+<span class="cmt">// 具体子类：只写自己的特殊之处</span>
+<span class="kw">public class</span> ItemDaoImpl <span class="kw">extends</span> AbstractGenericDao&lt;Item&gt; {
+    <span class="kw">public</span> ItemDaoImpl() { setClazz(Item.class); }
+    <span class="ann">@Override</span> <span class="kw">public void</span> insert(Item item) { em.persist(item); <span class="kw">for</span> (Bid b : item.getBids()) em.persist(b); }
+    <span class="ann">@Override</span> <span class="kw">public void</span> delete(Item item) { <span class="kw">for</span> (Bid b : item.getBids()) em.remove(b); em.remove(item); }
+}
+<span class="kw">public class</span> BidDaoImpl <span class="kw">extends</span> AbstractGenericDao&lt;Bid&gt; {
+    <span class="kw">public</span> BidDaoImpl() { setClazz(Bid.class); }     <span class="cmt">// <b>其余方法全部继承，完全可复用</b></span>
+}</code></pre>
+
+<div class="tip"><b>配置与测试的小改动</b><p>把 bean 与注入点的类型从 <code>ItemDao</code>/<code>BidDao</code> 改成 <code>GenericDao&lt;Item&gt;</code>/<code>GenericDao&lt;Bid&gt;</code> 即可：</p>
+<pre style="margin:8px 0 0"><code><span class="ann">@Bean</span> <span class="kw">public</span> GenericDao&lt;Item&gt; itemDao() { <span class="kw">return new</span> ItemDaoImpl(); }
+<span class="ann">@Bean</span> <span class="kw">public</span> GenericDao&lt;Bid&gt;  bidDao()  { <span class="kw">return new</span> BidDaoImpl(); }
+
+<span class="ann">@Autowired</span> <span class="kw">private</span> GenericDao&lt;Item&gt; itemDao;   <span class="cmt">// DatabaseService 与 SpringJpaTest 中</span></code></pre></div>
+
+<h2 id="s4"><span class="num">14.4</span>用 Spring + DAO 模式构建 Hibernate 应用</h2>
+
+<div class="pit"><b><code>getCurrentSession()</code> vs <code>openSession()</code> —— 必须理解的差别</b>
+<p><code>sessionFactory.getCurrentSession()</code>：<b>如果不存在就创建一个新 Session；否则使用 Hibernate 上下文中已有的 session</b>。<b>事务结束时该 session 会被自动 flush 并 close。</b></p>
+<p style="margin-top:6px"><b>它非常适合单线程应用</b> —— 用单个 session 会提升性能。<b>但在多线程应用中 session 不是线程安全的</b>，此时应该用 <code>sessionFactory.openSession()</code> 并<b>显式关闭</b>打开的 session；或者因为 <code>Session</code> 实现了 <code>AutoCloseable</code>，用 <b>try-with-resources</b> 块。</p></div>
+
+<div class="tablewrap"><table>
+<thead><tr><th style="width:210px">从 JPA 迁到 Hibernate 时要替换的东西</th><th>JPA 版</th><th>Hibernate 版</th></tr></thead>
+<tbody>
+<tr><td>持久化管理器</td><td><code>@PersistenceContext EntityManager em</code></td><td><code>@Autowired SessionFactory sessionFactory</code>，用 <code>getCurrentSession()</code></td></tr>
+<tr><td>工厂 bean</td><td><code>LocalContainerEntityManagerFactoryBean</code></td><td><code>LocalSessionFactoryBean</code></td></tr>
+<tr><td>事务管理器 bean</td><td><code>JpaTransactionManager</code></td><td><code>HibernateTransactionManager</code></td></tr>
+<tr><td>属性配置</td><td><code>persistence.xml</code> 中的持久化单元</td><td><code>sessionFactory.setHibernateProperties(...)</code></td></tr>
+<tr><td>不变的部分</td><td colspan="2"><b><code>Item</code>、<code>Bid</code> 类以及 <code>ItemDao</code>、<code>BidDao</code> 接口完全不变</b></td></tr>
+</tbody></table></div>
+
+<div class="cols">
+<div>
+<div class="filename">…/spring-hibernate-dao/…/dao/ItemDaoImpl.java</div>
+<pre><code><span class="ann">@Repository</span> <span class="ann">@Transactional</span>
+<span class="kw">public class</span> ItemDaoImpl <span class="kw">implements</span> ItemDao {
+    <span class="ann">@Autowired</span>
+    <span class="kw">private</span> SessionFactory sessionFactory;
+
+    <span class="ann">@Override</span> <span class="kw">public</span> Item getById(<span class="kw">long</span> id) {
+        <span class="kw">return</span> sessionFactory.getCurrentSession().get(Item.class, id);
+    }
+    <span class="ann">@Override</span> <span class="kw">public</span> List&lt;Item&gt; getAll() {
+        <span class="kw">return</span> sessionFactory.getCurrentSession()
+                 .createQuery(<span class="str">"from Item"</span>, Item.class).list();
+    }
+    <span class="ann">@Override</span> <span class="kw">public void</span> insert(Item item) {
+        sessionFactory.getCurrentSession().persist(item);
+        <span class="kw">for</span> (Bid bid : item.getBids())
+            sessionFactory.getCurrentSession().persist(bid);
+    }
+    <span class="ann">@Override</span> <span class="kw">public void</span> update(<span class="kw">long</span> id, String name) {
+        Item item = sessionFactory.getCurrentSession().get(Item.class, id);
+        item.setName(name);
+        sessionFactory.getCurrentSession().update(item);
+    }
+    <span class="ann">@Override</span> <span class="kw">public void</span> delete(Item item) {      <span class="cmt">// ← <b>改用批量删除查询</b></span>
+        sessionFactory.getCurrentSession()
+            .createQuery(<span class="str">"delete from Bid b where b.item.id = :id"</span>)
+            .setParameter(<span class="str">"id"</span>, item.getId()).executeUpdate();
+        sessionFactory.getCurrentSession()
+            .createQuery(<span class="str">"delete from Item i where i.id = :id"</span>)
+            .setParameter(<span class="str">"id"</span>, item.getId()).executeUpdate();
+    }
+    <span class="ann">@Override</span> <span class="kw">public</span> Item findByName(String name) {
+        <span class="kw">return</span> sessionFactory.getCurrentSession()
+                 .createQuery(<span class="str">"from Item where name=:name"</span>, Item.class)
+                 .setParameter(<span class="str">"name"</span>, name).uniqueResult();
+    }
+}</code></pre>
+</div>
+<div>
+<div class="filename">…/configuration/SpringConfiguration.java（Hibernate 版）</div>
+<pre><code><span class="ann">@EnableTransactionManagement</span>
+<span class="kw">public class</span> SpringConfiguration {
+
+    <span class="ann">@Bean</span> <span class="kw">public</span> LocalSessionFactoryBean sessionFactory() {
+        LocalSessionFactoryBean sf = <span class="kw">new</span> LocalSessionFactoryBean();
+        sf.setDataSource(dataSource());
+        sf.setPackagesToScan(<span class="kw">new</span> String[]{<span class="str">"com.manning.javapersistence.ch14"</span>});
+        sf.setHibernateProperties(hibernateProperties());
+        <span class="kw">return</span> sf;
+    }
+
+    <span class="kw">private</span> Properties hibernateProperties() {
+        Properties p = <span class="kw">new</span> Properties();
+        p.setProperty(AvailableSettings.HBM2DDL_AUTO, <span class="str">"create"</span>);
+        p.setProperty(AvailableSettings.SHOW_SQL,     <span class="str">"true"</span>);
+        p.setProperty(AvailableSettings.DIALECT,
+                      <span class="str">"org.hibernate.dialect.MySQL8Dialect"</span>);
+        <span class="kw">return</span> p;
+    }
+
+    <span class="ann">@Bean</span> <span class="kw">public</span> DataSource dataSource() { … }
+    <span class="ann">@Bean</span> <span class="kw">public</span> DatabaseService databaseService() { <span class="kw">return new</span> DatabaseService(); }
+
+    <span class="ann">@Bean</span> <span class="kw">public</span> HibernateTransactionManager transactionManager(
+                                     SessionFactory sessionFactory) {
+        HibernateTransactionManager tm = <span class="kw">new</span> HibernateTransactionManager();
+        tm.setSessionFactory(sessionFactory);
+        <span class="kw">return</span> tm;
+    }
+
+    <span class="ann">@Bean</span> <span class="kw">public</span> ItemDao itemDao() { <span class="kw">return new</span> ItemDaoImpl(); }
+    <span class="ann">@Bean</span> <span class="kw">public</span> BidDao  bidDao()  { <span class="kw">return new</span> BidDaoImpl(); }
+}</code></pre>
+</div>
+</div>
+
+<h2 id="s5"><span class="num">14.5</span>泛型化 Hibernate 版</h2>
+<p><code>GenericDao</code> 接口<b>完全不变</b>，只需把 <code>AbstractGenericDao</code> 用 Hibernate API 重写：</p>
+
+<pre><code><span class="ann">@Repository</span> <span class="ann">@Transactional</span>
+<span class="kw">public abstract class</span> AbstractGenericDao&lt;T&gt; <span class="kw">implements</span> GenericDao&lt;T&gt; {
+
+    <span class="ann">@Autowired</span>
+    <span class="kw">protected</span> SessionFactory sessionFactory;      <span class="cmt">// protected：供子类继承使用</span>
+    <span class="kw">private</span> Class&lt;T&gt; clazz;
+    <span class="kw">public void</span> setClazz(Class&lt;T&gt; clazz) { <span class="kw">this</span>.clazz = clazz; }
+
+    <span class="ann">@Override</span> <span class="kw">public</span> T getById(<span class="kw">long</span> id) {
+        <span class="kw">return</span> sessionFactory.getCurrentSession()
+            .createQuery(<span class="str">"SELECT e FROM "</span> + clazz.getName() + <span class="str">" e WHERE e.id = :id"</span>, clazz)
+            .setParameter(<span class="str">"id"</span>, id).getSingleResult();
+    }
+    <span class="ann">@Override</span> <span class="kw">public</span> List&lt;T&gt; getAll() {
+        <span class="kw">return</span> sessionFactory.getCurrentSession()
+            .createQuery(<span class="str">"from "</span> + clazz.getName(), clazz).getResultList();
+    }
+    <span class="ann">@Override</span> <span class="kw">public void</span> insert(T entity) { sessionFactory.getCurrentSession().persist(entity); }
+    <span class="ann">@Override</span> <span class="kw">public void</span> delete(T entity) { sessionFactory.getCurrentSession().delete(entity); }
+    <span class="cmt">// update / findByProperty 与 JPA 版结构相同，只是换成 getCurrentSession()</span>
+}
+
+<span class="kw">public class</span> ItemDaoImpl <span class="kw">extends</span> AbstractGenericDao&lt;Item&gt; {
+    <span class="kw">public</span> ItemDaoImpl() { setClazz(Item.class); }
+    <span class="ann">@Override</span> <span class="kw">public void</span> insert(Item item) { … }   <span class="cmt">// 用继承来的 sessionFactory 字段</span>
+    <span class="ann">@Override</span> <span class="kw">public void</span> delete(Item item) { … }
+}
+<span class="kw">public class</span> BidDaoImpl <span class="kw">extends</span> AbstractGenericDao&lt;Bid&gt; {
+    <span class="kw">public</span> BidDaoImpl() { setClazz(Bid.class); }
+}</code></pre>
+
+<div class="summary" id="s6">
+<h3>本章小结</h3>
+<ul>
+<li><b>依赖注入</b>设计模式是 Spring 框架的基础，支撑「由不同组件与对象构成的应用」的创建。<b>框架的关键特征就是控制反转：库由你调用，框架调用你。</b></li>
+<li>可以用 Spring + DAO 模式开发 <b>JPA 应用</b>：Spring 控制 <code>EntityManager</code>、事务管理器和应用使用的其他 bean。<b>注意所有注入的 <code>EntityManager</code> 都要用 <code>PersistenceContextType.EXTENDED</code>。</b></li>
+<li>可以把 JPA 应用<b>泛型化</b>，提供一个通用、易扩展的 DAO 基类：基类含有<b>被所有派生 DAO 继承的公共行为</b>，让它们只实现自己的特定行为。</li>
+<li>可以用 Spring + DAO 模式开发 <b>Hibernate 应用</b>：Spring 控制 <code>SessionFactory</code>、事务管理器等 bean。<b><code>getCurrentSession()</code> 适合单线程；多线程要用 <code>openSession()</code> 并显式关闭。</b></li>
+<li>同样可以把 Hibernate 应用泛型化，得到一个易扩展的 DAO 类层次。</li>
+<li><b>什么时候不用 Spring Data JPA 而手写 DAO</b>：想把 EM/事务交给 Spring 但保留自定义 API；有非常特定、必须自己控制的操作；或想去掉 Spring Data 的团队爬坡成本、新依赖与执行开销。</li>
+</ul>
+</div>
+
+<div class="pager">
+  <a href="ch13.html">← 第 13 章　过滤数据</a>
+  <a href="ch15.html">第 15 章　使用 Spring Data JDBC →</a>
+</div>
+</main>
+</div>
+</body>
+</html>
